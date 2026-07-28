@@ -6,7 +6,7 @@ Usage: py -X utf8 chat.py [yourname]
 import asyncio
 import sys
 
-from tiwa import memory, pipeline
+from tiwa import gcal, memory, pipeline, tools
 
 name = sys.argv[1] if len(sys.argv) > 1 else "user"
 db = memory.connect()
@@ -27,6 +27,10 @@ async def main():
         print(f"tiwa> {reply}\n")
         # sync here — terminal, latency fine; prior lines let "he/she" resolve
         memory.extract(db, name, text, reply, memory.history_context(hist))
+        while tools.PENDING_CALENDAR:  # terminal version of the Discord ✅ gate
+            req = tools.PENDING_CALENDAR.pop(0)
+            if input(f"calendar change: {req} — confirm? [y/N] ").lower() == "y":
+                print(gcal.apply_change(req))
 
 
 asyncio.run(main())

@@ -1,2 +1,6 @@
 discord.py
 ollama
+httpx
+ddgs
+google-api-python-client
+google-auth-oauthlib

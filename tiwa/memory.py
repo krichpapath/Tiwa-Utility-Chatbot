@@ -4,8 +4,6 @@ import sqlite3
 import time
 from pathlib import Path
 
-from ollama import Client
-
 MODEL = "huihui_ai/qwen3-abliterated:8b"
 TIWA = "ทิวา"
 DATA_DIR = Path(__file__).parents[1] / "data"
@@ -22,9 +20,6 @@ CREATE TABLE IF NOT EXISTS episodes(
 CREATE TABLE IF NOT EXISTS mood(
     user TEXT PRIMARY KEY, mood TEXT, intensity INTEGER, cause TEXT, decay INTEGER);
 """
-
-_ollama = Client()
-
 
 def connect(path: str = DB_PATH) -> sqlite3.Connection:
     if path == DB_PATH:
@@ -89,6 +84,13 @@ def turn_context(db, user: str) -> str:
     ):
         lines.append(f"earlier with {user}: {text}")
     return "\n".join(lines)
+
+
+def recent_episodes(db, n: int = 5) -> str:
+    """Latest episodes across all users — fuel for the idle heartbeat."""
+    return "\n".join(
+        t for (t,) in db.execute("SELECT text FROM episodes ORDER BY ts DESC LIMIT ?", (n,))
+    )
 
 
 _EXTRACT_SYSTEM = f"""You are {TIWA}'s private memory judgment. Read one chat exchange and decide what she keeps. Output JSON only.
@@ -173,9 +175,11 @@ def extract(db, user: str, user_text: str, tiwa_reply: str, context: str = ""):
     `context` = a few prior chat lines, so "he/she" resolves to a real name
     (the ask-then-learn loop: "who is Steven?" ... "he's my cousin" -> Steven).
     """
+    from . import llm  # late import: memory is imported by llm's callers first
+
     prefix = f"earlier lines (context only):\n{context}\n\n" if context else ""
-    resp = _ollama.chat(
-        model=MODEL,
+    resp = llm.chat(
+        model=llm.EXTRACT_MODEL if llm.PROVIDER == "openrouter" else MODEL,
         messages=[
             {"role": "system", "content": _EXTRACT_SYSTEM},
             {
@@ -183,12 +187,11 @@ def extract(db, user: str, user_text: str, tiwa_reply: str, context: str = ""):
                 "content": f"{prefix}{user} said: {user_text}\n{TIWA} replied: {tiwa_reply}",
             },
         ],
-        format=_EXTRACT_FORMAT,
-        think=False,
+        fmt=_EXTRACT_FORMAT,
         options={"temperature": 0, "num_ctx": 4096},
     )
     try:
-        data = json.loads(resp.message.content or "{}")
+        data = json.loads(resp["content"] or "{}")
     except json.JSONDecodeError:
         return  # 8B gibberish turn — drop it, next turn tries again
     store_extraction(db, user, data)
