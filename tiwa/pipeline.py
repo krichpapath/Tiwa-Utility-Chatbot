@@ -93,8 +93,10 @@ async def _tool_chat(db, msgs: list) -> str:
                 if t
                 else "unknown tool"  # models sometimes invent tool names
             )
-            # blank arg = the model mangled it; that is the metric G2 benches
-            memory.log(db, "tool", f"{tc['name']}({arg!r}) -> {out[:80]}",
+            # blank arg = the model mangled it; that is the metric G2 benches.
+            # The panel splits this on "(" and ") -> " to show the tool, the query
+            # she chose and what came back as three separate things.
+            memory.log(db, "tool", f"{tc['name']}({arg!r}) -> {out[:240]}",
                        (time.perf_counter() - t0) * 1000)
             msgs.append(llm.tool_result_msg(tc, out))
     # tool rounds exhausted — force a brief from what was gathered so far

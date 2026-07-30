@@ -34,6 +34,8 @@ db.execute("INSERT INTO episodes(user, text, ts) VALUES(?,?,?)",
            ("Krich", "Krich promised to send the guitar recording", time.time()))
 memory.log(db, "turn", "Krich: play bad apple -> เปิดให้ละ", 2300)
 memory.log(db, "music", "playing Bad Apple!! (video)")
+memory.log(db, "tool", "web_search('ผลบอลเมื่อคืน') -> Thairath [thairath.co.th]: ...", 640)
+memory.log(db, "tool", "calendar_read('ignored') -> nothing next week", 210)
 memory.log_llm("ollama", "qwen3", 900, 0, "[system]\nYou are ทิวา's inner thoughts",
                "you remember Krich")
 memory.log_llm("openrouter", "deepseek", 700, 420,
@@ -83,6 +85,15 @@ check("llm pass filter", "private memory judgment"
 check("llm provider filter", "qwen3" not in get("/?view=llm&prov=openrouter"))
 check("log kind filter", "Bad Apple" not in get("/?view=log&kind=turn"))
 check("log text search", "Bad Apple" in get("/?view=log&q=bad"))
+
+# the whole point of the tool rows: which tool, and what she typed into it
+lt = get("/?view=log&kind=tool")
+check("log shows the tool name", ">web_search</a>" in lt)
+check("log shows what she searched", "<code>ผลบอลเมื่อคืน</code>" in lt)
+check("log shows what came back", "thairath.co.th" in lt)
+check("log hides 'ignored' args", "<code>ignored</code>" not in lt)
+check("tool name filters to itself",
+      "calendar_read" not in get("/?view=log&kind=tool&q=web_search"))
 
 # exports
 check("export memory.json", '"subject"' in get("/export/memory.json"))

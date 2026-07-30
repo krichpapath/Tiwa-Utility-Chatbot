@@ -208,6 +208,8 @@ background:#22222e;color:var(--dim);text-decoration:none;font-size:13px}
 .chip:hover,.chip.on{background:var(--acc);color:#fff}
 .ms{color:var(--dim);font-variant-numeric:tabular-nums;white-space:nowrap}
 .kind{color:#b9abff}
+.tool{color:#8fe3c4;font-weight:600;text-decoration:none}
+.tool:hover{text-decoration:underline}
 code{background:#101018;padding:1px 6px;border-radius:5px;font-size:13px}
 pre{background:#0a0a0f;padding:11px;border-radius:8px;overflow:auto;font-size:12.5px;
 white-space:pre-wrap;max-height:400px;color:#c6c6d8;margin:6px 0}
@@ -542,6 +544,24 @@ def view_llm(db, env, args, flash):
             f"<th>reply — click to open</th></tr>{body}</table></div>")
 
 
+def tool_cell(args, text):
+    """A tool row reads `name('arg') -> result`. Show those as three things.
+
+    Which tool she reached for and what she typed into it is the whole reason to
+    open this page — as one string it is unreadable, and the query is the part you
+    are usually hunting for.
+    """
+    head, sep, out = text.partition(") -> ")
+    name, paren, arg = head.partition("(")
+    if not sep or not paren:
+        return esc(text)  # some other shape — show it raw rather than mangling it
+    arg = arg.strip("'\"")
+    return (f"<a class=tool href='{qs(args, view='log', kind='tool', q=name)}'>"
+            f"{esc(name)}</a>"
+            + (f" <code>{esc(arg)}</code>" if arg and arg != "ignored" else "")
+            + f" <span class=ms>→ {esc(out)}</span>")
+
+
 def view_log(db, env, args, flash):
     kind, q = args.get("kind", ""), args.get("q", "").strip().lower()
     all_rows = memory.read_log(db, 3000)
@@ -553,8 +573,9 @@ def view_log(db, env, args, flash):
         kept += 1
         if kept > 250:
             continue
+        what = tool_cell(args, text) if k == "tool" else esc(text)
         rows.append(f"<tr><td class=ms>{when(ts)}</td><td class=kind>{esc(k)}</td>"
-                    f"<td>{esc(text)}</td><td class=ms>{f'{ms}ms' if ms else ''}</td></tr>")
+                    f"<td>{what}</td><td class=ms>{f'{ms}ms' if ms else ''}</td></tr>")
     body = "".join(rows) or "<tr><td class=empty colspan=4>nothing matches</td></tr>"
     chips = "".join(
         "<a class='chip%s' href='%s'>%s</a>"

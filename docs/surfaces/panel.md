@@ -42,7 +42,7 @@ you.</figcaption>
 | **settings** | every knob grouped by subsystem, each with an explanation and its default. Empty box = default. **Reset all to defaults** at the bottom |
 | **memory** | facts grouped per person with a jump index, searchable, `forget` per row, plus forget-everything |
 | **llm** | every model call labelled by pass — **thinking** / **her reply** / **remembering** — filterable by pass, provider and text. Click a row for the exact prompt and reply |
-| **log** | turns, tool calls with arguments, music, voice — filter by kind or text |
+| **log** | turns, tool calls, music, voice — filter by kind or text. See [reading the tool rows](#reading-the-tool-rows) |
 
 Exports on every tab: `memory.json`, `memory.csv`, `episodes.csv`, `llm.json`,
 `log.csv`. CSVs use a UTF-8 BOM so Excel opens Thai correctly.
@@ -67,9 +67,32 @@ did she do that":
 - **her reply** — what rules were injected this turn?
 - **remembering** — what did extraction propose, before the guards?
 
+### Reading the tool rows {#reading-the-tool-rows}
+
+`_tool_chat()` logs every call as `name('argument') -> result`. The log tab splits that
+into three parts, because as one string it's unreadable and the **argument** is what you're
+usually hunting for:
+
+| | shows |
+|---|---|
+| tool name | which tool she reached for. Click it to filter the log to just that tool |
+| `argument` | **what she actually searched.** The keywords for `web_search`, the song terms for `play_music`. Hidden when the tool takes no argument |
+| → result | what came back, first 240 characters |
+
+This is the page that answers *"she said she'd play something — did she?"* A turn with no
+`play_music` row means the tool never fired, whatever she said. A `-> forced, the tool pass
+skipped it` result means [the retry](../concepts/action-state.md) caught one.
+
+It's also where you judge query quality, which is the whole subject of
+[search and curiosity](../concepts/search.md) — if the arguments are whole sentences rather
+than keywords, that's the bug.
+
 ## Gotchas
 
 - **Settings don't affect a running bot.** They're read at import. Restart her.
+- **`log` is never pruned; `llm_log` is.** The activity log keeps everything until you
+  clear it, so counts there are real totals. The model-call log is a rolling 400
+  (`LLM_LOG_KEEP`) because prompts are big.
 - **Model calls stop being logged if `TIWA_LOG_PROMPTS=0`** — the tab just goes empty.
 - **`llm_log` keeps 400 rows.** Older prompts are gone; export if you need history.
 - **Two instances can't share port 8787.** If the page looks stale, an older
