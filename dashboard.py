@@ -299,6 +299,8 @@ def which_pass(req: str) -> str:
         return "remembering"
     if "idle thoughts" in req:
         return "idle"
+    if "describing an image" in req:
+        return "seeing"
     if "[inner-state" in req:
         return "her reply"
     return "other"
@@ -527,7 +529,7 @@ def view_llm(db, env, args, flash):
     passes = "".join(
         "<a class='chip%s' href='%s'>%s</a>"
         % (" on" if want == p else "", qs(args, view="llm", **{"pass": p}), p or "all")
-        for p in ("", "thinking", "her reply", "remembering", "idle"))
+        for p in ("", "thinking", "her reply", "remembering", "seeing", "idle"))
     provs = "".join(
         "<a class='chip%s' href='%s'>%s</a>"
         % (" on" if prov == p else "", qs(args, view="llm", prov=p), p or "both")

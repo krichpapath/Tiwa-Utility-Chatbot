@@ -42,6 +42,10 @@ memory.log_llm("openrouter", "deepseek", 700, 420,
                "[system]\n[inner-state — background", "เปิดให้ละ")
 memory.log_llm("openrouter", "deepseek", 500, 300,
                "[system]\nYou are ทิวา's private memory judgment", '{"memories":[]}')
+memory.log_llm("openrouter", "vl-8b", 800, 900,  # not "qwen3-*": the provider
+                                                # filter check below greps for it
+               "[system]\nYou are describing an image for someone who is about to REACT",
+               "a cat on a keyboard")
 db.commit()
 
 srv = HTTPServer(("127.0.0.1", 8788), dashboard.H)
@@ -80,8 +84,11 @@ check("memory search filters", "Gojo" not in get("/?view=memory&q=guitar"))
 lg = get("/?view=llm")
 check("llm page names the passes", "thinking" in lg and "her reply" in lg
       and "remembering" in lg)
+check("llm names the vision pass", "seeing" in lg and "cat on a keyboard" in lg)
 check("llm pass filter", "private memory judgment"
       not in get("/?view=llm&pass=thinking"))
+check("vision filters to itself",
+      "memory judgment" not in get("/?view=llm&pass=seeing"))
 check("llm provider filter", "qwen3" not in get("/?view=llm&prov=openrouter"))
 check("log kind filter", "Bad Apple" not in get("/?view=log&kind=turn"))
 check("log text search", "Bad Apple" in get("/?view=log&q=bad"))
