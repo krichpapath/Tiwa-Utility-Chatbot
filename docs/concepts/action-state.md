@@ -49,7 +49,7 @@ stateDiagram-v2
 ## How it works here
 
 ```python
-def _doing(missed_music: bool = False) -> str:
+def _doing(missed_music: bool = False, blind: bool = False) -> str:
     out = []
     if music.NOW["title"]:
         # "You are playing X right now. Queued next: Y. You know this
@@ -59,6 +59,9 @@ def _doing(missed_music: bool = False) -> str:
     elif missed_music:
         # "They asked for music but the search came up empty and nothing
         #  is queued — do NOT say you are putting a song on."
+    if blind:
+        # "They sent an image and your eyes did not work this time — you
+        #  genuinely cannot see it. Do NOT guess what is in it."
     if tools.PENDING_LEAVE:
         # "You are leaving the voice channel as you say this."
     return " ".join(out)      # "" on a quiet turn
@@ -106,6 +109,13 @@ retry worked, job 2 covers it and the negative stays quiet.
 
 The guard didn't get weaker: the case it defended against is now caught in code before the
 prompt ever sees it. Prompts reduce, code decides.
+
+The `blind` flag is the same negative in a second place. [`eyes.look()`](../surfaces/eyes.md)
+returns `""` rather than raising when the vision call fails, and `respond()` passes
+`blind=bool(images) and not seen`. It fires on exactly the turns where an image arrived and
+she cannot see it — never as a standing "you have no eyes". Bluffing about a picture that's
+right there in the channel is caught instantly, which is why it's worth the tokens on those
+turns and no others.
 
 ### `now_playing` was deleted
 

@@ -345,3 +345,67 @@ option 2 remains a cheap swap the day the index is the thing that's wrong.
 **Caveat on the numbers.** They are reported by the cited sources on their own benchmarks,
 not reproduced here. What *was* measured locally: region choice on one Thai query, and the
 queries she picks across five asks (`tests/searchbench.py --live`).
+
+## ADR-018 · Her eyes emit text, not answers {#adr-018}
+
+**Status.** Accepted, testing state · July 2026
+
+**Context.** She could not see images at all. Discord hands her screenshots, photos,
+signs and memes, and she had nothing to say about any of them. One fact removes most of
+the design space: her own model is text-only —
+`deepseek/deepseek-v4-flash` reports `input_modalities: ['text']` — so vision is a
+separate call whatever else is decided. The choice is what that call **outputs**.
+
+**Options.**
+
+1. Caption to text: an image becomes a description, the description joins the chat.
+2. A native VLM answers the turn.
+3. OCR for text-heavy images, plus a captioner for the picture.
+4. Vision as a tool she calls with a question.
+
+**Decision.** Option 1, with the caption conditioned on what they said.
+
+**Why.** The goal is *react and comment*, not extract.
+
+Option 2 loses her voice, which on a reaction turn is the entire product. A correct
+observation in Qwen's register is still a failure.
+
+Option 4 needs a trigger, and there isn't one — nobody asks a question when they drop a
+meme. Her live log also shows she under-calls tools already (4 tool rows in 10 turns).
+
+Option 3 is ruled out by memes specifically.
+[Hateful Memes](https://proceedings.nips.cc/paper_files/paper/2020/file/1b84c4cee2b8b3d823b30e2d604b1878-Paper.pdf)
+(Kiela et al., NeurIPS 2020) is constructed from *benign confounders* — examples built so
+text-alone or image-alone gives the wrong answer, scoring models at **64.73% against
+84.7% for humans**. Splitting the words from the picture rebuilds exactly the unimodal
+signal the benchmark defeats.
+
+Option 1's known flaw is named in [PICa](https://arxiv.org/pdf/2109.05014)'s own paper
+(Yang et al., AAAI 2022): information lost converting image to caption, because the
+caption is written before anyone asks. Here that barely bites — usually **there is no
+question**, the picture is the whole message — and what remains is fixed by sending their
+message along with the image. Meanwhile
+[*Caption This, Reason That*](https://arxiv.org/pdf/2505.21538) found VLMs reason **better**
+over their own generated captions than over raw pixels, so the text step is not purely a
+downgrade. The architecture is [Socratic Models](https://arxiv.org/abs/2204.00598)
+(Zeng et al., 2022) — frozen models composed through language, no finetuning.
+
+**Consequences.** Nothing downstream learns that an image existed: it is text by the time
+it reaches the brief, her rules, the log and memory extraction. The log row is
+`look('meme.png') -> ...`, which the panel's existing `tool_cell()` splits with no
+dashboard change. A failed look returns `""`, never an exception, and `_doing()` turns
+that into her saying she cannot see — the same anti-confabulation shape as the music
+guard, code-enforced.
+
+API-only, even in `local` mode: `qwen3-vl:4b` is 3.3 GB against her ~5 GB 8B on an 8 GB
+card, so ollama would evict and reload on every image. The cost of local vision here is a
+load stall, not inference.
+
+**Caveat on the numbers.** Benchmark figures are the cited sources' own, not reproduced
+here. Measured locally: four real images through the live model
+(`tests/eyebench.py --live`), and the ~900-character multilingual OCR that produced the
+`MAX_CHARS` cap.
+
+**Deferred.** [Typhoon OCR](https://github.com/scb-10x/typhoon-ocr) for Thai text images —
+add when Thai screenshots measurably fail, not before. Local vision when the VRAM exists.
+Multiple images per turn.

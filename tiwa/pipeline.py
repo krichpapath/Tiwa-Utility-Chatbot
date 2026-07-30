@@ -6,7 +6,7 @@ import re
 import time
 from pathlib import Path
 
-from . import llm, memory, tools
+from . import eyes, llm, memory, tools
 from .memory import MODEL, TIWA
 
 PERSONA = (Path(__file__).parents[1] / "prompts" / "tiwa.md").read_text(encoding="utf-8")
@@ -32,6 +32,8 @@ web_search when the message turns on a fact you do not have: news, a score, a pr
 a game or show or person they brought up that you do not recognise. Not recognising
 something is a reason to SEARCH, not a reason to hedge. Search keywords, never their
 whole sentence, and never the same keywords twice in one turn.
+An image counts as bringing something up: if you can see a game, show, product or
+place in it that you do not recognise, search for it before she replies.
 Then output a short plain-text brief (max 5 lines) addressed to her as "you":
 - what you actually know or feel about them (memory or tool results only — NEVER invent),
   e.g. "you remember Steven: Krich's cousin, plays guitar"
@@ -104,15 +106,19 @@ async def _tool_chat(db, msgs: list) -> str:
     return _clean(resp["content"])
 
 
-async def _inner_brief(db, author: str, text: str, recent: str = "") -> str:
+async def _inner_brief(db, author: str, text: str, recent: str = "", seen: str = "") -> str:
     prefix = f"earlier lines (context only):\n{recent}\n\n" if recent else ""
+    # what she can see goes to the TOOL pass too, not just to her voice: a game or
+    # a product in a screenshot is something to look up, same as one they typed.
+    sight = f"\n[they attached an image. you can see it:\n{seen}]" if seen else ""
     # she was searching "ราคา RTX 5090 2025" in July 2026 (tests/searchbench.py --live).
     # A model dates itself from its training data unless you tell it otherwise, and a
     # wrong year in a search query is a wrong page back.
     now = datetime.datetime.now()
     msgs = [
         {"role": "system", "content": _INNER_SYSTEM},
-        {"role": "user", "content": f"today is {now:%Y-%m-%d}\n{prefix}{author}: {text}"},
+        {"role": "user",
+         "content": f"today is {now:%Y-%m-%d}\n{prefix}{author}: {text}{sight}"},
     ]
     return await _tool_chat(db, msgs)
 
@@ -179,7 +185,7 @@ async def _force_music(db, text: str) -> None:
         memory.log(db, "tool", f"play_music({terms!r}) -> forced, the tool pass skipped it")
 
 
-def _doing(missed_music: bool = False) -> str:
+def _doing(missed_music: bool = False, blind: bool = False) -> str:
     """What she is actually doing, read from live state — never from what the
     model believes it did.
 
@@ -190,8 +196,9 @@ def _doing(missed_music: bool = False) -> str:
 
     Doing nothing says NOTHING. Returns "" on a quiet turn: a standing "no music
     is playing" is context she pays for on every ordinary message and uses on
-    almost none. The one negative kept is the anti-confabulation guard, and it
-    only fires when `missed_music` says she was asked and still has nothing.
+    almost none. The only negatives kept are the anti-confabulation guards, and
+    both are narrow — `missed_music` fires when she was asked for a song and has
+    none, `blind` when an image arrived and the vision call came back empty.
     """
     from . import music  # lazy: keeps av out of import for non-Discord callers
 
@@ -217,13 +224,23 @@ def _doing(missed_music: bool = False) -> str:
         out.append("They asked for music but the search came up empty and nothing"
                    " is queued — do NOT say you are putting a song on. Say it did"
                    " not work.")
+    if blind:
+        # same shape as the music guard: the picture is right there in the channel,
+        # so bluffing about it is caught instantly. Cheaper to admit it.
+        out.append("They sent an image and your eyes did not work this time — you"
+                   " genuinely cannot see it. Do NOT guess what is in it or act like"
+                   " you looked. Say you cannot see it.")
     if tools.PENDING_LEAVE:
         out.append("You are leaving the voice channel as you say this.")
     return " ".join(out)
 
 
-async def respond(db, hist: list, author: str, text: str) -> str:
-    """One Tiwa turn. `hist` = chat messages incl. the current one. Caller appends the reply."""
+async def respond(db, hist: list, author: str, text: str, images=()) -> str:
+    """One Tiwa turn. `hist` = chat messages incl. the current one. Caller appends the reply.
+
+    `images` = attachment urls on the current message. Empty on every ordinary
+    turn, and an empty list costs exactly nothing — no vision call is made.
+    """
     turn0 = time.perf_counter()
     recent = "\n".join(
         m["content"] if m["role"] == "user" else f"{TIWA}: {m['content']}"
@@ -231,7 +248,9 @@ async def respond(db, hist: list, author: str, text: str) -> str:
         # fight is still on screen. This window IS the lifetime of her mood.
         for m in hist[-9:-1]
     )
-    inner = await _inner_brief(db, author, text, recent)
+    # before the brief, so the tool pass can look up whatever she saw
+    seen = await asyncio.to_thread(eyes.look, db, images, text) if images else ""
+    inner = await _inner_brief(db, author, text, recent, seen)
     missed = _missed_music(text)
     if missed:
         await _force_music(db, text)
@@ -257,9 +276,17 @@ async def respond(db, hist: list, author: str, text: str) -> str:
         "they care about it, whether it is any good — ask, and ask like the answer "
         "matters to you. A real question beats a safe take every time."
     )
-    doing = _doing(missed)
+    doing = _doing(missed, blind=bool(images) and not seen)
     if doing:  # quiet turn = not one wasted token
         rules += " " + doing
+    if seen:
+        # the description reaches her voice verbatim, never filtered through the
+        # 8B's brief — and it arrives with the only instruction that matters.
+        # Narrating a picture back to the person who posted it is the same
+        # failure as reciting inner-state.
+        rules += (f" You can see the image they sent: {seen} React to it — say what"
+                  " you actually think of it. Do NOT describe it back to them; they"
+                  " can already see it. Never claim you cannot see images.")
     # feelings arrive in `inner`, written fresh from the visible chat. No mood
     # table, no decay: it lasts exactly as long as the fight is still on screen.
     rules += (

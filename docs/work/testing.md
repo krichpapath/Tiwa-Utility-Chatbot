@@ -30,6 +30,7 @@ Recommended canon. Run these and you know the system is sound:
 | `toolbench.py` | measure | Right tool, right argument, latency per provider | no |
 | `pickbench.py` | measure | Music asks with **no song named** — the newest regression | no |
 | `searchbench.py` | both | Search mechanics offline; `--live` shows the keywords she picks | partly |
+| `eyebench.py` | both | [Her eyes](../surfaces/eyes.md): image → her voice, blind turns, zero cost when idle | partly |
 | `smoke.py` | measure | Does she still sound like herself | no |
 
 ```bash
@@ -48,10 +49,19 @@ py -X utf8 tests\panelbench.py
 py -X utf8 tests\searchbench.py
 ```
 
+```bash
+py -X utf8 tests\eyebench.py
+```
+
 The first three need no API key and no Ollama. Run them before every commit.
-`searchbench.py` joins them without `--live` — its offline half fakes `ddgs` and checks
-dedupe, region and formatting. With `--live` it becomes a measure: it prints the query
-she actually chose for five asks, which is the part only you can judge.
+`searchbench.py` and `eyebench.py` join them without `--live` — `searchbench`'s offline
+half fakes `ddgs` and checks dedupe, region and formatting; `eyebench`'s fakes the vision
+model and checks the plumbing, which is where every one of those bugs actually lives.
+
+With `--live` both become measures. `searchbench --live` prints the query she chose for
+five asks. `eyebench --live` sends four real images — a meme, a screenshot, a Thai sign
+and a photo — through the real vision model for about $0.0006, and prints what she saw.
+Both are the part only you can judge.
 
 ## The rest
 

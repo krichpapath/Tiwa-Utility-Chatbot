@@ -40,6 +40,13 @@ Never rendered by the panel, never committed, gitignored.
 | `TIWA_MUSIC_VOLUME` | `1.0` | `1.0` is however loud YouTube handed it over. Set `0.4`–`0.6` so you can still hear her talk over a song |
 | `TIWA_MAX_TRACK_MIN` | `12` | Longest result she'll accept as a song. YouTube's top hit for a mood is a 2–3 hour mix, which outlives the conversation and starves the queue — anything longer is skipped for the next result. Raise it if you want long mixes back |
 
+## Her eyes
+
+| Variable | Default | What it means |
+|---|---|---|
+| `TIWA_VISION` | `1` | `1` = she looks at images posted with her name and reacts. `0` = images ignored entirely, and she says she can't see them. Messages with no picture cost nothing either way — no image, no call |
+| `TIWA_VISION_MODEL` | `qwen/qwen3-vl-8b-instruct` | Always an API model, even in `local` mode: her 8B and a local vision model don't fit in 8 GB together. ~$0.00015 a look. See [her eyes](../surfaces/eyes.md) |
+
 ## Her speaking voice
 
 | Variable | Default | What it means |

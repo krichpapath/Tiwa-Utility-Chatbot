@@ -76,7 +76,7 @@ usually hunting for:
 | | shows |
 |---|---|
 | tool name | which tool she reached for. Click it to filter the log to just that tool |
-| `argument` | **what she actually searched.** The keywords for `web_search`, the song terms for `play_music`. Hidden when the tool takes no argument |
+| `argument` | **what she actually searched.** The keywords for `web_search`, the song terms for `play_music`, the filename for [`look`](eyes.md). Hidden when the tool takes no argument |
 | → result | what came back, first 240 characters |
 
 This is the page that answers *"she said she'd play something — did she?"* A turn with no

@@ -259,14 +259,21 @@ async def on_message(message: discord.Message):
     if message.author.bot:
         return
     text = message.content.replace(f"<@{client.user.id}>", "").strip()
-    if text:
+    # content_type is None for some clients; treat that as not-an-image rather than
+    # paying a vision call on a .zip
+    images = [a.url for a in message.attachments
+              if (a.content_type or "").startswith("image/")]
+    # a picture with no caption is the normal case — the chatlog needs to show
+    # something happened, or "ดูสิ" three messages later resolves to nothing
+    said = (text + " [image]").strip() if images else text
+    if said:
         # record everything so Tiwa has channel context; reply only when addressed
         history[message.channel.id].append(
-            {"role": "user", "content": f"{message.author.display_name}: {text}"}
+            {"role": "user", "content": f"{message.author.display_name}: {said}"}
         )
     if message.guild is not None and client.user not in message.mentions:
         return
-    if not text:
+    if not said:
         return
     # voice-channel commands: exact phrases only, so normal chat never triggers them
     cmd = text.lower().strip(" .!?")
@@ -284,7 +291,8 @@ async def on_message(message: discord.Message):
     author = message.author.display_name
     async with locks[message.channel.id]:
         async with message.channel.typing():
-            reply = await pipeline.respond(db, list(history[message.channel.id]), author, text)
+            reply = await pipeline.respond(db, list(history[message.channel.id]),
+                                           author, text, images)
         # Queued actions must run whatever she says. An empty reply used to
         # `return` here and silently swallow the song she had already queued —
         # you asked for Bad Apple and nothing happened.
@@ -293,7 +301,9 @@ async def on_message(message: discord.Message):
             # post-turn memory write, off the reply path; prior lines let "he/she" resolve
             ctx = memory.history_context(list(history[message.channel.id]))
             asyncio.create_task(
-                asyncio.to_thread(memory.extract, db, author, text, reply, ctx)
+                # `said`, not `text`: extraction of a caption-less image turn used
+                # to be handed an empty string
+                asyncio.to_thread(memory.extract, db, author, said, reply, ctx)
             )
             for i in range(0, len(reply), 2000):
                 await message.channel.send(reply[i : i + 2000])

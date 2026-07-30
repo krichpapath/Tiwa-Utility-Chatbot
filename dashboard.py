@@ -75,6 +75,18 @@ SETTINGS = [
          "you actually want long mixes.",
          "12", None),
     ]),
+    ("Eyes", [
+        ("TIWA_VISION", "See images",
+         "1 = she looks at any image posted with her name and reacts to it. "
+         "0 = images are ignored completely and she says she cannot see them. "
+         "Costs nothing on messages with no picture — no image, no call.",
+         "1", ["1", "0"]),
+        ("TIWA_VISION_MODEL", "Vision model",
+         "Always an API model, even in local mode: her 8B and a local vision "
+         "model do not fit in 8 GB together, so ollama would swap on every "
+         "image. About $0.00015 a look at the default.",
+         "qwen/qwen3-vl-8b-instruct", None),
+    ]),
     ("Her speaking voice", [
         ("TIWA_TTS_TH", "Thai voice",
          "edge-tts voice for Thai replies. Others: th-TH-NiwatNeural (male).",
