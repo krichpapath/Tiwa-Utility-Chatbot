@@ -1,0 +1,126 @@
+site_name: Tiwa — developer guide
+site_description: How Tiwa works, why she is built this way, and how to ship your first change.
+site_url: http://127.0.0.1:8000/
+repo_url: https://github.com/krichpapath/Tiwa-Utility-Chatbot
+repo_name: krichpapath/Tiwa-Utility-Chatbot
+docs_dir: docs
+site_dir: site
+use_directory_urls: true
+
+theme:
+  name: material
+  palette:
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: deep purple
+      accent: purple
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: deep purple
+      accent: purple
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+  features:
+    - navigation.sections
+    - navigation.tracking
+    - navigation.top
+    - navigation.indexes
+    - toc.follow
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+    - content.tooltips
+  icon:
+    repo: fontawesome/brands/github
+
+markdown_extensions:
+  - abbr
+  - admonition
+  - attr_list
+  - def_list
+  - footnotes
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.details
+  - pymdownx.inlinehilite
+  - pymdownx.keys
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.superfences:
+      custom_fences:
+        # class is deliberately NOT "mermaid": mkdocs-material 9.7 hijacks that
+        # class, moves the source out and leaves an empty div, but ships no mermaid
+        # asset to render it with. Our own class + js/mermaid-init.js owns rendering.
+        - name: mermaid
+          class: mermaid-src
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.tabbed:
+      alternate_style: true
+
+# Vendored, not CDN: the whole site must work with no internet. mkdocs-material 9.7
+# ships no mermaid asset and does not fetch one, but it DOES initialise mermaid
+# (including theme switching) as soon as window.mermaid exists — so this one file is
+# the entire integration. Do not add an init script; it fights Material's own.
+extra_javascript:
+  - js/mermaid.min.js
+  - js/mermaid-init.js
+
+extra_css:
+  - css/extra.css
+
+plugins:
+  - search
+
+# catches a link to a heading that does not exist, not just a missing file
+validation:
+  omitted_files: warn
+  absolute_links: warn
+  unrecognized_links: warn
+  anchors: warn
+
+nav:
+  - Start here:
+      - Introduction: index.md
+      - Before you begin: before-you-begin.md
+      - Environment setup: setup.md
+      - The 10-minute tour: tour.md
+  - Core concepts:
+      - The three passes: concepts/three-passes.md
+      - Modes — where she runs: concepts/modes.md
+      - Memory — the knowledge graph: concepts/memory.md
+      - The guards: concepts/guards.md
+      - The tool registry: concepts/tools.md
+      - Her persona: concepts/persona.md
+      - Action state: concepts/action-state.md
+  - Surfaces:
+      - The Discord bot: surfaces/discord.md
+      - Music and the DJ: surfaces/music.md
+      - Voice out — she speaks: surfaces/voice-out.md
+      - Voice in — she listens: surfaces/voice-in.md
+      - Calendar: surfaces/calendar.md
+      - The control panel: surfaces/panel.md
+  - The toolchain:
+      - Model providers: toolchain/providers.md
+      - Audio and speech: toolchain/audio-speech.md
+      - Discord and voice transport: toolchain/discord-transport.md
+      - Dependency table: toolchain/dependencies.md
+  - Working on it:
+      - Common workflows: work/workflows.md
+      - Conventions and gotchas: work/conventions.md
+      - The bench suite: work/testing.md
+      - Your turn: work/your-turn.md
+      - First week checklist: work/first-week.md
+  - Reference:
+      - Decision log: reference/decisions.md
+      - Environment variables: reference/env.md
+      - Glossary: reference/glossary.md
+      - Audit findings: reference/findings.md
+      - Docs maintenance: reference/docs-maintenance.md
+      - Where to go next: reference/next.md
+      - Open questions: open-questions.md

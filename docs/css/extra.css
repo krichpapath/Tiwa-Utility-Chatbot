@@ -1,0 +1,31 @@
+/* Diagram captions. Every diagram in this guide is followed by a <figcaption>
+   stating the one thing it teaches. */
+figcaption {
+  display: block;
+  margin: -0.6rem 0 1.4rem;
+  font-size: 0.75rem;
+  line-height: 1.5;
+  color: var(--md-default-fg-color--light);
+  text-align: center;
+}
+
+/* Mermaid renders inline SVG; center it and let wide diagrams scroll rather
+   than forcing the page to scroll sideways. */
+pre.mermaid-src {
+  display: block;
+  overflow-x: auto;
+  text-align: center;
+  background: none;
+  padding: 0.4rem 0;
+}
+
+pre.mermaid-src svg {
+  max-width: 100%;
+  height: auto;
+}
+
+/* Tables in this guide are mostly reference material — keep them readable and
+   scrollable on a phone instead of squeezing columns. */
+.md-typeset table:not([class]) {
+  font-size: 0.72rem;
+}

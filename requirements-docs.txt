@@ -1,0 +1,4 @@
+# Docs site only. The bot itself never imports these.
+#   py -m pip install -r requirements-docs.txt
+#   py -m mkdocs serve
+mkdocs-material
