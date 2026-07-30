@@ -1,5 +1,6 @@
 """Tiwa memory — SQLite knowledge graph: lookup (recall), extraction (write)."""
 import json
+import os
 import re
 import sqlite3
 import time
@@ -322,6 +323,13 @@ def history_context(hist: list, n: int = 4) -> str:
     )
 
 
+# The ONE pass where thinking is affordable: extraction is fired off after her
+# reply is already on screen, so nobody is waiting on it. Every other pass blocks
+# a human — measured 6.8x slower on the tool pass for 0 accuracy gain.
+# Default is set from what extractbench actually measured; see docs/work/testing.md.
+EXTRACT_THINK = os.environ.get("TIWA_EXTRACT_THINK", "0") != "0"
+
+
 def extract(db, user: str, user_text: str, tiwa_reply: str, context: str = ""):
     """Post-turn write pass. Called fire-and-forget after each reply.
 
@@ -341,7 +349,11 @@ def extract(db, user: str, user_text: str, tiwa_reply: str, context: str = ""):
             },
         ],
         fmt=_EXTRACT_FORMAT,
-        options={"temperature": 0, "num_ctx": 4096},
+        # reasoning tokens share this window with the JSON, so the ceiling goes up
+        # when thinking is on. 4096-with-thinking was never measured; it was raised
+        # so a truncated <think> block could not be the explanation for a bad result.
+        options={"temperature": 0, "num_ctx": 16384 if EXTRACT_THINK else 4096},
+        think=EXTRACT_THINK,
     )
     try:
         data = json.loads(resp["content"] or "{}")

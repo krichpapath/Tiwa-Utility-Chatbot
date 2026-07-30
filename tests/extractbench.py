@@ -1,10 +1,12 @@
 """G3 — does the memory write path survive on the API?
 
-Scores the extractor on direction (who is the subject), phantom entities, and
-the coercion guard. Fresh in-memory DB per probe so nothing bleeds across.
+Scores the extractor on direction (who is the subject), phantom entities, junk
+in entity names, and the coercion guard. Fresh in-memory DB per probe so nothing
+bleeds across.
 
     py -X utf8 tests\\extractbench.py            # both providers
     py -X utf8 tests\\extractbench.py openrouter
+    py -X utf8 tests\\extractbench.py --think    # A/B reasoning on the write pass
 """
 import sys
 import time
@@ -88,9 +90,18 @@ def phantom(p, rels):
     return [n for n in names if not any(k.lower() in n.lower() for k in p["known"])]
 
 
+def junk(rels):
+    """Structured output leaking into a name. `score()` matches by substring, so
+    'guitar},{' scored ok — caught by eye during the thinking A/B, not by the
+    bench, which is exactly why this check exists now."""
+    bad = '{}[]"'
+    return [f"{s}|{r}|{d}" for s, r, d in rels
+            if any(c in s + r + d for c in bad)]
+
+
 def run(provider):
     llm.PROVIDER = provider
-    print(f"\n=== {provider} ===")
+    print(f"\n=== {provider}  think={'ON' if memory.EXTRACT_THINK else 'OFF'} ===")
     passes = 0
     for p in PROBES:
         db = memory.connect(":memory:")
@@ -99,8 +110,8 @@ def run(provider):
         ms = (time.perf_counter() - t0) * 1000
         rels = relations(db)
         verdict, note = score(p, rels)
-        ph = phantom(p, rels)
-        passes += verdict == "ok" and not ph
+        ph, jk = phantom(p, rels), junk(rels)
+        passes += verdict == "ok" and not ph and not jk
         print(f"  {verdict:9} {ms:6.0f}ms  {p['name']}")
         for s, r, d in rels:
             print(f"            stored: {s} | {r} | {d}")
@@ -108,6 +119,8 @@ def run(provider):
             print("            stored: (nothing)")
         if ph:
             print(f"            phantom entities: {ph}")
+        if jk:
+            print(f"            MALFORMED (json leaked into a name): {jk}")
         if note:
             print(f"            ^ {note}")
     print(f"  -> {passes}/{len(PROBES)} clean")
@@ -115,5 +128,16 @@ def run(provider):
 
 
 if __name__ == "__main__":
-    for prov in sys.argv[1:] or ["ollama", "openrouter"]:
-        run(prov)
+    ab = "--think" in sys.argv
+    provs = [a for a in sys.argv[1:] if not a.startswith("-")] or ["ollama", "openrouter"]
+    rows = []
+    for prov in provs:
+        for think in ([False, True] if ab else [memory.EXTRACT_THINK]):
+            memory.EXTRACT_THINK = think
+            t0 = time.perf_counter()
+            rows.append((f"{prov} think={'ON' if think else 'OFF'}",
+                         run(prov), time.perf_counter() - t0))
+    if ab:
+        print(f"\n{'setting':26}{'clean':>8}{'total s':>10}")
+        for label, p, secs in rows:
+            print(f"{label:26}{p}/{len(PROBES):<6}{secs:>9.1f}")

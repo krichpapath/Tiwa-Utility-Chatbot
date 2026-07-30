@@ -70,7 +70,7 @@ more than routine gates:
 
 | Bench | What it measured |
 |---|---|
-| `extractbench.py` | Extraction quality per provider — direction errors, phantom entities |
+| `extractbench.py` | Extraction quality per provider — direction errors, phantom entities, JSON leaking into names. `--think` A/Bs model reasoning on the write pass ([ADR-019](../reference/decisions.md#adr-019)) |
 | `factbench.py` | Confabulation: 7 invented facts → 0 once the code guard landed |
 | `moodbench.py` | The anger arc across turns, and that naming her mood made it worse |
 | `episodebench.py` | Episode noise vs real events after raising the bar |

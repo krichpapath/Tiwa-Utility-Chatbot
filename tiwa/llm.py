@@ -121,7 +121,11 @@ def _openrouter_chat(model, messages, tools, fmt, options, think):
         "top_p": opts.get("top_p", 0.8),
         # measured from Thailand: these two cut ~40% off round-trip. Do NOT use
         # reasoning effort "minimal" — it turns reasoning ON (105 chars, 30 tok).
-        "reasoning": {"enabled": False},
+        # `think` used to be an ollama-only knob and silently did nothing here;
+        # it now means the same thing on both providers. Off is still the default
+        # for every pass a human waits on — measured 6.8x slower on the tool pass
+        # for zero accuracy gain (scratch A/B, July 2026).
+        "reasoning": {"enabled": bool(think)},
         "provider": {"sort": "throughput"},
     }
     if tools:

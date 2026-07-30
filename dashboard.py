@@ -75,6 +75,15 @@ SETTINGS = [
          "you actually want long mixes.",
          "12", None),
     ]),
+    ("Memory", [
+        ("TIWA_EXTRACT_THINK", "Think before remembering",
+         "Turns the model's reasoning on for the memory write pass — the only "
+         "pass nobody waits on, since it runs after her reply is already sent. "
+         "Measured and NOT recommended: no accuracy gain either provider, and "
+         "on the local 8B it was 15x slower and leaked JSON into an entity name "
+         "(tests/extractbench.py --think).",
+         "0", ["0", "1"]),
+    ]),
     ("Eyes", [
         ("TIWA_VISION", "See images",
          "1 = she looks at any image posted with her name and reacts to it. "

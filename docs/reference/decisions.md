@@ -409,3 +409,67 @@ here. Measured locally: four real images through the live model
 **Deferred.** [Typhoon OCR](https://github.com/scb-10x/typhoon-ocr) for Thai text images —
 add when Thai screenshots measurably fail, not before. Local vision when the VRAM exists.
 Multiple images per turn.
+
+## ADR-019 · Reasoning stays off, on every pass {#adr-019}
+
+**Status.** Accepted · July 2026
+
+**Context.** Both her models can reason. `huihui_ai/qwen3-abliterated:8b` is a hybrid
+thinking model and ollama exposes `think`; `deepseek/deepseek-v4-flash` advertises
+`reasoning`, `reasoning_effort` and `include_reasoning` alongside `structured_outputs`.
+Neither was ever switched on, and `think` was a **dead parameter on the API path** — it
+existed in `chat()`, was wired to ollama, and was silently discarded by
+`_openrouter_chat`, which hardcoded `reasoning: {enabled: False}`.
+
+**Decision.** Wire `think` through to both providers so the knob is real, and leave it
+**off** everywhere. Ship `TIWA_EXTRACT_THINK`, defaulted to `0`.
+
+**Why.** Two measurements, not an opinion.
+
+*The tool pass* (12 probes, tools stubbed, local 8B):
+
+| | right tool | median | total |
+|---|---|---|---|
+| think off | 12/12 | 2,824 ms | 32.4 s |
+| think on | 12/12 | **19,217 ms** | 208.4 s |
+
+6.8× slower for no gain, on a pass a human waits through — it runs inside
+`channel.typing()`, before her reply pass even starts. Worse, reasoning made it *break a
+rule*: all 4/4 recall probes gained a spurious `web_search`, which the tool description
+explicitly forbids ("Never for people you should just recall"). Reasoning did not help it
+choose; it gave the model room to argue with the tool description.
+
+*The write pass* (`extractbench.py --think`) — the one place latency is genuinely free,
+since `memory.extract` is fired off after the reply is already on screen:
+
+| | clean | total |
+|---|---|---|
+| ollama off | 5/5 | 12.5 s |
+| ollama on | **4/5** | 190.4 s |
+| openrouter off | 5/5 | 8.6 s |
+| openrouter on | 5/5 | 19.6 s |
+
+No gain on either provider. On the local 8B, ~15× slower **and** structured output broke:
+it stored `Steven | plays | guitar},{` — raw JSON leaking into an entity name. It also
+reversed a non-symmetric relation, writing `Krich | girlfriend of | Mint`, which is the
+exact direction error the extraction prompt exists to prevent.
+
+**Consequences.** The knob works now and is honest on both providers, so this is cheap to
+revisit against a better model. Off stays the default everywhere.
+
+The one structural note worth keeping: her inner pass **is** her reasoning step — a
+separate call whose whole job is to think before she speaks. Enabling model reasoning
+means reasoning about reasoning. And the tool miss it would have fixed was already fixed
+in code by `_force_music`, which is deterministic, free, and runs in 0 ms.
+[Prompts reduce, code decides](../concepts/three-passes.md) — the same rule, applied to a
+knob.
+
+**Caveat on the numbers.** Both benches were at ceiling on accuracy (12/12 and 5/5
+baseline), so they can show reasoning *hurting* but could not have shown it helping. The
+intermittent `play_music` miss (~1 ask in 4–6) did not reproduce at all in the 4 music
+probes, and properly measuring that needs ~30 probes a side. Latency alone settled it.
+
+**Bench gap found and closed.** `extractbench` scored `guitar},{` as **ok** — `score()`
+matches by substring. The malformed-name check that catches it was added because a human
+read the output, not because the bench failed. Worth remembering the next time a green
+bench is treated as proof.

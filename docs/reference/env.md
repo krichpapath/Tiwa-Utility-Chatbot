@@ -40,6 +40,12 @@ Never rendered by the panel, never committed, gitignored.
 | `TIWA_MUSIC_VOLUME` | `1.0` | `1.0` is however loud YouTube handed it over. Set `0.4`–`0.6` so you can still hear her talk over a song |
 | `TIWA_MAX_TRACK_MIN` | `12` | Longest result she'll accept as a song. YouTube's top hit for a mood is a 2–3 hour mix, which outlives the conversation and starves the queue — anything longer is skipped for the next result. Raise it if you want long mixes back |
 
+## Memory
+
+| Variable | Default | What it means |
+|---|---|---|
+| `TIWA_EXTRACT_THINK` | `0` | Model reasoning on the memory **write** pass — the one pass nobody waits on, because it runs after her reply is sent. **Measured and not recommended**: no accuracy gain on either provider, and on the local 8B it was ~15× slower and leaked JSON into an entity name. See [ADR-019](decisions.md#adr-019) |
+
 ## Her eyes
 
 | Variable | Default | What it means |
