@@ -110,9 +110,14 @@ async def main():
     assert "Bad Apple (video)" in state and "Rick Roll (video)" in state
     music.QUEUE.clear()
     music.NOW["title"] = None
-    assert "No music is playing" in pipeline._doing()
-    music.QUEUE.clear()
-    music.NOW["title"] = None
+    # nothing happening = say nothing. A standing "no music is playing" would be
+    # paid for on every ordinary message and used on almost none.
+    assert pipeline._doing() == "", pipeline._doing()
+    # except when she was asked and the search came up empty — the one negative
+    assert "came up empty" in pipeline._doing(missed_music=True)
+    tools.PENDING_MUSIC = "lofi"  # forced retry worked -> back to silence on the negative
+    assert "came up empty" not in pipeline._doing(missed_music=True)
+    tools.PENDING_MUSIC = None
 
     # the forced retry: fires only when they asked and nothing was queued
     print("\n| ask | deck | forced? |")

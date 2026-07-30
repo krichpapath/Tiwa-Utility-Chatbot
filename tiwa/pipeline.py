@@ -155,7 +155,7 @@ async def _force_music(db, text: str) -> None:
         memory.log(db, "tool", f"play_music({terms!r}) -> forced, the tool pass skipped it")
 
 
-def _doing() -> str:
+def _doing(missed_music: bool = False) -> str:
     """What she is actually doing, read from live state — never from what the
     model believes it did.
 
@@ -163,6 +163,11 @@ def _doing() -> str:
     otherwise say "เปิดละ" with nothing queued (three turns running, measured).
     Both are the same bug: her actions were not in her context. One `if` per
     subsystem — when she gains a new one (lights, timers), add a line HERE.
+
+    Doing nothing says NOTHING. Returns "" on a quiet turn: a standing "no music
+    is playing" is context she pays for on every ordinary message and uses on
+    almost none. The one negative kept is the anti-confabulation guard, and it
+    only fires when `missed_music` says she was asked and still has nothing.
     """
     from . import music  # lazy: keeps av out of import for non-Discord callers
 
@@ -182,9 +187,12 @@ def _doing() -> str:
                    " your own way. Never say you do not know the song or cannot"
                    " find it; you do not need to recognise a song to put it on."
                    " Do not sing or quote its lyrics.")
-    elif not music.NOW["title"]:
-        out.append("No music is playing and none was queued this turn — do NOT"
-                   " say you are putting a song on.")
+    elif missed_music:
+        # asked for music, and _force_music came up empty too — the only turn
+        # where telling her what is NOT happening is worth the tokens
+        out.append("They asked for music but the search came up empty and nothing"
+                   " is queued — do NOT say you are putting a song on. Say it did"
+                   " not work.")
     if tools.PENDING_LEAVE:
         out.append("You are leaving the voice channel as you say this.")
     return " ".join(out)
@@ -203,7 +211,8 @@ async def respond(db, hist: list, author: str, text: str) -> str:
 
     from . import music  # lazy, same reason as _doing()
 
-    if _missed_music(text, bool(music.NOW["title"])):
+    missed = _missed_music(text, bool(music.NOW["title"]))
+    if missed:
         await _force_music(db, text)
 
     auto = memory.turn_context(db, author)
@@ -220,7 +229,9 @@ async def respond(db, hist: list, author: str, text: str) -> str:
         "Real chat rhythm: 1-3 short sentences, no monologues, no lists. "
         "Do NOT end every reply with a question — react, don't interview."
     )
-    rules += " " + _doing()
+    doing = _doing(missed)
+    if doing:  # quiet turn = not one wasted token
+        rules += " " + doing
     # feelings arrive in `inner`, written fresh from the visible chat. No mood
     # table, no decay: it lasts exactly as long as the fight is still on screen.
     rules += (
