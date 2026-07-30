@@ -1,22 +1,19 @@
 """Tiwa Discord bot — entrypoint. The brain lives in tiwa/."""
 import asyncio
+import logging
 import os
 from collections import defaultdict, deque
 from datetime import datetime
-from pathlib import Path
 
 import discord
 from discord.ext import tasks
 
-from tiwa import gcal, memory, pipeline, tools
+from tiwa import gcal, memory, music, pipeline, tools, voice  # tiwa.llm loads .env
 
-# minimal .env loader (KEY=VALUE lines), no dotenv dependency
-env = Path(__file__).with_name(".env")
-if env.exists():
-    for line in env.read_text().splitlines():
-        if "=" in line and not line.lstrip().startswith("#"):
-            k, _, v = line.partition("=")
-            os.environ.setdefault(k.strip(), v.strip().strip('"'))
+# Discord sends an RTCP sender report (type 200) every few seconds per speaker.
+# voice_recv has no handler for it and logs each one at INFO, which buries the
+# lines you actually want. Harmless packet, noisy log — warnings still show.
+logging.getLogger("discord.ext.voice_recv.reader").setLevel(logging.WARNING)
 
 db = memory.connect()
 history = defaultdict(lambda: deque(maxlen=40))  # channel_id -> chat messages
@@ -30,6 +27,155 @@ HOME = os.environ.get("TIWA_HOME_CHANNEL")  # channel id for unprompted messages
 pending_confirms = {}  # confirm-message id -> plain-language calendar request
 
 
+voice_channel = {}  # guild id -> text channel to mirror the transcript into
+
+
+async def _heard(name: str, text: str):
+    """Everything said in voice becomes chatlog (G6). The model runs ONLY when
+    her name is in it (G7) — Whisper is cheap, the LLM is not."""
+    for ch in list(voice_channel.values()):
+        history[ch.id].append({"role": "user", "content": f"{name}: {text}"})
+        memory.log(db, "voice", f"{name}: {text}")
+        asked = voice.wake(text)
+        await ch.send(f"🎙 **{name}:** {text}" + ("" if asked is None else "  ← for me"))
+        if asked is None:
+            continue  # heard, logged, not answered. No tokens spent.
+        async with locks[ch.id]:
+            reply = await pipeline.respond(db, list(history[ch.id]), name, asked)
+            if not reply:
+                continue
+            history[ch.id].append({"role": "assistant", "content": reply})
+            ctx = memory.history_context(list(history[ch.id]))
+            asyncio.create_task(
+                asyncio.to_thread(memory.extract, db, name, asked, reply, ctx)
+            )
+            await ch.send(reply[:2000])
+            await voice.say(ch.guild, reply)  # G8: answer out loud, ducks music
+            await _flush_music(ch)
+            await _flush_leave(ch, asked)  # she can be told to leave out loud too
+
+
+async def _start(channel, hit):
+    """Play `hit` now, and chain into the queue when it ends."""
+    vc = channel.guild.voice_client
+    if vc is None:
+        return
+    if vc.is_playing():
+        vc.stop()
+    loop = client.loop
+
+    def after(error):
+        if error:
+            print(f"[music] playback error: {error!r}")
+        music.NOW["title"] = None
+        # a finished song pulls the next one; scheduled onto the bot's loop
+        # because `after` runs on discord's audio thread
+        asyncio.run_coroutine_threadsafe(_next(channel), loop)
+
+    try:
+        src = music.source_for(hit)
+        if music.VOLUME != 1.0:  # set from the control panel
+            src = discord.PCMVolumeTransformer(src, volume=music.VOLUME)
+        vc.play(src, after=after)
+    except Exception as e:  # opus, frame timing, disconnects
+        print(f"[music] play failed: {type(e).__name__}: {e}")
+        await channel.send(f"found it but couldn't play it: {e}")
+        return
+    music.NOW.update(title=hit["title"], query=hit.get("query", ""))
+    memory.log(db, "music", f"playing {hit['title']}")
+    print(f"[music] playing: {hit['title']}")
+    await channel.send(f"▶ **{hit['title']}**")
+
+
+async def _next(channel):
+    """Advance to the queued song, if any."""
+    if not music.QUEUE:
+        return
+    await _start(channel, music.QUEUE.pop(0))
+
+
+async def _find(channel, query):
+    print(f"[music] searching: {query!r}")
+    try:
+        hit = await asyncio.to_thread(music.find, query)
+        hit["query"] = query  # kept so a mid-song drop can re-resolve the url
+        return hit
+    except Exception as e:
+        print(f"[music] search failed: {type(e).__name__}: {e}")
+        await channel.send(f"couldn't find that: {e}")
+        return None
+
+
+async def _flush_music(channel, author=None):
+    """Drain everything she asked the DJ to do this turn. Runs after the reply,
+    so music never blocks her talking."""
+    jobs = list(tools.DJ)
+    tools.DJ.clear()
+    if tools.PENDING_MUSIC is not None:  # play/stop from the older tools
+        jobs.insert(0, ("stop" if tools.PENDING_MUSIC == "" else "play",
+                        tools.PENDING_MUSIC))
+        tools.PENDING_MUSIC = None
+    if not jobs:
+        return
+
+    vc = channel.guild.voice_client
+    if vc is None and author is not None:
+        # asking for music IS asking her to come in — no need to say join first
+        result = await voice.join(author)
+        if not result.startswith("joined"):
+            await channel.send(result)
+            return
+        voice_channel[channel.guild.id] = channel
+        vc = channel.guild.voice_client
+    if vc is None:
+        await channel.send("i'm not in a voice channel")
+        return
+
+    for action, arg in jobs:
+        if action == "stop":
+            music.QUEUE.clear()
+            music.NOW["title"] = None
+            vc.stop()
+        elif action == "skip":
+            if not music.NOW["title"]:
+                await channel.send("nothing playing")
+            else:
+                skipped = music.NOW["title"]
+                vc.stop()  # `after` pulls the next track by itself
+                await channel.send(f"⏭ skipped **{skipped}**")
+        elif action == "queue":
+            hit = await _find(channel, arg)
+            if hit:
+                if music.NOW["title"]:
+                    music.QUEUE.append(hit)
+                    await channel.send(f"➕ queued **{hit['title']}**"
+                                       f" (#{len(music.QUEUE)})")
+                else:
+                    await _start(channel, hit)
+        elif action == "play":
+            hit = await _find(channel, arg)
+            if hit:
+                await _start(channel, hit)
+
+
+async def _hang_up(guild) -> str:
+    """Leave the call. Disconnecting kills playback, so the deck goes with it."""
+    voice_channel.pop(guild.id, None)
+    music.QUEUE.clear()
+    music.NOW["title"] = None
+    return await voice.leave(guild)
+
+
+async def _flush_leave(channel, text):
+    """She asked to leave. Runs last, after the reply and the music."""
+    if not tools.PENDING_LEAVE:
+        return
+    tools.PENDING_LEAVE = False
+    if not voice.wants_now(text):
+        return  # "ออกไปทีหลังนะ" is a plan, not an ask — same veto as joining
+    await channel.send(await _hang_up(channel.guild))
+
+
 async def _flush_calendar_queue(channel):
     """calendar_write only queues; every write is gated behind Krich's ✅ here."""
     while tools.PENDING_CALENDAR:
@@ -38,6 +184,18 @@ async def _flush_calendar_queue(channel):
         await m.add_reaction("✅")
         await m.add_reaction("❌")
         pending_confirms[m.id] = text
+
+
+@tasks.loop(seconds=30)
+async def keep_listening():
+    """voice_recv stops listening for good after ONE decode error. Restart it."""
+    for gid, ch in list(voice_channel.items()):
+        vc = ch.guild.voice_client
+        if vc is None:
+            voice_channel.pop(gid, None)
+        elif not vc.is_listening():
+            memory.log(db, "voice", "listening had stopped — restarting")
+            voice.listen(ch.guild, _heard, client.loop)
 
 
 last_unprompted = datetime.min  # ponytail: >=3h between unprompted messages, no spam
@@ -62,8 +220,11 @@ async def idle_turn():
 @client.event
 async def on_ready():
     print(f"logged in as {client.user}")
+    print(f"[music] {music.ready()}")
     if HOME and not idle_turn.is_running():
         idle_turn.start()
+    if not keep_listening.is_running():
+        keep_listening.start()
 
 
 @client.event
@@ -96,19 +257,50 @@ async def on_message(message: discord.Message):
         return
     if not text:
         return
+    # voice-channel commands: exact phrases only, so normal chat never triggers them
+    cmd = text.lower().strip(" .!?")
+    if cmd in ("join", "join vc", "get in here", "เข้ามา", "เข้าห้อง"):
+        result = await voice.join(message.author)
+        if result.startswith("joined"):
+            voice_channel[message.guild.id] = message.channel
+            result += " — " + voice.listen(message.guild, _heard, client.loop)
+        await message.channel.send(result)
+        return
+    if cmd in ("leave", "leave vc", "get out", "ออกไป", "ออกห้อง"):
+        await message.channel.send(await _hang_up(message.guild))
+        return
+
     author = message.author.display_name
     async with locks[message.channel.id]:
         async with message.channel.typing():
             reply = await pipeline.respond(db, list(history[message.channel.id]), author, text)
-        if not reply:
-            return
-        history[message.channel.id].append({"role": "assistant", "content": reply})
-        # post-turn memory write, off the reply path; prior lines let "he/she" resolve
-        ctx = memory.history_context(list(history[message.channel.id]))
-        asyncio.create_task(asyncio.to_thread(memory.extract, db, author, text, reply, ctx))
-        for i in range(0, len(reply), 2000):
-            await message.channel.send(reply[i : i + 2000])
+        # Queued actions must run whatever she says. An empty reply used to
+        # `return` here and silently swallow the song she had already queued —
+        # you asked for Bad Apple and nothing happened.
+        if reply:
+            history[message.channel.id].append({"role": "assistant", "content": reply})
+            # post-turn memory write, off the reply path; prior lines let "he/she" resolve
+            ctx = memory.history_context(list(history[message.channel.id]))
+            asyncio.create_task(
+                asyncio.to_thread(memory.extract, db, author, text, reply, ctx)
+            )
+            for i in range(0, len(reply), 2000):
+                await message.channel.send(reply[i : i + 2000])
+        else:
+            print("[bot] empty reply — running queued actions anyway")
+        if tools.PENDING_JOIN:  # she decided to come into voice this turn
+            tools.PENDING_JOIN = False
+            if voice.wants_now(text):  # "join us later tonight" is a plan, not an ask
+                result = await voice.join(message.author)
+                if result.startswith("joined"):
+                    voice_channel[message.guild.id] = message.channel
+                    voice.listen(message.guild, _heard, client.loop)
+                else:
+                    await message.channel.send(result)
+        await _flush_music(message.channel, message.author)
         await _flush_calendar_queue(message.channel)
+        await _flush_leave(message.channel, text)  # last: hanging up stops the music
 
 
-client.run(os.environ["DISCORD_TOKEN"])
+if __name__ == "__main__":  # guarded so tests can import the DJ logic
+    client.run(os.environ["DISCORD_TOKEN"])

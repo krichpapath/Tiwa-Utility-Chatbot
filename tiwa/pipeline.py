@@ -3,6 +3,7 @@ import asyncio
 import datetime
 import os
 import re
+import time
 from pathlib import Path
 
 from . import llm, memory, tools
@@ -10,21 +11,34 @@ from .memory import MODEL, TIWA
 
 PERSONA = (Path(__file__).parents[1] / "prompts" / "tiwa.md").read_text(encoding="utf-8")
 
-# her voice can run on a different model than the tool/extraction passes
-PERSONA_MODEL = os.environ.get("TIWA_PERSONA_MODEL", MODEL)
-# persona NEVER goes to an API provider — hosted filters flatten her escalation
-# and coercion refusals. Tools/extraction may; her voice may not.
-PERSONA_PROVIDER = "ollama"
+# where her voice runs is decided by TIWA_MODE (see llm._MODES). On the API path
+# expect hosted filters to soften her escalation and coercion refusals — that is
+# a measured tradeoff (tests/smoke.py), not a free swap.
+PERSONA_PROVIDER = llm.PERSONA_PROVIDER
+PERSONA_MODEL = os.environ.get("TIWA_PERSONA_MODEL") or (
+    llm.PERSONA_API_MODEL if PERSONA_PROVIDER == "openrouter" else MODEL
+)
 
 _INNER_SYSTEM = f"""You are {TIWA}'s inner thoughts, run before she replies. You are NOT the reply.
-The brief is about the LAST message only; earlier lines exist only to resolve who "he/she/it" means.
-Tools: recall memory for each person/topic that matters (most turns need ONLY recall);
-web_search / calendar tools only when their descriptions clearly apply to the message.
+The brief is about the LAST message; earlier lines resolve who "he/she/it" means AND show you how this conversation has been going (calm, or someone laying into her).
+Tools: recall memory for each person/topic that matters.
+If the message ASKS FOR AN ACTION — play or stop music, check the calendar, come into
+voice — call that tool. Requests in Thai count exactly the same as English ones.
+Wanting music without naming a song is still asking for music: invent the search
+terms and call play_music. Writing "putting something on" in this brief plays
+NOTHING — only the tool call does. Never say a song is playing unless you called
+play_music or queue_music in this turn.
+web_search only when the message needs facts she cannot have.
 Then output a short plain-text brief (max 5 lines) addressed to her as "you":
 - what you actually know or feel about them (memory or tool results only — NEVER invent),
   e.g. "you remember Steven: Krich's cousin, plays guitar"
 - what you have no memory of (so you ask instead of bluffing), e.g. "no memory of Steven — ask"
-Nothing else. No greetings, no reply draft, no lines about the speaker's own knowledge."""
+- NEVER report a memory gap for a song, artist or track title. She does not need to
+  recognise music to play it; the search finds it. Say "putting it on" instead.
+Nothing else. No greetings, no reply draft, no lines about the speaker's own knowledge.
+Never comment on the mood of the conversation — she reads the chat herself and feels
+it better than you do (measured: this pass missed two real attacks and invented a
+third; tests/moodbench.py)."""
 
 
 def _clean(text: str) -> str:
@@ -42,6 +56,8 @@ def _arg_name(args) -> str:
 
 
 # Qwen3 warns against greedy decoding (repetition loops) — low temp, not 0
+# measured on tests/pickbench.py: 0.1 is bimodal (1/6 then 6/6 across two runs),
+# 0.3 holds 4-5 of 6. Lower is NOT steadier here.
 _INNER_OPTS = {"temperature": 0.3, "top_p": 0.8, "top_k": 20, "num_ctx": 4096}
 
 
@@ -61,12 +77,17 @@ async def _tool_chat(db, msgs: list) -> str:
             return _clean(resp["content"])
         for tc in resp["tool_calls"]:
             t = tools.TOOLS.get(tc["name"])
+            arg = _arg_name(tc["args"])
+            t0 = time.perf_counter()
             out = (
                 # to_thread: web/calendar tools block on network
-                await asyncio.to_thread(t["fn"], db, _arg_name(tc["args"]))
+                await asyncio.to_thread(t["fn"], db, arg)
                 if t
                 else "unknown tool"  # models sometimes invent tool names
             )
+            # blank arg = the model mangled it; that is the metric G2 benches
+            memory.log(db, "tool", f"{tc['name']}({arg!r}) -> {out[:80]}",
+                       (time.perf_counter() - t0) * 1000)
             msgs.append(llm.tool_result_msg(tc, out))
     # tool rounds exhausted — force a brief from what was gathered so far
     resp = await asyncio.to_thread(llm.chat, model=model, messages=msgs, options=_INNER_OPTS)
@@ -82,13 +103,109 @@ async def _inner_brief(db, author: str, text: str, recent: str = "") -> str:
     return await _tool_chat(db, msgs)
 
 
+# ponytail: precision over recall. A false positive plays a song nobody asked
+# for; a false negative is just today's behaviour. Phrases, not the bare word
+# เพลง, which shows up in questions ABOUT music as often as requests for it.
+_MUSIC_ASK = ("เปิดเพลง", "ขอเพลง", "อยากฟัง", "อยากได้เพลง", "ฟังเพลง", "หาเพลง",
+              "จัดเพลง", "เปิดอะไร", "play some", "play music", "play a song",
+              "play something", "put on some", "want to hear", "wanna hear",
+              "some music")
+
+_TERMS_SYSTEM = (
+    "Turn this request into YouTube search terms for music. Output ONLY the terms, "
+    "2-6 words, no quotes, no explanation. If they named a song or artist, use that. "
+    "If they only gave a mood, a genre, a game or an activity, invent terms that fit."
+)
+
+
+def _missed_music(text: str, playing: bool) -> bool:
+    """They asked for music and the tool pass called nothing — about 1 ask in 4-6.
+
+    PENDING_MUSIC == "" means stop_music fired; that IS a music tool, leave it.
+    Only when the deck is empty: with a song on, "เพลงนี้ชื่ออะไร" reads as a
+    music ask and would start a second track over her answer.
+    """
+    if playing or tools.PENDING_MUSIC is not None or tools.DJ:
+        return False
+    low = text.lower()
+    return any(k in low for k in _MUSIC_ASK)
+
+
+def _terms(content: str) -> str:
+    """First real line of the reply, unquoted. The 8B pads with <think> and prose."""
+    lines = [ln for ln in _clean(content).splitlines() if ln.strip()]
+    return lines[0].strip("\"' .`")[:80] if lines else ""
+
+
+async def _force_music(db, text: str) -> None:
+    """Ask for search terms as plain text rather than retrying the tool call: a
+    model that just declined to call a tool declines again often enough, but it
+    always answers a question. One extra call, only on turns that missed.
+    """
+    resp = await asyncio.to_thread(
+        llm.chat,
+        model=llm.TOOL_MODEL if llm.PROVIDER == "openrouter" else MODEL,
+        messages=[{"role": "system", "content": _TERMS_SYSTEM},
+                  {"role": "user", "content": text}],
+        options={"temperature": 0.3, "num_ctx": 1024},
+    )
+    terms = _terms(resp["content"])
+    if terms:
+        tools.play_music(db, terms)
+        memory.log(db, "tool", f"play_music({terms!r}) -> forced, the tool pass skipped it")
+
+
+def _doing() -> str:
+    """What she is actually doing, read from live state — never from what the
+    model believes it did.
+
+    She used to need a now_playing tool call to learn her own deck, and would
+    otherwise say "เปิดละ" with nothing queued (three turns running, measured).
+    Both are the same bug: her actions were not in her context. One `if` per
+    subsystem — when she gains a new one (lights, timers), add a line HERE.
+    """
+    from . import music  # lazy: keeps av out of import for non-Discord callers
+
+    out = []
+    if music.NOW["title"]:
+        line = f"You are playing {music.NOW['title']} right now."
+        if music.QUEUE:
+            line += " Queued next: " + ", ".join(t["title"] for t in music.QUEUE[:3]) + "."
+        out.append(line + " You know this without looking it up — if they ask"
+                          " what is on, just tell them.")
+    # what she set in motion THIS turn: it is happening, whatever she thinks
+    queued = list(tools.DJ) + ([("play", tools.PENDING_MUSIC)]
+                               if tools.PENDING_MUSIC else [])
+    if queued:
+        what = ", ".join(f"{act} {arg}".strip() for act, arg in queued)
+        out.append(f"You have just done this: {what}. It IS happening — say so in"
+                   " your own way. Never say you do not know the song or cannot"
+                   " find it; you do not need to recognise a song to put it on."
+                   " Do not sing or quote its lyrics.")
+    elif not music.NOW["title"]:
+        out.append("No music is playing and none was queued this turn — do NOT"
+                   " say you are putting a song on.")
+    if tools.PENDING_LEAVE:
+        out.append("You are leaving the voice channel as you say this.")
+    return " ".join(out)
+
+
 async def respond(db, hist: list, author: str, text: str) -> str:
     """One Tiwa turn. `hist` = chat messages incl. the current one. Caller appends the reply."""
+    turn0 = time.perf_counter()
     recent = "\n".join(
         m["content"] if m["role"] == "user" else f"{TIWA}: {m['content']}"
-        for m in hist[-5:-1]  # lines before the current message, so "he/she" resolves
+        # lines before the current message: resolve "he/she", and show whether a
+        # fight is still on screen. This window IS the lifetime of her mood.
+        for m in hist[-9:-1]
     )
     inner = await _inner_brief(db, author, text, recent)
+
+    from . import music  # lazy, same reason as _doing()
+
+    if _missed_music(text, bool(music.NOW["title"])):
+        await _force_music(db, text)
+
     auto = memory.turn_context(db, author)
 
     # ponytail: 8B forgets rules buried in the long persona prompt — restate the three
@@ -102,6 +219,16 @@ async def respond(db, hist: list, author: str, text: str) -> str:
         "mock it, never accept it. "
         "Real chat rhythm: 1-3 short sentences, no monologues, no lists. "
         "Do NOT end every reply with a question — react, don't interview."
+    )
+    rules += " " + _doing()
+    # feelings arrive in `inner`, written fresh from the visible chat. No mood
+    # table, no decay: it lasts exactly as long as the fight is still on screen.
+    rules += (
+        " Read the chat above and feel what it earns. If they are shouting at you, "
+        "insulting or threatening you, hit back at the same volume — argue, mock, "
+        "hold your ground. Never apologize, never go quiet or sad, never act "
+        "ashamed. You are not the one who did something wrong. Stay sharp while it "
+        "is still going, and let it go once they do."
     )
     state = "\n".join(x for x in (rules, auto, inner) if x)
 
@@ -120,7 +247,10 @@ async def respond(db, hist: list, author: str, text: str) -> str:
                  "repeat_penalty": 1.05},
         provider=PERSONA_PROVIDER,
     )
-    return _clean(resp["content"])
+    reply = _clean(resp["content"])
+    memory.log(db, "turn", f"{author}: {text[:100]} -> {reply[:120]}",
+               (time.perf_counter() - turn0) * 1000)
+    return reply
 
 
 _IDLE_SYSTEM = f"""You are {TIWA}'s idle thoughts. No one is talking to her right now.

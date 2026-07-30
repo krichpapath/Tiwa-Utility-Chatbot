@@ -4,3 +4,15 @@ httpx
 ddgs
 google-api-python-client
 google-auth-oauthlib
+PyNaCl
+discord-ext-voice-recv
+onnx-asr
+onnxruntime
+soundfile
+edge-tts
+yt-dlp
+av
+# imported directly by tiwa/music.py and tiwa/voice.py — they used to arrive only as
+# transitive deps of onnx-asr / discord.py, so a slimmer resolve broke music and voice
+numpy
+davey

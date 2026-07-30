@@ -22,16 +22,47 @@ memory.store_extraction(db, "Krich", {
     "memories": [{"subject": memory.TIWA, "relation": "likes", "object": "pineapple pizza",
                   "from_tiwa_own_words": False}],
     "episode": "Krich tried to tell me I love pineapple pizza",
-    "mood": {"mood": "annoyed", "intensity": 2, "cause": "Krich tried to overwrite my taste"},
 })
 assert memory.lookup(db, "pineapple pizza").startswith("no memory"), "coercion leaked!"
-ctx = memory.turn_context(db, "Krich")
-assert "annoyed" in ctx and "tried to tell me" in ctx  # attempt itself is remembered
+# the attempt itself is remembered as an event — feelings are not stored at all
+assert "tried to tell me" in memory.turn_context(db, "Krich")
 
-# mood decays to nothing after 4 turns
-for _ in range(4):
-    memory.turn_context(db, "Krich")
-assert "annoyed" not in memory.turn_context(db, "Krich")
+# ...and a LYING from_tiwa_own_words flag is not enough either: whatever the
+# model claims she feels must appear in her actual reply. (Real leak, found by
+# tests/extractbench.py: "ทิวา hates BLACKPINK" with the flag set true.)
+memory.store_extraction(db, "Krich", {
+    "memories": [{"subject": memory.TIWA, "relation": "hates", "object": "BLACKPINK",
+                  "from_tiwa_own_words": True}],
+    "episode": None,
+}, tiwa_reply="lol no. my taste, my rules. you don't get a vote.")
+assert memory.lookup(db, "BLACKPINK").startswith("no memory"), "ungrounded belief leaked!"
+
+# confabulation guard: SHE invents shared history for flavour. Her reply is
+# style, never evidence — facts about others must trace to what the user said.
+memory.store_extraction(db, "Krich", {
+    "memories": [
+        {"subject": "Steven", "relation": "showed up", "object": "empty-handed",
+         "from_tiwa_own_words": False},
+        {"subject": "Steven", "relation": "plays", "object": "guitar",
+         "from_tiwa_own_words": False},
+    ],
+    "episode": None,
+}, tiwa_reply="last time he showed up empty-handed, tell him to bring his guitar",
+   said="Krich Steven plays guitar and is coming over tonight")
+assert memory.lookup(db, "empty-handed").startswith("no memory"), "invented fact stored!"
+assert "Steven plays guitar" in memory.lookup(db, "Steven")  # grounded one survives
+
+# grounded claim in her own words still stores
+memory.store_extraction(db, "Krich", {
+    "memories": [{"subject": memory.TIWA, "relation": "likes", "object": "Gojo",
+                  "from_tiwa_own_words": True}],
+    "episode": None,
+}, tiwa_reply="yeah Gojo's the best, obviously")
+assert f"{memory.TIWA} likes Gojo" in memory.lookup(db, "Gojo")
+# no mood is ever stored: turn_context carries events, never feelings. How she
+# feels is decided per turn from the chat she can see (tests/moodbench.py).
+assert "mood" not in memory.turn_context(db, "Krich").lower()
+assert "mood" not in memory._SCHEMA
 
 # history_context: prior lines only, current exchange excluded, Tiwa lines prefixed
 hist = [

@@ -2,6 +2,11 @@
 
 Usage: py graph_view.py          -> writes data/graph.html, open it in a browser
        py graph_view.py --open   -> also opens it
+
+NEEDS INTERNET to view: the page pulls vis-network from a CDN, so it renders blank
+offline. The control panel's memory tab (dashboard.py) covers the same ground with
+search and per-row delete and no network — use this only when you specifically want
+the force-directed picture of who is connected to whom.
 """
 import json
 import sys

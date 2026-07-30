@@ -73,7 +73,10 @@ _EVENT_FORMAT = {
         "start": {"type": "string", "description": "ISO 8601 local, e.g. 2026-07-20T15:00"},
         "end": {"type": ["string", "null"]},
     },
-    "required": ["action", "title", "start"],
+    # every property required + no extras: OpenRouter sends this as a STRICT json_schema
+    # and rejects a schema whose properties are not all required. "end" may be null.
+    "required": ["action", "title", "start", "end"],
+    "additionalProperties": False,
 }
 
 
@@ -82,26 +85,34 @@ def _plus1h(start_iso: str) -> str:
 
 
 def apply_change(text: str) -> str:
-    """Run AFTER Krich's ✅ only. Schema-constrained parse (reliable) -> API call."""
-    from ollama import Client
+    """Run AFTER Krich's ✅ only. Schema-constrained parse (reliable) -> API call.
+
+    Goes through llm.chat like every other model call: it used to build an ollama
+    client directly, which meant a confirmed calendar write needed ollama running
+    even in `api` mode — the one mode whose point is needing nothing local — and
+    the call never showed up in the model-call log.
+    """
+    from . import llm
 
     now = dt.datetime.now()
-    resp = Client().chat(
-        model=MODEL,
-        format=_EVENT_FORMAT,
-        think=False,
-        options={"temperature": 0, "num_ctx": 2048},
+    resp = llm.chat(
+        # same per-pass model choice as memory.extract: this is an extraction job
+        model=llm.EXTRACT_MODEL if llm.PROVIDER == "openrouter" else MODEL,
         messages=[
             {
                 "role": "system",
+                # the word "JSON" is load-bearing: DeepSeek returns empty content
+                # without it, and llm.chat asserts it is present
                 "content": f"Now: {now:%Y-%m-%d %H:%M} ({now:%A}), timezone {TZ}. "
                 "Convert this calendar request to JSON. Resolve relative dates.",
             },
             {"role": "user", "content": text},
         ],
+        fmt=_EVENT_FORMAT,
+        options={"temperature": 0, "num_ctx": 2048},
     )
     try:
-        ev = json.loads(resp.message.content or "{}")
+        ev = json.loads(resp["content"] or "{}")
         svc = _service()
         if ev["action"] == "cancel":
             hits = (
@@ -132,7 +143,21 @@ def apply_change(text: str) -> str:
         return f"calendar change failed: {e}"
 
 
-if __name__ == "__main__":  # runnable check: pure helpers, no network
+if __name__ == "__main__":  # runnable check: pure helpers + schema, no network
+    import inspect
+
     assert _plus1h("2026-07-20T15:00") == "2026-07-20T16:00:00"
     assert client_secret_path().endswith(".json")
-    print("gcal helpers ok")
+
+    # every model call goes through llm.chat, so `api` mode needs nothing local
+    # and the call lands in the model-call log
+    src = inspect.getsource(apply_change)
+    assert "llm.chat" in src, "apply_change must route through llm.chat"
+    assert "from ollama import" not in src, "apply_change bypasses the provider layer"
+    assert "json" in src.lower(), "schema-constrained call needs 'json' in the prompt"
+
+    # OpenRouter sends this as a strict json_schema: all properties required, no extras
+    props = set(_EVENT_FORMAT["properties"])
+    assert set(_EVENT_FORMAT["required"]) == props, "strict schema needs all keys required"
+    assert _EVENT_FORMAT["additionalProperties"] is False
+    print(f"gcal ok — helpers, llm.chat routing, strict schema ({len(props)} fields)")
