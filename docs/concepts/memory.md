@@ -64,8 +64,44 @@ Steven plays guitar
 produces passes through [the guards](guards.md) before it lands. That order matters:
 the model proposes, code decides.
 
-**Automatic context** — `turn_context()` puts the last 3 episodes for that person into
-every turn, so she opens with what she already knows about you.
+**Automatic context** — `turn_context()` puts **what she knows about whoever is talking**
+into every turn: their facts (capped at `TURN_FACTS = 12`) plus their last 3 episodes. She
+opens knowing you, with no tool call.
+
+!!! warning "This channel was dead until July 2026"
+
+    `turn_context()` read episodes *only* — and pass 3 is told an episode is "almost
+    always null", so on the real database it returned `""` on **every turn ever
+    recorded**. Facts could only be reached by the model *choosing* to call `recall`,
+    which across 11 logged turns it never did. Memory was write-only in practice.
+
+    Injecting the facts instead of hoping for a tool call is the same trade as
+    [deleting `now_playing`](../reference/decisions.md#adr-012). `recall` still earns its
+    place — for **third parties**, someone mentioned who isn't the one talking.
+
+### Near-duplicate names get folded {#near-duplicate-names-get-folded}
+
+`canonical()` runs on every write. Before creating an entity it checks the names already
+in the graph with `difflib` and reuses a close one:
+
+| written | stored as | ratio |
+|---|---|---|
+| `Marvel Rival` | **`Marvel Rivals`** | 0.96 |
+| `Steve` | **`Steven`** | 0.91 |
+| `Mind` | `Mind` (left alone) | 0.75 vs `Mint` |
+
+`ALIAS_CUTOFF = 0.85`. Open extraction spells the same thing differently every time — the
+real database held `Marvel Rival` while every turn said `Marvel Rivals`, so a lookup for
+one missed the facts filed under the other.
+
+Doing this properly is a research problem: [CESI](https://arxiv.org/abs/1902.00172)
+(WWW 2018) canonicalizes open knowledge bases by clustering learned embeddings with side
+information. At this scale a string ratio is the whole win. Revisit when two genuinely
+different spellings mean the same thing — `ไอภพ` and `Phop` will never be close enough
+for `difflib`.
+
+**First spelling wins.** Folding is onto whatever is already stored, so if the wrong name
+lands first it becomes canonical. Fix that with SQL, not code.
 
 ### There is no mood table
 
@@ -93,11 +129,17 @@ entity row was created, and deleting a fact by hand leaves the same litter.
 
 ## Gotchas
 
-- **"Gojo" and "Gojo Satoru" are two different nodes.** Facts about one are invisible
-  to a recall of the other. Known, deliberately deferred — the fix is an alias table or
-  FTS5. It gets worse as the graph grows. See [where to go next](../reference/next.md).
-- **Entity names are `COLLATE NOCASE` but not normalised.** Trailing whitespace used to
-  create duplicate rows; `remember()` now strips. Anything fancier is still absent.
+- **Only *entity* names are canonicalized, not relations.** The seeded graph held both
+  `Tycoon playing Marvel Rivals` and `Tycoon plays Marvel Rivals` — same fact, two rows,
+  because `plays` and `playing` are different strings. CESI clusters relation phrases too;
+  this doesn't. Deleted by hand.
+- **"Gojo" and "Gojo Satoru" still split at 0.62.** Below `ALIAS_CUTOFF`, so `difflib`
+  leaves them apart — a substring rule would catch this pair but would also merge things
+  that shouldn't be. Deferred; see [where to go next](../reference/next.md).
+- **An empty graph looks like a broken model.** Before it was seeded, `recall` was never
+  called in 11 real turns and that read as a tool-selection bug. It wasn't — measured
+  8/8 tool selection on the same registry. There was simply nothing to recall. Populate
+  before diagnosing.
 - **`lookup` is a Python scan over all entity names**, not SQL. Fine at this size,
   marked `ponytail:` in the source as a deliberate ceiling. FTS5 when it hurts.
 - **Deleting the DB is safe.** She starts empty. There's no migration system, so a

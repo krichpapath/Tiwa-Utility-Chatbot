@@ -39,7 +39,40 @@ def connect(path: str = DB_PATH) -> sqlite3.Connection:
     return db
 
 
+# How close two names must be before they are treated as the same thing.
+# 0.85 folds "Marvel Rival" into "Marvel Rivals" (0.96) and "Steve" into "Steven"
+# (0.91) while leaving "Mint"/"Mind" (0.75) alone. Raise it if two real friends
+# ever get merged; that is the failure that matters, not a missed merge.
+ALIAS_CUTOFF = 0.85
+
+
+def canonical(db, name: str) -> str:
+    """Fold a near-duplicate onto the name already in the graph.
+
+    Open extraction spells the same thing differently every time — the real
+    database had `Marvel Rival` where every other turn said `Marvel Rivals`, so
+    a lookup for one missed the facts stored under the other.
+
+    ponytail: stdlib difflib over the entity names, not embeddings. Canonicalizing
+    an open KB properly is a research problem (CESI, WWW 2018, clusters learned
+    embeddings with side information); at four-figure entity counts a string
+    ratio is the whole win. Revisit when two genuinely different names mean the
+    same thing — "ไอภพ" and "Phop" will never be close enough for difflib.
+    """
+    import difflib
+
+    name = name.strip()
+    low = name.lower()
+    names = [n for (n,) in db.execute("SELECT name FROM entities")]
+    if any(low == n.lower() for n in names):
+        return name  # exact (the column is COLLATE NOCASE, so sqlite dedupes it)
+    hit = difflib.get_close_matches(low, [n.lower() for n in names], n=1,
+                                    cutoff=ALIAS_CUTOFF)
+    return next((n for n in names if n.lower() == hit[0]), name) if hit else name
+
+
 def _eid(db, name: str, kind: str = "thing") -> int:
+    name = canonical(db, name)
     db.execute("INSERT OR IGNORE INTO entities(name, kind) VALUES(?, ?)", (name, kind))
     return db.execute("SELECT id FROM entities WHERE name = ?", (name,)).fetchone()[0]
 
@@ -77,8 +110,23 @@ def lookup(db, name: str) -> str:
     return "\n".join(lines) if lines else f"no memory of {name}"
 
 
+TURN_FACTS = 12  # ponytail: flat cap. Rank by recency when someone has 50.
+
+
 def turn_context(db, user: str) -> str:
-    """Per-turn automatic context: what happened before, as FACTS not feelings.
+    """Per-turn automatic context: what she knows about whoever is talking, as
+    FACTS not feelings.
+
+    This used to read episodes ONLY — and the extractor is told an episode is
+    "almost always null", so on the real database it returned "" on every turn
+    ever recorded. She was storing facts she could then only reach by choosing to
+    call `recall`, which across 11 logged turns she never did. Memory was
+    write-only in practice.
+
+    So the facts about the person in front of her arrive without a tool call, the
+    same trade as deleting `now_playing` and injecting the deck (ADR-012). recall
+    still earns its place for THIRD parties — someone mentioned who is not
+    talking.
 
     No mood table on purpose. How she feels is decided fresh each turn by the
     inner pass from the chat history she can actually see — so the feeling lasts
@@ -86,6 +134,10 @@ def turn_context(db, user: str) -> str:
     are permanent, feelings are not.
     """
     lines = []
+    facts = lookup(db, user)
+    if not facts.startswith("no memory"):
+        lines.append(f"what you already know about {user}:\n"
+                     + "\n".join(facts.splitlines()[:TURN_FACTS]))
     for (text,) in db.execute(
         "SELECT text FROM episodes WHERE user = ? ORDER BY ts DESC LIMIT 3", (user,)
     ):
@@ -186,10 +238,28 @@ def wipe(db, what: str):
     db.commit()
 
 
-def recent_episodes(db, n: int = 5) -> str:
-    """Latest episodes across all users — fuel for the idle heartbeat."""
+def idle_fuel(db, n: int = 5) -> str:
+    """Something to have an unprompted thought ABOUT. "" means stay quiet.
+
+    Was `recent_episodes`, and episodes alone starved it: the extractor is told
+    an episode is "almost always null", so the real database holds ZERO after
+    every turn it has ever run — and `idle()` returns "" whenever this is empty.
+    She could not have spoken unprompted once, ever, whatever the heartbeat did.
+
+    Falling back to the newest facts is the honest fix. Timing is the hard part
+    of a proactive agent — pre-set rules produce untimely, annoying messages
+    (Liao et al., SIGIR 2023) — so the caller keeps the real brakes: >= 3 h
+    apart, 09:00-23:00, and she is told to output NOTHING on most ticks.
+    """
+    eps = [t for (t,) in db.execute(
+        "SELECT text FROM episodes ORDER BY ts DESC LIMIT ?", (n,))]
+    if eps:
+        return "\n".join(eps)
     return "\n".join(
-        t for (t,) in db.execute("SELECT text FROM episodes ORDER BY ts DESC LIMIT ?", (n,))
+        f"{s} {r} {d}" for s, r, d in db.execute(
+            "SELECT s.name, r.rel, d.name FROM relations r "
+            "JOIN entities s ON s.id=r.src JOIN entities d ON d.id=r.dst "
+            "ORDER BY r.updated_at DESC LIMIT ?", (n,))
     )
 
 

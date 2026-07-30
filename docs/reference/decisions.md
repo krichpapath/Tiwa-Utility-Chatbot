@@ -214,7 +214,7 @@ the constraint costs nothing and removes a whole failure class.
 
 ---
 
-## ADR-012 · Delete `now_playing`, inject action state instead
+## ADR-012 · Delete `now_playing`, inject action state instead {#adr-012}
 
 **Context.** She needed a tool call to learn what she was playing, and separately claimed
 to be playing things she wasn't.
@@ -473,3 +473,59 @@ probes, and properly measuring that needs ~30 probes a side. Latency alone settl
 matches by substring. The malformed-name check that catches it was added because a human
 read the output, not because the bench failed. Worth remembering the next time a green
 bench is treated as proof.
+
+## ADR-020 · Inject what she knows; stop waiting for `recall` {#adr-020}
+
+**Status.** Accepted · July 2026
+
+**Context.** An audit of the real database showed five apparent problems: the tool pass
+almost never called tools (5 calls in 11 turns, **zero** `recall`, **zero** `web_search`),
+the forced music retry was firing as often as the model, the graph held 4 entities and 2
+relations, one of those entities was `Marvel Rival` where every turn said `Marvel Rivals`,
+and `episodes` was empty so `idle()` could never fire.
+
+**Decision.** Three code changes, and two of the five "problems" written off after
+measurement.
+
+**Why — what the measurements actually said.**
+
+*The tool pass is fine.* Hypothesis: eight lines of conversation history degrade tool
+selection, the way [Lost in the Middle](https://aclanthology.org/2024.tacl-1.9/)
+(Liu et al., TACL 2024) degrades retrieval. **Refuted** — 8/8 right tool with history and
+8/8 without, same probes. Then reading the 11 turns settled it: every one was a music
+request. No turn needed `recall` or `web_search`. The low count was correct behaviour on
+an unrepresentative sample, and the forced-retry rows are the guard working, not the model
+failing.
+
+That leaves the real defect underneath: **`turn_context()` read episodes only**, and pass
+3 is told an episode is "almost always null", so it returned `""` on every turn ever
+recorded. A stored fact could only be reached by the model *choosing* to call `recall`.
+Memory was write-only. It now injects the speaker's facts directly — the same trade as
+[ADR-012](#adr-012), and for the same reason: what she should already know is not worth a
+round-trip. `recall` keeps its job for third parties.
+
+The fix also dissolves the first "problem": with a populated graph, `recall` fires
+unprompted on the very next live turn. **#1 was a symptom of #3.**
+
+*Entity canonicalization.* `canonical()` folds near-duplicates with stdlib `difflib` at a
+0.85 ratio. [CESI](https://arxiv.org/abs/1902.00172) (WWW 2018) does this properly by
+clustering learned embeddings with side information; at this scale a string ratio is the
+whole win. Fewer tools is a real lever too — an adaptive policy showing ~7 tools instead
+of 50 lifted selection from 87.1% to 93.1% on
+[BFCL](https://proceedings.mlr.press/v267/patil25a.html) — but with selection measured at
+8/8 there is nothing here to buy.
+
+*The idle heartbeat could never fire.* `idle()` returns `""` when its fuel is empty, and
+its fuel was episodes, which are always null. `recent_episodes()` became `idle_fuel()` and
+falls back to the newest facts. Timing is the hard part of a proactive agent — fixed rules
+produce untimely, annoying messages ([Liao et al., SIGIR 2023](https://dl.acm.org/doi/10.1145/3539618.3594250))
+— so the brakes stay where they were: ≥ 3 h apart, 09:00–23:00, and she is told to output
+NOTHING on most ticks.
+
+**Consequences.** She opens every turn knowing who she is talking to, at the cost of up to
+12 lines of prompt. Proven live: asked in Thai which games her father plays, she answered
+from seeded facts she was never told in the conversation — including a stored `note` — and
+asked a follow-up.
+
+**Caveat.** The 11-turn sample is small and was all one activity. "The tool pass is fine"
+means fine on 8 probes and on 11 music turns, not fine in general.

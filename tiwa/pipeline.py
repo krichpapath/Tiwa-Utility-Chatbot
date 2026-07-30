@@ -328,13 +328,15 @@ Never greet, never "just checking in", never summarize the episodes back."""
 
 async def idle(db) -> str:
     """Heartbeat turn: usually returns "" (stay quiet), sometimes an unprompted message."""
-    eps = memory.recent_episodes(db)
+    eps = memory.idle_fuel(db)
     if not eps:
         return ""  # nothing lived yet = nothing to say; 8B won't stay quiet on its own
     now = datetime.datetime.now()
     msgs = [
         {"role": "system", "content": _IDLE_SYSTEM},
-        {"role": "user", "content": f"time: {now:%A %H:%M}\nrecent episodes:\n{eps}"},
+        # "what you know", not "recent episodes": idle_fuel falls back to facts
+        # when no episode exists, which on the real database is always
+        {"role": "user", "content": f"time: {now:%A %H:%M}\nwhat you know:\n{eps}"},
     ]
     thought = await _tool_chat(db, msgs)
     if not thought or "NOTHING" in thought[:30].upper():
