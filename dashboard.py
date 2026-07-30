@@ -68,6 +68,12 @@ SETTINGS = [
          "1.0 is however loud YouTube handed it over. Set 0.4-0.6 so you can "
          "still hear her talk while a song is playing.",
          "1.0", None),
+        ("TIWA_MAX_TRACK_MIN", "Longest track (minutes)",
+         "YouTube's top hit for a mood like 'hype gaming EDM' is a 2-3 hour mix, "
+         "which outlives the whole conversation and starves the queue. Anything "
+         "longer than this is skipped in favour of the next result. Raise it if "
+         "you actually want long mixes.",
+         "12", None),
     ]),
     ("Her speaking voice", [
         ("TIWA_TTS_TH", "Thai voice",

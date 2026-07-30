@@ -51,15 +51,44 @@ async def main():
     print(f"\n{len(CASES) - bad}/{len(CASES)} correct")
 
     if "--search" in sys.argv:
-        print("\n| query | youtube found |")
-        print("|---|---|")
+        # a song, not a 3-hour mix. YouTube's top hit for a mood query is always
+        # a mix, which outlives the conversation and starves the queue.
+        print("\n| query | youtube found | mins | song? |")
+        print("|---|---|---|---|")
+        live = long = 0
         for _, tool, query, _ in rows:
-            if tool == "play_music" and query:
-                try:
-                    hit = await asyncio.to_thread(music.find, query)
-                    print(f"| {query} | {hit['title'][:60]} ({hit['duration']}s) |")
-                except Exception as e:
-                    print(f"| {query} | FAILED {type(e).__name__} |")
+            if tool != "play_music" or not query:
+                continue
+            try:
+                hit = await asyncio.to_thread(music.find, query)
+            except Exception as e:
+                print(f"| {query} | FAILED {type(e).__name__} | — | **NO** |")
+                live += 1
+                continue
+            secs = hit["duration"]
+            live += secs == 0
+            long += secs > music.MAX_TRACK_S
+            verdict = ("**LIVESTREAM**" if not secs
+                       else "mix" if secs > music.MAX_TRACK_S else "yes")
+            print(f"| {query} | {hit['title'][:48]} | {secs / 60:.0f} | {verdict} |")
+        if long:
+            print(f"\n{long} query had no song on YouTube and got a mix that at least "
+                  "ends. Judge whether the query itself was mix-shaped.")
+
+        # the repeat: same words twice must not hand back the same video
+        first = await asyncio.to_thread(music.find, "เพลงมันๆ")
+        second = await asyncio.to_thread(music.find, "เพลงมันๆ")
+        print(f"\nsame query twice: {first['title'][:40]} -> {second['title'][:40]}")
+        assert first["id"] != second["id"], "same video twice for one query"
+
+        # the F1 path re-resolves the track it is ALREADY playing. It goes by
+        # video id, never by re-running the search, or it lands on a new song.
+        again = await asyncio.to_thread(music.find, music.watch_url(first["id"]))
+        assert again["id"] == first["id"], "re-resolve swapped the song mid-play"
+        print("re-resolve returned the original video, not a new one")
+        # a livestream never ends, so the queue behind it never plays. That one is
+        # a hard failure; a long mix is only a disappointment.
+        assert live == 0, f"{live} queries returned a livestream"
     assert bad == 0, f"{bad} cases wrong"
 
 
