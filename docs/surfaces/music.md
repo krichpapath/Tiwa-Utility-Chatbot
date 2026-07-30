@@ -165,10 +165,16 @@ amount of result filtering should override.
 - **She may refuse.** *"Not in the mood for Queen right now"* with nothing queued is a
   feature, not a bug. That's also why the forced retry below can't be a hard rule.
 - **A missed tool call is forced, not re-prompted.** She used to agree and queue nothing on
-  about 1 ask in 4–6. `pipeline._missed_music()` spots it — phrase match, only when the deck
-  is empty and no music tool fired — and `_force_music()` asks the model for search terms as
-  plain text, then calls `play_music` itself. Deliberately keyword-based and
-  precision-biased: a false positive plays a song nobody asked for.
+  about 1 ask in 4–6. `pipeline._missed_music()` spots it — phrase match, whenever no music
+  tool fired — and `_force_music()` asks the model for search terms as plain text, then
+  calls `play_music` itself. Deliberately keyword-based and precision-biased: a false
+  positive plays a song nobody asked for. See
+  [action state](../concepts/action-state.md#the-retry-does-not-care-whats-already-playing)
+  for why it ignores the current deck.
+- **Don't let it pad a named song.** `_force_music`'s terms prompt is told to output a named
+  song plus at most its artist or game, nothing else. It once turned *"Red Line"* (Warframe)
+  into `Red Line Warframe chase` — picking up "escape the police" from the sentence — and
+  played a different Warframe track.
 - **MRO trap.** `source()` builds `type("MusicSource", (Stream, discord.AudioSource), {})`
   — `Stream` **must** come first, or `AudioSource.read()` wins and raises
   `NotImplementedError` on every song. There's an `assert` guarding it. This shipped once.

@@ -73,6 +73,26 @@ entirely when it's empty. Three jobs in one function:
    *"never heard of it"* while the track was already starting.
 3. **What is *not* happening** — but only on a turn that asked for music and got none.
 
+### The retry does not care what's already playing
+
+`_missed_music()` fires on any music ask with no music tool called — **including while a
+song is on**. It briefly didn't, and that was a real bug: the guard existed to stop
+*"เพลงนี้ชื่ออะไร"* starting a track over her answer, but the phrase list never matched
+that question anyway, and the guard silently switched the retry off for *"put on a
+different one"*, which is most music turns.
+
+The live log caught it: three confabulated turns in one session, every one with a song
+already playing.
+
+| she was told | she said | tool fired |
+|---|---|---|
+| `เปิดเพลงปล้น` | "เปิดให้แล้ว เพลงปล้น ของ Bodyslam" | none |
+| `ให้โอกาสอีกรอบเปิดเพลงให้ถูก` | "เปิดเพลง You doom us all ให้แล้ว" | none |
+
+Note what *didn't* save her: `_doing()` correctly told her she was playing
+*"Lamenting the Days"*, and she claimed a different song anyway. True information in the
+prompt does not beat a tool that actually runs. **Prompts reduce, code decides.**
+
 ### The negative is narrow on purpose
 
 It used to say "no music is playing" on *every* quiet turn. That's a rule about music

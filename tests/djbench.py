@@ -119,25 +119,31 @@ async def main():
     assert "came up empty" not in pipeline._doing(missed_music=True)
     tools.PENDING_MUSIC = None
 
-    # the forced retry: fires only when they asked and nothing was queued
+    # the forced retry: fires whenever they asked and nothing was queued. The
+    # "already playing" rows are the ones that matter — they were live failures,
+    # three confabulated turns in one session, every one with a song already on.
     print("\n| ask | deck | forced? |")
     print("|---|---|---|")
     cases = [
         ("เปิดเพลงอะไรก็ได้", None, True),
         ("อยากได้เพลงเล่น Marvel rival เลือกให้หน่อย มันๆ", None, True),
         ("play some lofi", None, True),
-        ("เพลงนี้ชื่ออะไร", "Bad Apple (video)", False),  # asking, not requesting
-        ("มึงว่าไง", None, False),                        # not about music at all
+        ("เปิดเพลงปล้น", "Lamenting the Days", True),          # swap the track
+        ("ให้โอกาสอีกรอบเปิดเพลงให้ถูก", "Lamenting the Days", True),
+        ("เพลงนี้ชื่ออะไร", "Bad Apple (video)", False),        # asking, not requesting
+        ("มึงว่าไง", None, False),                             # not about music at all
     ]
     for ask, deck, want in cases:
         tools.PENDING_MUSIC, tools.DJ[:] = None, []
-        got = pipeline._missed_music(ask, bool(deck))
+        music.NOW["title"] = deck
+        got = pipeline._missed_music(ask)
         print(f"| {ask} | {deck or '—'} | {got} |")
         assert got is want, ask
+    music.NOW["title"] = None
     tools.PENDING_MUSIC = "lofi"  # play_music already fired -> never force twice
-    assert not pipeline._missed_music("เปิดเพลงอะไรก็ได้", False)
+    assert not pipeline._missed_music("เปิดเพลงอะไรก็ได้")
     tools.PENDING_MUSIC = ""  # stop_music fired -> do NOT start one instead
-    assert not pipeline._missed_music("ปิดเพลง เปิดเพลงใหม่ไม่ต้อง", False)
+    assert not pipeline._missed_music("ปิดเพลง เปิดเพลงใหม่ไม่ต้อง")
     tools.PENDING_MUSIC = None
 
     # model output arrives padded; only the terms may reach the search

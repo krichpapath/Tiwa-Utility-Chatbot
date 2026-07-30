@@ -125,19 +125,29 @@ _MUSIC_ASK = ("เปิดเพลง", "ขอเพลง", "อยากฟ
 
 _TERMS_SYSTEM = (
     "Turn this request into YouTube search terms for music. Output ONLY the terms, "
-    "2-6 words, no quotes, no explanation. If they named a song or artist, use that. "
-    "If they only gave a mood, a genre, a game or an activity, invent terms that fit."
+    "2-6 words, no quotes, no explanation. "
+    "If they NAMED a song, output that name plus at most the artist or game it is "
+    "from, and nothing else — a descriptive word they did not say ('chase', 'hype', "
+    "'sad') finds a different song. Measured: 'Red Line' from Warframe became "
+    "'Red Line Warframe chase' and played the wrong track. "
+    "Only when they named no song at all — just a mood, a genre, a game or an "
+    "activity — invent terms that fit it."
 )
 
 
-def _missed_music(text: str, playing: bool) -> bool:
+def _missed_music(text: str) -> bool:
     """They asked for music and the tool pass called nothing — about 1 ask in 4-6.
 
     PENDING_MUSIC == "" means stop_music fired; that IS a music tool, leave it.
-    Only when the deck is empty: with a song on, "เพลงนี้ชื่ออะไร" reads as a
-    music ask and would start a second track over her answer.
+
+    Deliberately does NOT care whether something is already playing. It used to
+    skip a busy deck, to stop "เพลงนี้ชื่ออะไร" starting a track over her answer —
+    but the phrase list never matched that anyway, and the guard silently disabled
+    the retry for "put on a different one", which is the common case. Measured in
+    the live log: three confabulated turns in one session, every one of them with
+    a song already on.
     """
-    if playing or tools.PENDING_MUSIC is not None or tools.DJ:
+    if tools.PENDING_MUSIC is not None or tools.DJ:
         return False
     low = text.lower()
     return any(k in low for k in _MUSIC_ASK)
@@ -220,10 +230,7 @@ async def respond(db, hist: list, author: str, text: str) -> str:
         for m in hist[-9:-1]
     )
     inner = await _inner_brief(db, author, text, recent)
-
-    from . import music  # lazy, same reason as _doing()
-
-    missed = _missed_music(text, bool(music.NOW["title"]))
+    missed = _missed_music(text)
     if missed:
         await _force_music(db, text)
 
