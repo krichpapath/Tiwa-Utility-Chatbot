@@ -57,7 +57,45 @@ def main():
     assert len(written) == TOTAL - 1, "router stopped writing after the bad packet"
     assert "packet3" not in written, "corrupt packet should have been skipped"
     assert "packet4" in written, "router did not recover after the bad packet"
-    print("\nrouter ok — bad packet skipped, listening continued")
+    watchdog()
+    print("\nrouter ok — bad packet skipped, listening continued, watchdog quiet")
+
+
+def watchdog():
+    """The 30s restart loop must stay silent when her ears are off.
+
+    With TIWA_LISTEN=0 it used to log "listening had stopped — restarting" every
+    tick forever and restart nothing: 36 rows out of 36 ticks on a real session.
+    """
+    import asyncio
+
+    import bot
+
+    async def ticks(n):
+        bot.client.loop = asyncio.get_running_loop()  # listen() needs a live loop
+        for _ in range(n):
+            await bot.keep_listening.coro()
+
+    logged = []
+    live = {"on": False}
+    vc = types.SimpleNamespace(is_listening=lambda: live["on"],
+                               listen=lambda ears: live.update(on=True))
+    bot.memory.log = lambda db, kind, text, ms=0: logged.append(text)
+    bot.voice_channel[1] = types.SimpleNamespace(
+        guild=types.SimpleNamespace(voice_client=vc))
+
+    was, voice.LISTEN = voice.LISTEN, False
+    try:
+        asyncio.run(ticks(3))  # three ticks of a real session, ears off
+        assert not logged, f"watchdog logged with listening off: {logged}"
+
+        voice.LISTEN = True  # ears on: restart once, then stay quiet
+        asyncio.run(ticks(3))
+        assert logged == ["listening had stopped — restarted"], logged
+    finally:
+        voice.LISTEN = was
+        bot.voice_channel.pop(1, None)
+    print("watchdog: silent with ears off, one line per real restart with them on")
 
 
 main()

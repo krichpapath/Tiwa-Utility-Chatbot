@@ -64,7 +64,8 @@ failure is logged and skipped instead of fatal. `tests/routerbench.py` asserts t
 is installed.
 
 Belt and braces: `keep_listening` in `bot.py` restarts listening every 30 s if it dies
-anyway.
+anyway — but only when `TIWA_LISTEN` is on, since a watchdog over a disabled feature just
+reports it as permanently broken ([voice in](../surfaces/voice-in.md#gotchas)).
 
 ## Gotchas
 

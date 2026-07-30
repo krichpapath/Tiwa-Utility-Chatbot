@@ -371,7 +371,12 @@ class Ears(voice_recv.AudioSink):
                 traceback.print_exc()
 
     def cleanup(self):
-        self.task.cancel()
+        # voice_recv's AudioSink.__del__ calls this, so it runs even when __init__
+        # died before its last line and there is no task to cancel. An exception
+        # in a destructor is only ever "Exception ignored" noise on stderr.
+        task = getattr(self, "task", None)
+        if task is not None:
+            task.cancel()
 
 
 # Listening is OFF by default. Thai transcription on CPU is not good enough to

@@ -89,6 +89,15 @@ call.** Remove it when `voice_recv` ships its own support.
 - **A dead listener used to stay dead.** Two watchdogs now: `enable_resilient_router()`
   patches the router so one bad packet can't stop everything, and `keep_listening` in
   `bot.py` restarts it every 30 s.
+- **That watchdog ran with her ears off and never noticed.** `voice.listen()` returns
+  early when `TIWA_LISTEN=0`, so `vc.is_listening()` stays `False` forever — which the
+  watchdog read as "it died", logged, restarted nothing, and repeated. A real session
+  logged **36 restarts out of 36 ticks with 0 utterances**: 36 of 60 rows in the log
+  table, and none of them true. It now returns immediately when `voice.LISTEN` is off,
+  and only logs a restart that actually started. Asserted in `tests/routerbench.py`.
+
+    The general shape is worth remembering: **a watchdog for a disabled feature reports
+    that feature as permanently broken.** Check the feature flag before the health check.
 - **`traceback` was once unimported** in the error handler, so the handler raised
   `NameError` and killed the task it was protecting — the classic "listener hiccup, still
   listening" then silence. It's one of the [exercises](../work/your-turn.md).

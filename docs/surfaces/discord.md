@@ -65,7 +65,9 @@ future-tense veto in code.
 
 **Two background loops:**
 
-- `keep_listening` (30 s) — restarts voice listening if it ever dies. It has died.
+- `keep_listening` (30 s) — restarts voice listening if it ever dies. It has died. Returns
+  immediately when `TIWA_LISTEN=0`, or it would report a switched-off feature as broken
+  twice a minute forever — see [voice in](voice-in.md#gotchas).
 - `idle_turn` (30 min) — lets her speak unprompted at most once every 3 hours, only
   between 09:00 and 23:00, and only if `TIWA_HOME_CHANNEL` is set. Usually returns
   nothing.

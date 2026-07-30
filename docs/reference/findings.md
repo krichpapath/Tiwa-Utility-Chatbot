@@ -4,7 +4,8 @@ Problems found while writing this guide. They were **found, not fixed** — docu
 project was the job, and changing code during an audit hides what the audit found. Fixes
 land afterwards and get marked here when they do.
 
-Ordered by what would bite a new developer first.
+Ordered by what would bite a new developer first. F8 arrived later, from a live session
+rather than the audit — kept here because the list is where findings live.
 
 ---
 
@@ -118,6 +119,34 @@ force-directed picture of who is connected to whom. So the README now marks it
 Still a fair candidate for deletion if it stays unused — but a documented 37-line script
 costs nothing, and deleting a tool the author had forgotten is not a call worth making for
 them.
+
+---
+
+## F8 · The listener watchdog logged 36 false restarts in 18 minutes — **FIXED 2026-07-30** {#f8}
+
+Found by reading the live log for an unrelated bug, which is the only way it could have
+been found: every bench was green.
+
+**Was:** `keep_listening` (30 s) checks `vc.is_listening()` and restarts on `False`. With
+`TIWA_LISTEN=0` — the default, because [voice in](../surfaces/voice-in.md) is parked —
+`voice.listen()` returns before ever calling `vc.listen()`, so `is_listening()` is `False`
+forever. The watchdog read that as "it died", wrote `listening had stopped — restarting`,
+restarted nothing, and did it again 30 seconds later.
+
+One 18-minute session: **36 restart rows out of 36 ticks, 0 utterances, 36 of 60 rows in
+the whole log table.** The `voice` kind became pure noise, and the log is the first place
+you look when something else goes wrong.
+
+**Now:** returns immediately when `voice.LISTEN` is off, and logs only a restart that
+reported `"listening"`. `tests/routerbench.py` ticks it three times with ears off (expects
+silence) and three times with ears on (expects exactly one line).
+
+**The reusable lesson:** a watchdog over a disabled feature reports that feature as
+permanently broken. Check the feature flag before the health check.
+
+Found alongside it: `Ears.cleanup()` did a bare `self.task.cancel()`, but `task` is
+assigned on the last line of `__init__` and `AudioSink.__del__` calls `cleanup()` — so a
+construction that died early raised `AttributeError` from a destructor. Now a `getattr`.
 
 ---
 

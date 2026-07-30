@@ -188,14 +188,25 @@ async def _flush_calendar_queue(channel):
 
 @tasks.loop(seconds=30)
 async def keep_listening():
-    """voice_recv stops listening for good after ONE decode error. Restart it."""
+    """voice_recv stops listening for good after ONE decode error. Restart it.
+
+    Only meaningful when her ears are on. With TIWA_LISTEN=0 (the default)
+    voice.listen() returns without calling vc.listen(), so is_listening() is
+    False forever — this loop read that as "stopped", logged a restart, restarted
+    nothing, and did it again 30 seconds later. Measured on a real session: 36
+    restart rows out of 36 ticks, and 0 utterances, which is 36 of 60 log rows.
+    """
+    if not voice.LISTEN:
+        return
     for gid, ch in list(voice_channel.items()):
         vc = ch.guild.voice_client
         if vc is None:
             voice_channel.pop(gid, None)
         elif not vc.is_listening():
-            memory.log(db, "voice", "listening had stopped — restarting")
-            voice.listen(ch.guild, _heard, client.loop)
+            # log the restart, not the attempt: a line saying "restarting" when
+            # nothing restarted is what buried the log in the first place
+            if voice.listen(ch.guild, _heard, client.loop) == "listening":
+                memory.log(db, "voice", "listening had stopped — restarted")
 
 
 last_unprompted = datetime.min  # ponytail: >=3h between unprompted messages, no spam
