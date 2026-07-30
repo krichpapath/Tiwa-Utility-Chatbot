@@ -298,3 +298,50 @@ unsigned native binaries — Node's toolchain is native binaries, MkDocs is pure
 
 **Consequences.** No Vue/React components inside pages. This guide needs diagrams and
 prose, so that costs nothing.
+
+---
+
+## ADR-017 · Fix the query before replacing the search engine {#adr-017}
+
+**Date.** 2026-07-30.
+
+**Context.** Search results were poor: she called `web_search` rarely, passed the user's
+whole sentence as the query, and got the same three pages back on a repeat. Two candidate
+causes — a weak index, or weak queries.
+
+**Options.**
+
+1. Keep `ddgs`, fix the query and the call parameters.
+2. Swap to a search API built for agents (Brave, Tavily) or self-host SearXNG.
+3. Fan out: generate 2–3 query variants per search and merge.
+
+**Decision.** Option 1, and only option 1 for now.
+
+**Why.** The literature puts the win where the cheap fix is.
+[Ma et al. (EMNLP 2023)](https://arxiv.org/abs/2305.14283) frame it as
+*rewrite-retrieve-read* — "there is inevitably a gap between the input text and the needed
+knowledge in retrieval." The
+[query expansion survey (2025)](https://arxiv.org/pdf/2509.07794) puts raw → LLM-rewritten
+at **+14.35 NDCG@10 / +23.43 Recall@10**, and then *"rapidly diminishing returns"*. The
+first rewrite is nearly the whole benefit.
+
+Option 3 is what those diminishing returns rule out: 1→2 queries is about **+6.7%** average
+exact match and saturates by three, which does not justify tripling every search when she
+already gets three tool rounds to try different angles herself.
+
+Option 2 was measured by others, not by us —
+[a 2026 benchmark of 8 search APIs](https://aimultiple.com/agentic-search) has Brave
+highest (agent score 14.89, ~1 point clear of Tavily) and fastest (669 ms), with Tavily
+"the cleanest default" for LLM-consumed retrieval and SearXNG free but only as stable as
+your hosting. **Reviewed and deferred**, for two reasons: none of them fixes a sentence
+passed in as a query, so the rewriting was needed either way; and Brave retired its
+perpetual free tier in February 2026, so this is the first paid dependency in a project
+that has none.
+
+**Consequences.** The rewriter is the tool description, not a model — no training loop, no
+second model in 8 GB of VRAM, no extra call per search. `web_search` stays one function, so
+option 2 remains a cheap swap the day the index is the thing that's wrong.
+
+**Caveat on the numbers.** They are reported by the cited sources on their own benchmarks,
+not reproduced here. What *was* measured locally: region choice on one Thai query, and the
+queries she picks across five asks (`tests/searchbench.py --live`).

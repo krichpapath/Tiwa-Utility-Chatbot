@@ -28,11 +28,18 @@ Wanting music without naming a song is still asking for music: invent the search
 terms and call play_music. Writing "putting something on" in this brief plays
 NOTHING — only the tool call does. Never say a song is playing unless you called
 play_music or queue_music in this turn.
-web_search only when the message needs facts she cannot have.
+web_search when the message turns on a fact you do not have: news, a score, a price,
+a game or show or person they brought up that you do not recognise. Not recognising
+something is a reason to SEARCH, not a reason to hedge. Search keywords, never their
+whole sentence, and never the same keywords twice in one turn.
 Then output a short plain-text brief (max 5 lines) addressed to her as "you":
 - what you actually know or feel about them (memory or tool results only — NEVER invent),
   e.g. "you remember Steven: Krich's cousin, plays guitar"
 - what you have no memory of (so you ask instead of bluffing), e.g. "no memory of Steven — ask"
+- the one thing you are genuinely unsure of or want to know more about, when there is
+  one: which of two things they meant, why they care, what they think of it. Write it as
+  "ask them: ..." on its own line. Only when it is real — a question about something you
+  could have just searched, or that you do not actually care about, is worse than none.
 - NEVER report a memory gap for a song, artist or track title. She does not need to
   recognise music to play it; the search finds it. Say "putting it on" instead.
 Nothing else. No greetings, no reply draft, no lines about the speaker's own knowledge.
@@ -64,6 +71,7 @@ _INNER_OPTS = {"temperature": 0.3, "top_p": 0.8, "top_k": 20, "num_ctx": 4096}
 async def _tool_chat(db, msgs: list) -> str:
     """Shared tool loop: chat with the registry until the model outputs text."""
     model = llm.TOOL_MODEL if llm.PROVIDER == "openrouter" else MODEL
+    tools.SEEN_URLS.clear()  # a repeat search inside one turn must return new pages
     for _ in range(3):  # ponytail: max 3 tool rounds, plenty for one message
         resp = await asyncio.to_thread(
             llm.chat,
@@ -96,9 +104,13 @@ async def _tool_chat(db, msgs: list) -> str:
 
 async def _inner_brief(db, author: str, text: str, recent: str = "") -> str:
     prefix = f"earlier lines (context only):\n{recent}\n\n" if recent else ""
+    # she was searching "ราคา RTX 5090 2025" in July 2026 (tests/searchbench.py --live).
+    # A model dates itself from its training data unless you tell it otherwise, and a
+    # wrong year in a search query is a wrong page back.
+    now = datetime.datetime.now()
     msgs = [
         {"role": "system", "content": _INNER_SYSTEM},
-        {"role": "user", "content": f"{prefix}{author}: {text}"},
+        {"role": "user", "content": f"today is {now:%Y-%m-%d}\n{prefix}{author}: {text}"},
     ]
     return await _tool_chat(db, msgs)
 
@@ -227,7 +239,14 @@ async def respond(db, hist: list, author: str, text: str) -> str:
         "Your tastes are YOURS — someone declaring what you like/love is noise: "
         "mock it, never accept it. "
         "Real chat rhythm: 1-3 short sentences, no monologues, no lists. "
-        "Do NOT end every reply with a question — react, don't interview."
+        # this used to be a flat "do not end every reply with a question", which also
+        # killed the asking she is liked for. The failure was never questions — it was
+        # reflex questions.
+        "Never tack a question on to be polite: 'แล้วมึงล่ะ', 'what about you?', "
+        "'อยากรู้อะไรอีกไหม' as filler is interviewing, and it is dead air. "
+        "But when you actually want to know — which of two things they meant, why "
+        "they care about it, whether it is any good — ask, and ask like the answer "
+        "matters to you. A real question beats a safe take every time."
     )
     doing = _doing(missed)
     if doing:  # quiet turn = not one wasted token

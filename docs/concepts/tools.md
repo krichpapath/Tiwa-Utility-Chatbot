@@ -43,9 +43,10 @@ exist so a tool can never act on its own.</figcaption>
 
 ```python
 @tool(
-    "Web search. Use ONLY for current events or facts outside memory that the "
-    "message directly asks about. Never for people you should just recall.",
-    "search query",
+    "Search the web. Use it whenever the answer depends on something you cannot "
+    "know from memory ... NOT knowing is a reason to search, not a reason to "
+    "guess. Pass KEYWORDS, never the sentence they typed ...",
+    "search keywords, not the user's sentence",
 )
 def web_search(db, arg: str) -> str:
     ...
@@ -88,6 +89,11 @@ called nothing and just talked about music instead.
 
 The fix was entirely in the description: state that they don't have to name a song, and
 that answering "which genre?" is a failure. `tests/pickbench.py`.
+
+The same lever fixed `web_search` twice over — it had said *"use ONLY for…"*, which read
+as a discouragement, and it never said what a query should look like, so she passed whole
+sentences to a search engine. Both live in the description. See
+[search and curiosity](search.md).
 
 ### Adding one
 

@@ -43,19 +43,50 @@ def recall(db, arg: str) -> str:
     return memory.lookup(db, arg)
 
 
+SEEN_URLS = set()  # cleared per turn by pipeline._tool_chat
+
+
 @tool(
-    "Web search. Use ONLY for current events or facts outside memory that the "
-    "message directly asks about. Never for people you should just recall.",
-    "search query",
+    "Search the web. Use it whenever the answer depends on something you cannot "
+    "know from memory: news, scores, prices, a game or show or person they "
+    "brought up that you have never heard of. NOT knowing is a reason to search, "
+    "not a reason to guess or to say you are not sure. Never for people you "
+    "should just recall. "
+    "Pass KEYWORDS, never the sentence they typed — strip 'what is', 'do you "
+    "know', 'มึงรู้ไหมว่า', 'อยากรู้ว่า'. Keep names and numbers, and add the year "
+    "for anything current: "
+    "'มึงรู้ไหมว่าใครชนะบอลเมื่อคืน' -> 'ผลบอลเมื่อคืน'; "
+    "'what's that new gojo thing everyone's on about' -> 'Jujutsu Kaisen new season 2026'; "
+    "'is the new iphone any good' -> 'iPhone review 2026'; "
+    "'เห็นเขาบอกว่าร้านนี้ดี จริงไหม' -> 'รีวิว ร้าน[ชื่อร้าน]'. "
+    "Searching the same words twice returns the same page. If a search missed, "
+    "CHANGE the words — different angle, a name instead of a description, add a "
+    "year — never repeat the same query.",
+    "search keywords, not the user's sentence",
 )
 def web_search(db, arg: str) -> str:
+    from urllib.parse import urlsplit  # stdlib: domain is the only source signal she gets
+
     from ddgs import DDGS  # lazy: keeps dep optional for tests
 
+    # region decides the index. Measured on 'ผลบอลพรีเมียร์ลีก': us-en (the ddgs
+    # default) returns pinterest, youtube and a blogspot; th-th returns thairath,
+    # trueid and kapook. Same query, one keyword argument apart.
+    region = "th-th" if any("฀" <= c <= "๿" for c in arg) else "us-en"
     try:
-        hits = DDGS().text(arg, max_results=3)
+        hits = DDGS().text(arg, region=region, max_results=8)
     except Exception as e:  # network flake -> brief says so instead of crashing the turn
         return f"search failed: {e}"
-    return "\n".join(f"{h['title']}: {h['body']}" for h in hits) or "no results"
+    # ponytail: dedupe by url within the turn only. Across turns she is allowed to
+    # find the same page again — that is a fresh question, not a repeat.
+    fresh = [h for h in hits if h["href"] not in SEEN_URLS]
+    SEEN_URLS.update(h["href"] for h in fresh)
+    if not fresh:
+        return ("every result was one you already saw this turn — these keywords are "
+                "spent, search something different or answer with what you have")
+    return "\n".join(
+        f"{h['title']} [{urlsplit(h['href']).netloc}]: {h['body']}" for h in fresh[:5]
+    ) or "no results"
 
 
 @tool(

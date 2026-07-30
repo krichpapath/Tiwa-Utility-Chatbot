@@ -29,6 +29,7 @@ Recommended canon. Run these and you know the system is sound:
 | `panelbench.py` | check | Control panel: 27 assertions incl. "never writes secrets" | yes |
 | `toolbench.py` | measure | Right tool, right argument, latency per provider | no |
 | `pickbench.py` | measure | Music asks with **no song named** — the newest regression | no |
+| `searchbench.py` | both | Search mechanics offline; `--live` shows the keywords she picks | partly |
 | `smoke.py` | measure | Does she still sound like herself | no |
 
 ```bash
@@ -43,7 +44,14 @@ py -X utf8 tests\djbench.py
 py -X utf8 tests\panelbench.py
 ```
 
-Those three need no API key and no Ollama. Run them before every commit.
+```bash
+py -X utf8 tests\searchbench.py
+```
+
+The first three need no API key and no Ollama. Run them before every commit.
+`searchbench.py` joins them without `--live` — its offline half fakes `ddgs` and checks
+dedupe, region and formatting. With `--live` it becomes a measure: it prints the query
+she actually chose for five asks, which is the part only you can judge.
 
 ## The rest
 

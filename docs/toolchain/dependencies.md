@@ -18,7 +18,7 @@ all declared in `requirements.txt`.
 | **PyNaCl** | Voice transport encryption | Required by discord.py for voice | transitive | n/a |
 | **ollama** | Local model client | Official client for the local server | `tiwa/llm.py`, `tiwa/gcal.py` | Low — one function |
 | **httpx** | HTTP for OpenRouter | Modern, timeouts that work, already a discord.py dep | `tiwa/llm.py` | Low — `requests` or `urllib` |
-| **ddgs** | DuckDuckGo search | No key, no quota, one call | `tiwa/tools.py` (`web_search`) | Low — any search API, but most want a key |
+| **ddgs** | DuckDuckGo search | No key, no quota, one call. `region`/`max_results` are all the tuning [search](../concepts/search.md) needs | `tiwa/tools.py` (`web_search`) | Low — one function, but every alternative wants a key |
 | **google-api-python-client** | Calendar REST | Official | `tiwa/gcal.py` | Medium — raw REST is doable |
 | **google-auth-oauthlib** | OAuth consent + token refresh | Official; handles the desktop flow | `gcal_auth.py`, `tiwa/gcal.py` | Medium — don't hand-roll OAuth |
 | **onnx-asr** | Whisper on onnxruntime | Runs under Smart App Control; no PyTorch | `tiwa/voice.py` | Medium |

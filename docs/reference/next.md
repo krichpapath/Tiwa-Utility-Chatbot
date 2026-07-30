@@ -32,6 +32,22 @@ terms **as plain text** instead of retrying the tool call — a model that just 
 call a tool declines again often enough, but it always answers a question. One extra call,
 only on turns that missed. Trigger cases are asserted in `tests/djbench.py`.
 
+**Swap the search index — if the results still annoy you.** Query quality is fixed
+([search](../concepts/search.md)); the index isn't. A live run for *"is the new iphone any
+good"* returned `vk.com` and `ispace.ge`. Benchmarked options as of 2026:
+
+| | Agent score | Latency | Cost |
+|---|---|---|---|
+| **Brave Search API** | highest measured (14.89), ~1 point clear of Tavily | lowest, 669 ms | $5/mo credit; the perpetual free tier ended Feb 2026 |
+| **Tavily** | just behind Brave, built for LLM retrieval | "Advanced" tier 5 s+ | 1,000 searches/mo free |
+| **SearXNG** | depends entirely on your hosting | yours to own | free, self-hosted, Docker |
+| **ddgs** (current) | not in the benchmark | fine | free, no key |
+
+Source and review in [ADR-017](decisions.md#adr-017). Short version: **don't do this yet.**
+`web_search` is one function, so the swap is cheap whenever you want it, and none of these
+fixes a bad query — the rewriting had to come first either way. Do it when you catch her
+answering from a junk domain, not before.
+
 **Screenshot the control panel.** Five images would make
 [that page](../surfaces/panel.md) twice as useful. See
 [known gaps](docs-maintenance.md#known-gaps-in-this-guide).

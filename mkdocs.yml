@@ -96,6 +96,7 @@ nav:
       - Memory — the knowledge graph: concepts/memory.md
       - The guards: concepts/guards.md
       - The tool registry: concepts/tools.md
+      - Search and curiosity: concepts/search.md
       - Her persona: concepts/persona.md
       - Action state: concepts/action-state.md
   - Surfaces:
