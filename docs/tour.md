@@ -143,7 +143,7 @@ page in this guide and the one that matters most.
 
 ## What she can do
 
-Nine tools. One function each, one string argument each.
+Ten tools. One function each, one string argument each.
 
 `recall` · `web_search` · `calendar_read` · `calendar_write` · `join_voice` ·
 `leave_voice` · `play_music` · `stop_music` · `queue_music` · `skip_music`

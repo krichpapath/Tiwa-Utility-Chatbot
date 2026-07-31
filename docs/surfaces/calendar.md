@@ -3,7 +3,7 @@
 ## What this is
 
 She reads your Google Calendar freely and can *request* changes. Every write waits for
-your ✅ in Discord. `tiwa/gcal.py`, 138 lines.
+your ✅ in Discord. `tiwa/gcal.py`, ~160 lines.
 
 ## Why it's here
 

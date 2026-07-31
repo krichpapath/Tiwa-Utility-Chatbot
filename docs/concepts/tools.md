@@ -2,8 +2,8 @@
 
 ## What this is
 
-Nine abilities, each a plain function taking `(db, arg: str) -> str`, registered by a
-decorator. `tiwa/tools.py` is about 200 lines and there is no framework underneath it.
+Ten abilities, each a plain function taking `(db, arg: str) -> str`, registered by a
+decorator. `tiwa/tools.py` is about 250 lines and there is no framework underneath it.
 
 ## Why it's here
 

@@ -9,7 +9,7 @@
 ## What this is
 
 Post a picture at her and she reacts to it. `tiwa/eyes.py` — one function, one
-model call, ~110 lines.
+model call, ~135 lines.
 
 ```bash
 py -X utf8 -m tiwa.eyes
@@ -46,7 +46,7 @@ flowchart LR
     B -- yes --> C[eyes.look<br/>vision model + what they said]
     C -- text --> D[inner pass<br/>can search what she saw]
     C -- text --> E[her rules<br/>verbatim]
-    C -- "" --> F[blind rule<br/>'say you cannot see it']
+    C -- "empty (failed)" --> F[blind rule<br/>say you cannot see it]
     D --> G[her reply]
     E --> G
     F --> G

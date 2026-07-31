@@ -2,7 +2,7 @@
 
 ## What this is
 
-`bot.py` — 306 lines connecting Discord to `pipeline.respond()`. It holds no reasoning.
+`bot.py` — ~330 lines connecting Discord to `pipeline.respond()`. It holds no reasoning.
 Its real job is **ordering**: what happens before what, so a slow action never blocks a
 fast reply.
 

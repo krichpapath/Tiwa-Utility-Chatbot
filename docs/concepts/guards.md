@@ -98,6 +98,31 @@ no-op instead of an action.
 `llm.chat()` checks `spend()` against `TIWA_DAILY_TOKENS` before every API call and
 falls back to local with a printed warning. See [modes](modes.md).
 
+### The smaller write guards {#the-smaller-write-guards}
+
+Not part of the big four, but the same rule — each landed only after the prompt was
+tried and lost:
+
+| guard | rejects | why the prompt wasn't enough |
+|---|---|---|
+| blank slots | `"" \| plays \| guitar` | the model emits empty fields; they'd create `""` entities |
+| self-relation | `Nara \| owes \| Nara` | forbidden in the prompt with an example, emitted anyway |
+| `_role_swap()` | `Krich \| girlfriend of \| Mint` | the rule *and* the wrong example were both in the prompt; still reversed |
+
+`_role_swap()` is deliberately narrow: it fires only when the relation ends in `" of"`,
+the subject is the speaker, and the text literally introduces the object as the speaker's
+something. Symmetric roles like *cousin* read equally true either way, so a swap there
+costs nothing.
+
+!!! warning "One guard depends on a prompt line"
+
+    `_grounded()` compares names against the literal text — so if the extractor **re-spells
+    a name, the guard throws the fact away**. It romanized `ไอภพ` to `Iop` and a true fact
+    vanished silently for eleven turns. The counterweight is one line in
+    `_EXTRACT_SYSTEM` telling it to copy names character for character. Weaken that line
+    and you lose facts in every non-Latin script. See
+    [ADR-021](../reference/decisions.md#adr-021).
+
 ## Gotchas
 
 - **`_grounded()` is deliberately loose** — substring, then any word ≥3 chars. It's a

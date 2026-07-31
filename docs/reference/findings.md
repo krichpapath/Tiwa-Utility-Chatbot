@@ -108,7 +108,7 @@ retry that isn't coming.
 
 ## F6 · `graph_view.py` was undocumented — **CLOSED 2026-07-30** {#f6}
 
-37 lines that dump the memory graph to `data/graph.html` using `vis-network` **from a CDN**,
+42 lines that dump the memory graph to `data/graph.html` using `vis-network` **from a CDN**,
 so the page renders blank offline. The author did not recognise the file when asked, which
 is what made it a finding — not the code, the fact that nobody knew what it was for.
 
@@ -152,7 +152,7 @@ construction that died early raised `AttributeError` from a destructor. Now a `g
 
 ## F7 · `dashboard.py` is the largest file in the project {#f7}
 
-**Severity: observation. Nothing to fix — deliberately left alone.** 672 lines, bigger than
+**Severity: observation. Nothing to fix — deliberately left alone.** ~720 lines, bigger than
 `voice.py` (570) and more than double `pipeline.py` (234).
 
 It's a single-file HTML-in-Python server with no template engine. That's the right trade

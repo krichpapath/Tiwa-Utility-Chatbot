@@ -63,7 +63,7 @@ registry in `tiwa/tools.py` **is** the framework — about 30 lines. Adding a de
 here needs a reason, and [the decision log](reference/decisions.md) records the ones that
 earned their place and the ones that were rejected.
 
-The whole thing is **4,369 lines of Python** across 29 files with no build step.
+The whole thing is **about 5,600 lines of Python** across 34 files with no build step.
 You can read all of it in an afternoon. This guide exists so you don't have to.
 
 !!! warning "The repo is ahead of its last commit"

@@ -3,7 +3,7 @@
 ## What this is
 
 She searches YouTube, streams the audio into a Discord voice channel, and keeps talking
-while it plays. `tiwa/music.py` (214 lines) does the audio; `bot.py` runs the deck.
+while it plays. `tiwa/music.py` (~320 lines) does the audio; `bot.py` runs the deck.
 
 **She streams. Nothing is ever downloaded to disk.**
 

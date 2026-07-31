@@ -2,11 +2,21 @@
 
 ## What this is
 
-Every time Tiwa answers, up to three separate model calls happen. One decides what to
+Every time Tiwa answers, three separate model calls happen. One decides what to
 do, one writes her reply, one decides what to remember. They use different prompts,
 different temperatures, and can run on different providers.
 
-All three live in `tiwa/pipeline.py` — about 234 lines.
+All three live in `tiwa/pipeline.py` — about 360 lines.
+
+Two more calls exist but only fire on the turns that need them, and neither is a
+"pass" — they are single questions with one job each:
+
+| extra call | when | where |
+|---|---|---|
+| **seeing** | the message has an image attached | [`eyes.look()`](../surfaces/eyes.md) |
+| **search terms** | someone asked for music and pass 1 called no tool | `_force_music()` |
+
+So a plain text turn is 3 calls, a turn with a picture is 4.
 
 ## Why it's here
 
@@ -31,7 +41,10 @@ sequenceDiagram
     participant tools as tools.TOOLS
     participant persona as Pass 2 — persona
     participant ex as Pass 3 — extraction
-    caller->>inner: author, text, last 8 lines
+    opt image attached
+        caller->>caller: eyes.look() — one vision call, returns text
+    end
+    caller->>inner: author, text, last 8 lines, what she can see
     loop up to 3 rounds
         inner->>tools: tool call
         tools-->>inner: result string
@@ -63,8 +76,8 @@ Temperature `0.3`. Lower was tried — `0.1` measured *worse* and bimodal. Comme
 **Pass 2 — persona** (`respond`). Gets three system messages: the full
 `prompts/tiwa.md`, then a per-turn `[inner-state]` block, then chat history. The
 inner-state block is where code injects things the model reliably forgets — language,
-who she's talking to, and [what she's currently doing](action-state.md). Temperature
-`0.7`.
+who she's talking to, [what she already knows about them](memory.md),
+[what she's currently doing](action-state.md), and what she can see. Temperature `0.7`.
 
 **Pass 3 — extraction** (`memory.extract`). Schema-constrained JSON, temperature `0`.
 Runs via `asyncio.create_task(asyncio.to_thread(...))` in `bot.py`, so a slow write

@@ -46,11 +46,11 @@ her by hand is expected for now, so [setup](setup.md) covers both.
 
 **Which benches are canonical?**
 : Author deferred to a recommendation. Chosen six, with the reasoning, in
-[the bench suite](work/testing.md#start-with-these-six). The three offline ones
+[the bench suite](work/testing.md#start-here). The three offline ones
 (`test_memory`, `djbench`, `panelbench`) are the pre-commit set.
 
 **What is `graph_view.py`?**
-: **Author didn't recognise it.** 37 lines, dumps the memory graph to `data/graph.html`
+: **Author didn't recognise it.** 42 lines, dumps the memory graph to `data/graph.html`
 using a CDN-hosted library, so it needs internet. Mostly superseded by the panel's memory
 tab, but it draws a force-directed picture the panel doesn't. Kept and documented rather
 than deleted — [F6](reference/findings.md#f6).

@@ -121,7 +121,10 @@ turns and no others.
 
 Once the deck is in her context every turn, a tool that reports the deck is a wasted
 round-trip. Removing it also removed one competitor for the model's attention — and
-missing `play_music` was an active bug at the time. Nine tools instead of ten.
+missing `play_music` was an active bug at the time.
+
+`turn_context()` later did the same thing for memory: what she should already know is
+injected, not asked for. Same trade, same reason.
 
 ### Adding a future feature
 

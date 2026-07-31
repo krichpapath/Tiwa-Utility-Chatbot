@@ -2,7 +2,7 @@
 
 ## What this is
 
-Nineteen scripts in `tests/`. Not unit tests — each one runs real code and **prints a
+Twenty scripts in `tests/`. Not unit tests — each one runs real code and **prints a
 markdown table you read and judge**. No pytest, no fixtures, no CI.
 
 ## Why it's here
@@ -18,7 +18,7 @@ So benches come in two kinds, and telling them apart matters:
 | **Checks** | yes — pass or fail | Any failure is a real bug |
 | **Measures** | no — calls a model | A score. Compare against the score before your change |
 
-## Start with these six
+## Start with these eight {#start-here}
 
 Recommended canon. Run these and you know the system is sound:
 
@@ -26,7 +26,7 @@ Recommended canon. Run these and you know the system is sound:
 |---|---|---|---|
 | `test_memory.py` | check | **The guards.** Coercion + confabulation regressions by name | yes |
 | `djbench.py` | check | The whole DJ engine — queue, skip, auto-advance, stop, action state | yes |
-| `panelbench.py` | check | Control panel: 27 assertions incl. "never writes secrets" | yes |
+| `panelbench.py` | check | Control panel: 34 assertions incl. "never writes secrets" | yes |
 | `toolbench.py` | measure | Right tool, right argument, latency per provider | no |
 | `pickbench.py` | measure | Music asks with **no song named** — the newest regression | no |
 | `searchbench.py` | both | Search mechanics offline; `--live` shows the keywords she picks | partly |
