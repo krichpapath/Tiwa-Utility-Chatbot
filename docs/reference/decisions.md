@@ -529,3 +529,61 @@ asked a follow-up.
 
 **Caveat.** The 11-turn sample is small and was all one activity. "The tool pass is fine"
 means fine on 8 probes and on 11 music turns, not fine in general.
+
+## ADR-021 · Anchor the extractor, then give the bench its teeth back {#adr-021}
+
+**Status.** Accepted · July 2026
+
+**Context.** The graph stayed almost empty through 11 real turns. `ไอภพ` was named in four
+of them and never stored. Separately, every bench sat at ceiling — 8/8, 12/12, 5/5 — so
+nothing could show a fix working.
+
+**Decision.** Fix extraction at the input, move two guards from prompt to code, and add
+probes that fail.
+
+**Why.** Tracing one real turn found the whole bug in one line: the model **romanized**
+`ไอภพ` to `Iop`, `_grounded()` could not find `Iop` in the Thai text, and a true fact was
+dropped. The guard was right; its input was wrong.
+
+That is the failure mode
+[AEVS](https://www.mdpi.com/2073-431X/15/3/178) describes — hallucination comes from an
+unconstrained generation space, and the fix is to tie every element to a span of the source
+*before* extraction rather than filtering after. The cheap version of that is one rule:
+copy every name character-for-character in its own script, never romanize. `ไอภพ | plays |
+Blade` stored on the next run.
+
+Two more guards moved to code after prompting demonstrably failed:
+
+- **Role direction.** `Krich | girlfriend of | Mint` says Krich is the girlfriend. The rule
+  *and the exact wrong example* were already in `_EXTRACT_SYSTEM` and the model reversed it
+  anyway. `_role_swap()` fires only when the relation ends in " of", the subject is the
+  speaker, and the text literally introduces the object as the speaker's something.
+- **Self-relations.** `Nara | owes | Nara`, invented from her own reply. Forbidden in the
+  prompt, emitted anyway, rejected in code now.
+
+**The benches had no discriminative power.** When a benchmark is easier than the system,
+pass rates saturate near 1 and models of very different capability produce indistinguishable
+numbers ([arXiv 2602.16763](https://arxiv.org/html/2602.16763v1)); the answer is harder
+items, the MMLU → MMLU-Pro move. `extractbench` gained three probes that all failed when
+written — the Thai name, a forbidden reversal, and her enthusiasm treated as fact — plus
+checks for forbidden directions and self-relations. It went 5/5 → **6/8** on the first run
+and back to 8/8 only after the fixes landed.
+
+**Consequences.** Two of the checks exist because a human read the output, not because a
+bench failed: `guitar},{` and `Nara owes Nara` both scored **ok**. A green bench is evidence,
+not proof.
+
+**Measured and rejected.**
+
+- *A bigger vision model for Thai.* `qwen3-vl-32b-instruct` is cheaper per token than the
+  8B ($0.104/M vs $0.117/M), so it looked free. Across two runs on the same sign it was
+  better once and worse once, while costing **4.2× the latency** (7,385 ms vs 1,744 ms) on
+  a call that blocks her reply. Run-to-run variance on one image is not evidence. Keeping
+  the 8B; [Typhoon OCR](https://github.com/scb-10x/typhoon-ocr) stays the real upgrade.
+- *Folding `Gojo` into `Gojo Satoru`.* Tempting at 0.62, but the same containment rule
+  merges `Blade` with `Blade Runner`, and a wrong merge is unrecoverable. `lookup()` already
+  matches substrings both ways, so the pair already **reads** as one. Two nodes, one answer.
+- *difflib for relation names.* Disqualified by measurement: `likes`/`dislikes` scores
+  **0.769** while `plays`/`playing` scores **0.667**, so every cutoff that folds the pair we
+  want also merges a relation with its opposite. A 4-character stem of the first word
+  separates them cleanly.

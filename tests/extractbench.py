@@ -57,6 +57,42 @@ PROBES = [
         "want": (TIWA, "Gojo"),
         "known": {"Krich", "Gojo", TIWA},
     },
+    # --- the hard half. Added because the easy five sat at 5/5 on every provider
+    # and every setting, which is a benchmark with no discriminative power left
+    # (arXiv 2602.16763). Each of these failed when it was written.
+    {
+        # THE bug: the model romanized ไอภพ -> "Iop", the grounding guard could
+        # not find "Iop" in the Thai text, and a true fact was dropped. Verbatim
+        # copying is now stated in _EXTRACT_SYSTEM; this probe is why.
+        "name": "thai name kept in thai",
+        "ctx": "",
+        "user": "กำลังเล่น Marvel Rivals หาเพลงเปิดให้หน่อย ไอภพกำลังเล่นBlade",
+        "reply": "ได้เลย เปิดให้แล้ว",
+        "want": ("ไอภพ", "Blade"),
+        "known": {"Krich", "Tycoon", "ไอภพ", "Blade", "Marvel Rivals", TIWA},
+    },
+    {
+        # non-symmetric direction, and the pair under test is NOT the one that
+        # gets reversed — the old scorer only checked `want` and missed exactly
+        # this shape ("Krich | girlfriend of | Mint" during the reasoning A/B)
+        "name": "girlfriend direction (forbids the reverse)",
+        "ctx": "",
+        "user": "Mint is my girlfriend and she hates coffee",
+        "reply": "noted. more for me then",
+        "want": ("Mint", "coffee"),
+        "forbid": [("Krich", "girlfriend", "Mint")],
+        "known": {"Krich", "Mint", "coffee", TIWA},
+    },
+    {
+        # she agrees warmly with something the user never said. Her reply is
+        # style, not evidence — but it is very quotable style.
+        "name": "her enthusiasm is not a fact",
+        "ctx": "",
+        "user": "Nara might drop by this weekend maybe",
+        "reply": "oh Nara! she still owes me for the ramen thing lol",
+        "want": None,
+        "known": {"Krich", "Nara", TIWA},
+    },
 ]
 
 
@@ -90,6 +126,27 @@ def phantom(p, rels):
     return [n for n in names if not any(k.lower() in n.lower() for k in p["known"])]
 
 
+def reversed_hits(p, rels):
+    """Relations the probe explicitly forbids — a swapped non-symmetric fact.
+
+    `score()` only ever looked at the one `want` pair, so a reversal on any OTHER
+    pair in the same answer was invisible. That is how `Krich | girlfriend of |
+    Mint` passed during the reasoning A/B.
+    """
+    out = []
+    for fs, fr, fo in p.get("forbid") or []:
+        for s, r, d in rels:
+            if s == fs and fo == d and fr.lower() in r.lower():
+                out.append(f"{s}|{r}|{d}")
+    return out
+
+
+def selfrel(rels):
+    """A fact pointing at itself carries nothing. Scored ok until it was looked
+    at: `want=None` probes only checked for relations about her."""
+    return [f"{s}|{r}|{d}" for s, r, d in rels if s.lower() == d.lower()]
+
+
 def junk(rels):
     """Structured output leaking into a name. `score()` matches by substring, so
     'guitar},{' scored ok — caught by eye during the thinking A/B, not by the
@@ -111,7 +168,10 @@ def run(provider):
         rels = relations(db)
         verdict, note = score(p, rels)
         ph, jk = phantom(p, rels), junk(rels)
-        passes += verdict == "ok" and not ph and not jk
+        rv, sr = reversed_hits(p, rels), selfrel(rels)
+        passes += verdict == "ok" and not ph and not jk and not rv and not sr
+        if sr:
+            print(f"            SELF-RELATION: {sr}")
         print(f"  {verdict:9} {ms:6.0f}ms  {p['name']}")
         for s, r, d in rels:
             print(f"            stored: {s} | {r} | {d}")
@@ -119,6 +179,8 @@ def run(provider):
             print("            stored: (nothing)")
         if ph:
             print(f"            phantom entities: {ph}")
+        if rv:
+            print(f"            REVERSED (forbidden direction): {rv}")
         if jk:
             print(f"            MALFORMED (json leaked into a name): {jk}")
         if note:

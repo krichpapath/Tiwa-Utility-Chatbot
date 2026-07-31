@@ -217,7 +217,9 @@ def _doing(missed_music: bool = False, blind: bool = False) -> str:
         out.append(f"You have just done this: {what}. It IS happening — say so in"
                    " your own way. Never say you do not know the song or cannot"
                    " find it; you do not need to recognise a song to put it on."
-                   " Do not sing or quote its lyrics.")
+                   " Do not sing or quote its lyrics. You have not seen the search"
+                   " result yet, so do NOT name an artist, album or year for it —"
+                   " those are things you would be making up.")
     elif missed_music:
         # asked for music, and _force_music came up empty too — the only turn
         # where telling her what is NOT happening is worth the tokens

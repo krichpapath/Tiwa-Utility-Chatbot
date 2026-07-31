@@ -129,10 +129,15 @@ entity row was created, and deleting a fact by hand leaves the same litter.
 
 ## Gotchas
 
-- **Only *entity* names are canonicalized, not relations.** The seeded graph held both
-  `Tycoon playing Marvel Rivals` and `Tycoon plays Marvel Rivals` — same fact, two rows,
-  because `plays` and `playing` are different strings. CESI clusters relation phrases too;
-  this doesn't. Deleted by hand.
+- **Relations fold by 4-character stem, not by similarity.** `plays`/`playing` become one
+  row; `likes`/`dislikes` stay two. difflib is disqualified here and it is measured —
+  `likes`/`dislikes` scores **0.769** against `plays`/`playing` at **0.667**, so any cutoff
+  that folds the pair you want also merges a relation with its own opposite. Scoped to one
+  (subject, object) pair.
+- **Names must be copied verbatim, and that is load-bearing.** The extractor romanized
+  `ไอภพ` to `Iop`, the grounding guard could not find `Iop` in the Thai text, and a true
+  fact was silently dropped. Any prompt edit that weakens "copy every name character for
+  character" loses facts in every non-Latin script.
 - **"Gojo" and "Gojo Satoru" still split at 0.62.** Below `ALIAS_CUTOFF`, so `difflib`
   leaves them apart — a substring rule would catch this pair but would also merge things
   that shouldn't be. Deferred; see [where to go next](../reference/next.md).

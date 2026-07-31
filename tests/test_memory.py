@@ -112,6 +112,49 @@ assert memory.idle_fuel(fresh) == ""  # truly nothing lived = still silent
 memory.remember(fresh, "Gateaux", "likes", "Limbus Company")
 assert "Limbus Company" in memory.idle_fuel(fresh), "idle starves on a db with facts"
 
+# --- relation folding, and what must NOT fold -------------------------------
+# difflib is disqualified here, measured: likes/dislikes scores 0.769 while
+# plays/playing scores only 0.667, so every cutoff that folds the pair we want
+# also merges a relation with its own opposite. A 4-char stem separates them.
+rel_db = memory.connect(":memory:")
+memory.remember(rel_db, "Tycoon", "playing", "Marvel Rivals")
+memory.remember(rel_db, "Tycoon", "plays", "Marvel Rivals")
+rels = [r for (r,) in rel_db.execute("SELECT rel FROM relations")]
+assert rels == ["playing"], f"one fact became two rows: {rels}"
+memory.remember(rel_db, "Krich", "likes", "durian")
+memory.remember(rel_db, "Krich", "dislikes", "durian")
+rels = sorted(r for (r,) in rel_db.execute(
+    "SELECT rel FROM relations WHERE rel LIKE '%likes'"))
+assert rels == ["dislikes", "likes"], f"a relation merged with its opposite: {rels}"
+
+# --- direction: "X is my ROLE" means X has the role -------------------------
+# Prompting failed on this one — the rule AND the wrong example are both in
+# _EXTRACT_SYSTEM and the model still reversed it. So it is code now.
+dir_db = memory.connect(":memory:")
+memory.store_extraction(dir_db, "Krich", {
+    "memories": [{"subject": "Krich", "relation": "girlfriend of", "object": "Mint",
+                  "from_tiwa_own_words": False}],
+    "episode": None,
+}, said="Krich Mint is my girlfriend and she hates coffee")
+assert "Mint girlfriend of Krich" in memory.lookup(dir_db, "Mint"), \
+    memory.lookup(dir_db, "Mint")
+# ...and it must not fire on a relation the speaker really is the subject of
+memory.store_extraction(dir_db, "Krich", {
+    "memories": [{"subject": "Krich", "relation": "plays", "object": "guitar",
+                  "from_tiwa_own_words": False}],
+    "episode": None,
+}, said="Krich I play guitar")
+assert "Krich plays guitar" in memory.lookup(dir_db, "guitar")
+
+# --- a fact may not point at itself -----------------------------------------
+# Real: "Nara owes Nara", from her reply "she still owes me for the ramen thing".
+memory.store_extraction(dir_db, "Krich", {
+    "memories": [{"subject": "Nara", "relation": "owes", "object": "Nara",
+                  "from_tiwa_own_words": False}],
+    "episode": None,
+}, said="Krich Nara might drop by this weekend")
+assert memory.lookup(dir_db, "Nara").startswith("no memory"), "self-relation stored"
+
 print("SQL checks OK")
 
 if "--live" in sys.argv:

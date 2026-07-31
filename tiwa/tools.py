@@ -169,7 +169,13 @@ def play_music(db, arg: str) -> str:
     # Knowing a song is not required to play one.
     return (f"YouTube is being searched for '{arg}' and it will start playing "
             f"in a moment. You do NOT need to recognise this song — say you are "
-            f"putting it on. Never claim you cannot find it.")
+            f"putting it on. Never claim you cannot find it. "
+            # real log: 'เปิดให้แล้ว "เพลงปล้น" ของ Bodyslam' — the search had not
+            # even run yet. She fills the gap with a plausible artist because the
+            # tool gave her a query and she read it as a result.
+            f"You have NOT seen the result: you do not know the artist, the album, "
+            f"the year or the video title. Name none of them. Say what you searched "
+            f"for and nothing more.")
 
 
 @tool(
