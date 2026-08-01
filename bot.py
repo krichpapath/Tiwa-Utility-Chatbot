@@ -1,5 +1,6 @@
 """Tiwa Discord bot — entrypoint. The brain lives in tiwa/."""
 import asyncio
+import faulthandler
 import logging
 import os
 from collections import defaultdict, deque
@@ -16,6 +17,15 @@ from tiwa import gcal, memory, music, pipeline, tools, voice  # tiwa.llm loads .
 logging.getLogger("discord.ext.voice_recv.reader").setLevel(logging.WARNING)
 
 db = memory.connect()
+
+# She vanished once with no traceback and no error row — the console was gone and
+# the log simply stopped mid-song. Playback runs through PyAV, which is native
+# code, so a crash there kills the process without ever reaching Python. stdlib
+# faulthandler is the only thing that catches that: it writes the C and Python
+# stacks of every thread straight to a file the moment the process faults.
+_crash = open(memory.DATA_DIR / "crash.log", "a", buffering=1)
+faulthandler.enable(_crash)
+
 history = defaultdict(lambda: deque(maxlen=40))  # channel_id -> chat messages
 locks = defaultdict(asyncio.Lock)  # serialize replies per channel
 
@@ -55,11 +65,28 @@ async def _heard(name: str, text: str):
             await _flush_leave(ch, asked)  # she can be told to leave out loud too
 
 
+_deck_gen = 0  # bumped by every deliberate play; see `after` below
+
+
 async def _start(channel, hit):
     """Play `hit` now, and chain into the queue when it ends."""
+    global _deck_gen
     vc = channel.guild.voice_client
     if vc is None:
         return
+
+    # `vc.stop()` below makes discord.py fire the OUTGOING track's `after` — the
+    # same callback a song reaching its end fires. So swapping tracks used to
+    # look exactly like "the song finished", and pulled the next queue item on
+    # top of the song we were in the middle of starting. Live log, 20:39:15:
+    # play_music('Mili') stopped Dvorak, Dvorak's after popped the queue, and
+    # Mili and 'Limbus Company OST' both logged `playing` in the same second.
+    #
+    # So each play takes a ticket. A callback only owns the deck if its ticket
+    # is still the current one — bumped BEFORE the stop, so the outgoing track's
+    # callback is already stale by the time it runs on the audio thread.
+    _deck_gen += 1
+    mine = _deck_gen
     if vc.is_playing():
         vc.stop()
     loop = client.loop
@@ -67,11 +94,14 @@ async def _start(channel, hit):
     def after(error):
         if error:
             print(f"[music] playback error: {error!r}")
+        if mine != _deck_gen:
+            return  # replaced on purpose — the track that replaced us owns the deck
         music.NOW["title"] = None
         # a finished song pulls the next one; scheduled onto the bot's loop
         # because `after` runs on discord's audio thread
         asyncio.run_coroutine_threadsafe(_next(channel), loop)
 
+    src = None
     try:
         src = music.source_for(hit)
         if music.VOLUME != 1.0:  # set from the control panel
@@ -79,6 +109,12 @@ async def _start(channel, hit):
         vc.play(src, after=after)
     except Exception as e:  # opus, frame timing, disconnects
         print(f"[music] play failed: {type(e).__name__}: {e}")
+        # discord.py cleans up sources IT accepted. This one it never took, so
+        # its decode thread and its open PyAV container are ours to close —
+        # otherwise every failed play leaks a thread reading a CDN forever.
+        if src is not None:
+            src.cleanup()
+        music.NOW["title"] = None  # we already stopped whatever was on
         await channel.send(f"found it but couldn't play it: {e}")
         return
     music.NOW.update(title=hit["title"], query=hit.get("query", ""))

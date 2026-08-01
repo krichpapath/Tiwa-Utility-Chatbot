@@ -73,6 +73,22 @@ Auto-advance works through Discord's `after` callback, which runs on the **audio
 thread** — so it schedules `_next()` onto the bot's loop with
 `asyncio.run_coroutine_threadsafe`.
 
+!!! danger "`after` fires on a deliberate stop too — that is not the end of a song"
+
+    `vc.stop()` runs the outgoing track's `after`, so **swapping tracks looks identical to
+    a track finishing**. `play` while a queue is waiting used to mean: stop the current
+    song → its `after` pops the queue → that lands *on top of* the song `play` was
+    starting. Two tracks logged `playing` in the same second, the second one won, and the
+    process did not survive it.
+
+    So `_start()` takes a ticket (`_deck_gen`), bumped **before** the stop. A callback only
+    advances the queue if its ticket is still current — a track that was replaced on
+    purpose stays quiet. `skip` is unaffected: nothing bumps the ticket, so its `after`
+    still pulls the next song, which is exactly what skip means.
+
+    Locked in `tests/djbench.py` — the fake voice client fires `after` on `stop()` the same
+    way discord.py does, so the bug reproduces offline.
+
 **Asking for music is asking her to join.** If she's not in a voice channel, the flush
 joins yours first. You never have to say "join" before "play something".
 

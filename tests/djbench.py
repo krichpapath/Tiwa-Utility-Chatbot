@@ -99,6 +99,31 @@ async def main():
     await show("stop")
     assert music.NOW["title"] is None and not music.QUEUE
 
+    # THE 20:39:15 BUG: play something while a queue is waiting behind the
+    # current track. Stopping the outgoing song fires its `after`, which used to
+    # be indistinguishable from that song ending — so the queue advanced on top
+    # of the track we were starting, and two songs logged `playing` in the same
+    # second. She asked for Mili and got Limbus Company.
+    await run(("play", "dvorak"))
+    await run(("queue", "limbus"))
+    assert len(music.QUEUE) == 1
+    played.clear()
+    await run(("play", "mili"))          # explicit swap, NOT a song ending
+    await asyncio.sleep(0.05)
+    await show("play over a full queue")
+    assert music.NOW["title"].startswith("Mili"), \
+        f"the queue stole the deck: {music.NOW['title']}"
+    assert len(played) == 1, f"started {len(played)} tracks at once: {played}"
+    assert len(music.QUEUE) == 1, "the deliberate swap ate a queued song"
+
+    # ...and the queue must still advance when the song really does end
+    vc.stop()
+    await asyncio.sleep(0.05)
+    await show("mili ends on its own")
+    assert music.NOW["title"].startswith("Limbus"), music.NOW
+    assert not music.QUEUE
+    await run(("stop", ""))
+
     # what she is told every turn, without spending a tool call on it
     from tiwa import pipeline
 
