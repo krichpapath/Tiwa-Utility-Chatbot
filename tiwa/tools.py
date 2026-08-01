@@ -163,7 +163,17 @@ PENDING_MUSIC = None  # kept for the old play/stop path; bot.py drains both
 )
 def play_music(db, arg: str) -> str:
     global PENDING_MUSIC
-    PENDING_MUSIC = arg
+    if PENDING_MUSIC:
+        # Second play this turn. PENDING_MUSIC holds one string, so a plain
+        # assignment would drop the first song on the floor — while this function
+        # had already told her "it will start playing in a moment" about it. That
+        # is the silent-confabulation shape twice over. She can reach here two
+        # ways: two play_music calls in one round, or one per tool round (the
+        # loop allows 3). Queue it instead: nothing is lost, and it cannot
+        # double-start the deck.
+        DJ.append(("queue", arg))
+    else:
+        PENDING_MUSIC = arg
     # She used to answer "never heard of it" while the track was already
     # starting: her never-bluff rule fired on a song title she did not know.
     # Knowing a song is not required to play one.
@@ -245,6 +255,12 @@ if __name__ == "__main__":  # runnable check: registry shape + dispatch
     assert PENDING_LEAVE is True
     TOOLS["play_music"]["fn"](db, "lofi")
     assert PENDING_MUSIC == "lofi"
+    # calling the same tool twice in one turn is normal — 6 of the 7 multi-call
+    # rounds in the live log were the SAME tool twice. A second play must not
+    # overwrite the first, because she was already told the first was happening.
+    TOOLS["play_music"]["fn"](db, "jazz")
+    assert PENDING_MUSIC == "lofi", "second play_music silently dropped the first"
+    assert DJ[-1] == ("queue", "jazz"), DJ
     TOOLS["stop_music"]["fn"](db, "")
     assert PENDING_MUSIC == ""
     print("tools ok:", ", ".join(TOOLS))
