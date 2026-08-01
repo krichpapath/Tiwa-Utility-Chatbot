@@ -132,6 +132,20 @@ async def main():
         ("ให้โอกาสอีกรอบเปิดเพลงให้ถูก", "Lamenting the Days", True),
         ("เพลงนี้ชื่ออะไร", "Bad Apple (video)", False),        # asking, not requesting
         ("มึงว่าไง", None, False),                             # not about music at all
+        # --- straight from the live log, 2026-08-01 20:23-20:27. Every one of
+        # these called no tool AND hit no retry, and she claimed she played it.
+        ("play ビビデバ - BIBBIDIBA", "TheFatRat - Unity", True),
+        ("Queue เพลง ビビデバ - BIBBIDIBA", "TheFatRat - Unity", True),
+        ("play tung tung tung sahur orchestra", "TheFatRat - Unity", True),
+        # ...and the opposite failure from the same session: a QUESTION matched,
+        # so the retry searched the sentence and played a random Thai song over
+        # her answer. Silence is bad; the wrong song on top of a reply is worse.
+        ("ตอนนี้้เปิดเพลงอะไรอยู่", "BIBBIDIBA", False),
+        ("what song is this", "BIBBIDIBA", False),
+        ("เปิดเพลงนี้ให้หน่อยได้ไหม", None, False),             # a question, politely
+        # a bare `play` substring must NOT fire — this is why _MUSIC_VERB anchors
+        ("my dad plays Warframe", None, False),
+        ("he plays guitar", None, False),
     ]
     for ask, deck, want in cases:
         tools.PENDING_MUSIC, tools.DJ[:] = None, []

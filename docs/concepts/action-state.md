@@ -79,10 +79,11 @@ entirely when it's empty. Three jobs in one function:
 ### The retry does not care what's already playing
 
 `_missed_music()` fires on any music ask with no music tool called — **including while a
-song is on**. It briefly didn't, and that was a real bug: the guard existed to stop
-*"เพลงนี้ชื่ออะไร"* starting a track over her answer, but the phrase list never matched
-that question anyway, and the guard silently switched the retry off for *"put on a
-different one"*, which is most music turns.
+song is on**. It briefly didn't, and that was a real bug: the guard silently switched the
+retry off for *"put on a different one"*, which is most music turns.
+
+The deck was the wrong thing to check. The right guard is [the question
+check](#a-question-is-not-a-request), and it took a second live failure to find.
 
 The live log caught it: three confabulated turns in one session, every one with a song
 already playing.
@@ -95,6 +96,34 @@ already playing.
 Note what *didn't* save her: `_doing()` correctly told her she was playing
 *"Lamenting the Days"*, and she claimed a different song anyway. True information in the
 prompt does not beat a tool that actually runs. **Prompts reduce, code decides.**
+
+### The retry only fires if the trigger matches {#a-question-is-not-a-request}
+
+The bug came back, because the trigger list was the weak part all along. It held request
+*phrases* — `เปิดเพลง`, `play some` — and missed the most ordinary ask there is: a bare
+imperative with a title after it. Four turns in one session, every one silent:
+
+| she was told | tool fired | retry fired |
+|---|---|---|
+| `play ビビデバ - BIBBIDIBA` | none | none |
+| `Queue เพลง ビビデバ - BIBBIDIBA` | none | none |
+| `play tung tung tung sahur orchestra` | none | none |
+
+So `_MUSIC_VERB` now matches a verb at the **start** of the message. Anchored, because a
+bare `play` substring also matches *"my dad plays Warframe"* and would put on a random song.
+
+And the same session produced the mirror failure, which is worse:
+
+| she was told | what happened |
+|---|---|
+| `ตอนนี้เปิดเพลงอะไรอยู่` (*what song is on?*) | matched `เปิดเพลง` → the retry searched that literal sentence → played an unrelated Thai song over her answer |
+
+**Asking about music is not asking for music.** `_QUESTION` now short-circuits the retry.
+It holds phrases rather than the bare word `อะไร`, because *"เปิดอะไรก็ได้"* (put on
+anything) is a real request and would otherwise be swallowed.
+
+Both directions are locked in `tests/djbench.py` using the exact strings from the log —
+that table fails 4/4 against the old trigger.
 
 ### The negative is narrow on purpose
 

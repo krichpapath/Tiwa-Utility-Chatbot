@@ -131,6 +131,26 @@ _MUSIC_ASK = ("เปิดเพลง", "ขอเพลง", "อยากฟ
               "play something", "put on some", "want to hear", "wanna hear",
               "some music")
 
+# A bare imperative — "play <title>", "queue <title>" — is the most common ask
+# there is, and none of the phrases above match it. Live log, four turns in a
+# row: `play ビビデバ - BIBBIDIBA`, `Queue เพลง ビビデバ`, `play tung tung tung
+# sahur orchestra` all called no tool, hit no retry, and she claimed she had put
+# them on. Anchored to the START of the message, because a bare `play` substring
+# also fires on "my dad plays Warframe" and would put on a random song.
+# ponytail: prefix match on the raw message. bot.py strips the @mention before
+# this sees it, so "@Tiwa play X" works — but "หนู play X" does not. Parse the
+# first word properly if leading filler turns out to be common.
+_MUSIC_VERB = ("play ", "queue ", "put on ", "เปิดเพลง", "เล่นเพลง", "ต่อคิว",
+               "เปลี่ยนเพลง")
+
+# ...but an imperative is not always a request. "ตอนนี้เปิดเพลงอะไรอยู่" (what
+# song is on right now?) matched _MUSIC_ASK, so _force_music searched that
+# literal sentence and played a random Thai song over the top of her answer.
+# That is worse than the silence this whole retry exists to fix.
+# Phrases, not the bare word อะไร: "เปิดอะไรก็ได้" (put on anything) is a real ask.
+_QUESTION = ("?", "อะไรอยู่", "อะไรบ้าง", "ชื่ออะไร", "ไหม", "มั้ย", "ทำไม", "เมื่อไหร่",
+             "what song", "which song", "what's playing", "what is playing")
+
 _TERMS_SYSTEM = (
     "Turn this request into YouTube search terms for music. Output ONLY the terms, "
     "2-6 words, no quotes, no explanation. "
@@ -154,11 +174,16 @@ def _missed_music(text: str) -> bool:
     the retry for "put on a different one", which is the common case. Measured in
     the live log: three confabulated turns in one session, every one of them with
     a song already on.
+
+    It DOES care whether the sentence is a question — that is a different guard,
+    and the one this function was missing. See _QUESTION.
     """
     if tools.PENDING_MUSIC is not None or tools.DJ:
         return False
-    low = text.lower()
-    return any(k in low for k in _MUSIC_ASK)
+    low = text.lower().strip()
+    if any(q in low for q in _QUESTION):
+        return False  # asking about music is not asking for music
+    return low.startswith(_MUSIC_VERB) or any(k in low for k in _MUSIC_ASK)
 
 
 def _terms(content: str) -> str:
