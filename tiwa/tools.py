@@ -202,7 +202,11 @@ def stop_music(db, arg: str) -> str:
 @tool(
     "Queue a song to play AFTER the current one — use when music is already "
     "playing and they want more, not instead. Thai: 'ต่อด้วย...', 'ใส่คิว...', "
-    "'เปิดต่อ...'. Pass only the search terms.",
+    "'เปิดต่อ...', 'เพิ่มเพลง...ลงคิว'. Pass only the search terms. "
+    "ONE CALL QUEUES ONE SONG. If they ask for several ('หลายๆเพลง', 'a few "
+    "songs', 'some more'), call this MULTIPLE TIMES in the same reply — 3 calls "
+    "for 3 songs. Repeating the same search is correct and gives a different "
+    "song each time; do not invent song titles to vary it.",
     "song, artist or genre to queue",
 )
 def queue_music(db, arg: str) -> str:

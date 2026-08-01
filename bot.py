@@ -167,10 +167,17 @@ async def _flush_music(channel, author=None):
         await channel.send("i'm not in a voice channel")
         return
 
+    global _deck_gen
     for action, arg in jobs:
         if action == "stop":
             music.QUEUE.clear()
             music.NOW["title"] = None
+            # stop means the deck is done, so take the ticket away from the
+            # outgoing track's callback. Without this it still schedules a
+            # _next(), which runs at the NEXT await — by which time a later job
+            # in this same flush may have queued something, and the stale
+            # callback pops it and starts playing over the stop.
+            _deck_gen += 1
             vc.stop()
         elif action == "skip":
             if not music.NOW["title"]:

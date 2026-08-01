@@ -124,6 +124,20 @@ async def main():
     assert not music.QUEUE
     await run(("stop", ""))
 
+    # "เพิ่มเพลงMili ลงคิวหลายๆเพลง" — one queue_music call is one song, so several
+    # songs means several calls. The DJ list has to keep every one of them; the
+    # singleton globals are what silently drop repeats.
+    tools.DJ.clear()
+    for _ in range(3):
+        tools.queue_music(None, "Mili")  # queue_music never touches the db
+    assert tools.DJ == [("queue", "Mili")] * 3, tools.DJ
+    await bot._flush_music(channel, None)
+    await asyncio.sleep(0.05)
+    await show("queue Mili x3")
+    assert music.NOW["title"].startswith("Mili"), music.NOW
+    assert len(music.QUEUE) == 2, f"repeat queue_music lost songs: {music.QUEUE}"
+    await run(("stop", ""))
+
     # what she is told every turn, without spending a tool call on it
     from tiwa import pipeline
 
