@@ -587,3 +587,100 @@ not proof.
   **0.769** while `plays`/`playing` scores **0.667**, so every cutoff that folds the pair we
   want also merges a relation with its opposite. A 4-character stem of the first word
   separates them cleanly.
+
+## ADR-022 · Episodes fire on surprise, not on the model's judgment {#adr-022}
+
+**Status.** Accepted, August 2026.
+
+**Context.** The live database held **2 episodes across 97 logged turns** — and both
+were written on the same calendar turn, one a restatement of the other. Pass 3 is told
+*"episode: almost always null"*, backed by four BAD examples and one GOOD, and it obeyed
+almost absolutely. So `turn_context()`'s episode lines were effectively dead, and she
+knew facts about people while having essentially no memory of anything happening —
+semantic memory without episodic memory, in
+[Tulving's](https://doi.org/10.1037/h0080017) split.
+
+The two that *did* land are the tell. The prompt forbids an episode for "someone asking a
+question" and for "anything already captured as a memory above"; those two rows are a
+question, and each other. The gate was not merely too tight — it was **miscalibrated**,
+silent for 95 turns and then wrong twice on one.
+
+**Decision.** Stop asking a model *"would this matter in a month?"* — a judgment call
+it always declines — and decide in code from whether the turn **moved the graph**: a
+subject she had never met, or a belief that flipped. Both signals are already computed
+inside `store_extraction()`, so it costs no extra call.
+
+This is what event segmentation theory says the brain does: cut memories at
+**prediction errors**, the moments the pattern broke
+([Neurosci & Biobehav Rev](https://www.sciencedirect.com/science/article/abs/pii/S0149763424000010)).
+[EM-LLM](https://arxiv.org/abs/2407.09450) (ICLR 2025) segments a token stream by
+Bayesian surprise and beats full-context models on LongBench, which is the same idea one
+level down. A model-written episode still wins when one appears; it just no longer has
+to.
+
+**Consequences.** Measured **4 of 12** turns on a replay, and 3 of 4 on a live
+conversation. The rate falls on its own as the graph fills — new people get rarer, only
+flips remain. Three narrowing rules each came from reading real output rather than from
+a failing check: objects don't count (or every game ever named is a life event), the
+speaker doesn't count (his own facts are already in her context), and freshness is judged
+against a snapshot taken **before** the batch — live, `Steven plays guitar` read as old
+news because `Krich cousin of Steven` had invented him one line earlier in the same turn.
+
+**Rejected.** Lowering the prompt bar instead. The prompt bar *is* the mechanism that
+failed, and the project rule is the same one that settled the guards, `now_playing` and
+role direction: **prompts reduce, code decides.**
+
+## ADR-023 · A new belief replaces the old one {#adr-023}
+
+**Status.** Accepted, August 2026.
+
+**Context.** The primary key is `(src, rel, dst)`, so `Tycoon likes X` and `Tycoon hates
+X` were two valid rows. Both survived, both were injected every turn, and she read a flat
+contradiction and picked one at random. `canonical_rel()` deliberately keeps opposites
+apart as *names* — that is correct and measured — but nothing ever retired the loser.
+
+**Decision.** `_supersede()`: relations that are two answers to the **same question**
+compete for one (subject, object) pair, and the newer one wins. One hand-listed axis
+(`feel`: like/love/enjoy/prefer vs hate/dislike), with polarity, so a genuine flip is
+reported and a refinement (`likes` → `loves`) is not.
+
+**Consequences.** Verified live — "Steven loves durian" then "Steven hates durian now"
+leaves one row and one episode. `plays` and `likes` between the same pair are untouched:
+different questions. This is also the half of the forgetting literature that applies at
+her scale; **decay engines are not**, at nine facts. See
+[open questions](../open-questions.md).
+
+## ADR-024 · Reflection rides the heartbeat that was already running {#adr-024}
+
+**Status.** Accepted, August 2026.
+
+**Context.** `idle_turn()` wakes every 30 minutes from 09:00–23:00 — about **28 model
+calls a day** — and is rate-limited to *speaking* once every 3 hours. The overwhelming
+majority of those calls ran, decided "nothing to say", and were discarded. That is
+thinking time already bought and thrown in the bin.
+
+**Decision.** `pipeline._settle()` gives the tick a second job. Once `REFLECT_EVERY = 3`
+episodes have piled up unprocessed, it reads them and writes back one conclusion.
+
+- **Reflections are episodes filed under her own name**, so they land back in the stream
+  they were drawn from — `idle_fuel()` retrieves them like anything else she lived, and
+  the newest one dates the watermark for free. No new table.
+  [Generative Agents](https://arxiv.org/abs/2304.03442) stores reflections back into the
+  same observation stream for the same reason.
+- **It gets the expensive model.** Nobody is waiting on it, which makes it the one pass
+  where latency does not matter — the argument
+  [Letta](https://www.letta.com/blog/sleep-time-compute/) makes for sleep-time agents.
+- **It fires only on a backlog**, so a quiet day costs zero calls.
+
+**Consequences.** Live output on a four-turn conversation: *"Krich is always the one
+telling me about other people, but I still don't know what he himself thinks about
+anything."* No single turn contained that.
+
+A reflection that concludes nothing still writes a **blank row** as the watermark, or the
+same three episodes are re-reflected every half hour forever; `idle_fuel()` and the panel
+filter `text != ''` so it never reaches her as something she lived. A reflection that
+**fails** deliberately does not watermark — the events stay unreflected and the next tick
+retries, rather than a provider outage silently eating her week.
+
+**Depends on [ADR-022](#adr-022).** With zero episodes this pass reflects on an empty
+room; that is why episodes shipped first.

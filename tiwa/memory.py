@@ -110,21 +110,70 @@ def canonical_rel(db, src: int, dst: int, rel: str) -> str:
     return next((r for r in have if _stem(r) == stem), rel)
 
 
+# Two answers to the SAME question: you cannot both like and hate one thing.
+# stem -> (axis, polarity). Same axis replaces the old row instead of sitting
+# beside it; opposite polarity is a real change of mind, which surprise() reports.
+# ponytail: one hand-listed axis. Add another when a real contradiction shows up.
+_AXES = {
+    "like": ("feel", 1), "love": ("feel", 1), "enjo": ("feel", 1), "pref": ("feel", 1),
+    "hate": ("feel", -1), "disl": ("feel", -1),
+}
+
+
+def _supersede(db, src: int, dst: int, rel: str) -> str:
+    """Delete the beliefs this new one replaces. Returns the flipped one, if any.
+
+    The primary key is (src, rel, dst), so `Tycoon likes X` and `Tycoon hates X`
+    were two valid rows and BOTH were injected every turn — she read a flat
+    contradiction and picked one at random. People update a belief; she only ever
+    appended. Scoped to one (subject, object) pair, like canonical_rel().
+    """
+    axis, pol = _AXES.get(_stem(rel), (None, 0))
+    if not axis:
+        return ""
+    flipped = ""
+    # fetchall first: deleting under an open cursor on the same table
+    for (old,) in db.execute(
+        "SELECT rel FROM relations WHERE src = ? AND dst = ?", (src, dst)
+    ).fetchall():
+        oaxis, opol = _AXES.get(_stem(old), (None, 0))
+        if oaxis != axis or old.lower() == rel.lower():
+            continue
+        db.execute("DELETE FROM relations WHERE src=? AND rel=? AND dst=?", (src, old, dst))
+        if opol != pol:
+            flipped = old
+    return flipped
+
+
+def _known(db, name: str) -> bool:
+    """Has she met this entity before? Asked BEFORE the write, since _eid creates it.
+
+    Goes through canonical() so "Marvel Rival" does not read as a stranger one
+    letter away from something she already knows.
+    """
+    return db.execute(
+        "SELECT 1 FROM entities WHERE name = ?", (canonical(db, name),)).fetchone() is not None
+
+
 def _eid(db, name: str, kind: str = "thing") -> int:
     name = canonical(db, name)
     db.execute("INSERT OR IGNORE INTO entities(name, kind) VALUES(?, ?)", (name, kind))
     return db.execute("SELECT id FROM entities WHERE name = ?", (name,)).fetchone()[0]
 
 
-def remember(db, subject: str, rel: str, obj: str, note: str = ""):
+def remember(db, subject: str, rel: str, obj: str, note: str = "") -> str:
+    """Write one fact. Returns the belief it overturned, or "" — see surprise()."""
     # strip: "plays guitar " vs "plays guitar" would beat the primary key -> dup rows
     subject, rel, obj, note = subject.strip(), rel.strip(), obj.strip(), note.strip()
     src, dst = _eid(db, subject), _eid(db, obj)
+    rel = canonical_rel(db, src, dst, rel)
+    flipped = _supersede(db, src, dst, rel)
     db.execute(
         "INSERT OR REPLACE INTO relations(src, rel, dst, note, updated_at) VALUES(?,?,?,?,?)",
-        (src, canonical_rel(db, src, dst, rel), dst, note, time.time()),
+        (src, rel, dst, note, time.time()),
     )
     db.commit()
+    return flipped
 
 
 def lookup(db, name: str) -> str:
@@ -278,6 +327,37 @@ def wipe(db, what: str):
     db.commit()
 
 
+REFLECT_EVERY = 3  # unreflected episodes before thinking about them is worth a call
+
+
+def unreflected(db, n: int = 10) -> list:
+    """Episodes she has lived but not yet thought about. Newest first.
+
+    Her reflections are stored as episodes filed under her OWN name, so they land
+    back in the stream they were drawn from and idle_fuel picks them up like
+    anything else she lived — the Generative Agents trick, and it means no new
+    table. It also dates the watermark for free: everything after her last
+    reflection is what she has not processed.
+    """
+    last = db.execute(
+        "SELECT MAX(ts) FROM episodes WHERE user = ?", (TIWA,)).fetchone()[0] or 0
+    return list(db.execute(
+        "SELECT user, text FROM episodes WHERE user != ? AND ts > ? ORDER BY ts DESC LIMIT ?",
+        (TIWA, last, n)))
+
+
+def reflect(db, thought: str):
+    """Store one settled conclusion. Same table, her own name."""
+    db.execute("INSERT INTO episodes(user, text, ts) VALUES(?,?,?)",
+               (TIWA, thought.strip(), time.time()))
+    db.execute(
+        "DELETE FROM episodes WHERE user = ? AND id NOT IN "
+        "(SELECT id FROM episodes WHERE user = ? ORDER BY ts DESC LIMIT ?)",
+        (TIWA, TIWA, EPISODES_KEEP),
+    )
+    db.commit()
+
+
 def idle_fuel(db, n: int = 5) -> str:
     """Something to have an unprompted thought ABOUT. "" means stay quiet.
 
@@ -291,8 +371,10 @@ def idle_fuel(db, n: int = 5) -> str:
     (Liao et al., SIGIR 2023) — so the caller keeps the real brakes: >= 3 h
     apart, 09:00-23:00, and she is told to output NOTHING on most ticks.
     """
+    # text != '': a reflection that concluded nothing writes a blank row purely as
+    # a watermark for unreflected(). It is not something she lived.
     eps = [t for (t,) in db.execute(
-        "SELECT text FROM episodes ORDER BY ts DESC LIMIT ?", (n,))]
+        "SELECT text FROM episodes WHERE text != '' ORDER BY ts DESC LIMIT ?", (n,))]
     if eps:
         return "\n".join(eps)
     return "\n".join(
@@ -404,7 +486,24 @@ def store_extraction(db, user: str, data: dict, tiwa_reply: str = "", said: str 
     trace back to it, because she invents shared history for flavour and a
     prompt alone does not stop it (tests/factbench.py: 7 -> 4 invented facts
     from prompt work, 0 once this ran).
+
+    Episodes are gated on SURPRISE, not on the model's judgment. The extractor is
+    told an episode is "almost always null" and it obeyed absolutely: 0 rows
+    across every session ever logged, so half her memory never existed and
+    turn_context's episode lines were dead code. Asking a model "would this
+    matter in a month?" is a judgment call it always declines.
+
+    So it is arithmetic instead: an episode is written when this turn moved the
+    graph — a subject she had never met, or a belief that flipped. That is the
+    same thing event-segmentation theory says the brain cuts memories on, a
+    prediction error, and it costs no extra model call because both signals are
+    already computed here. Prompts reduce, code decides.
     """
+    surprises = []
+    # snapshot BEFORE the loop: one turn writes several facts, and the first write
+    # creates the entities the later ones mention. Asked per-write, "Steven plays
+    # guitar" read as old news because "Krich cousin of Steven" had just made him.
+    known_before = {n.lower() for (n,) in db.execute("SELECT name FROM entities")}
     for m in data.get("memories") or []:
         if not (m.get("subject", "").strip() and m.get("relation", "").strip()
                 and m.get("object", "").strip()):
@@ -433,11 +532,21 @@ def store_extraction(db, user: str, data: dict, tiwa_reply: str = "", said: str 
         elif said and not (_grounded(m["subject"], said) and _grounded(m["object"], said)):
             continue  # she made it up — her reply is style, never evidence
         m = _role_swap(m, user, said)
-        remember(db, m["subject"], m["relation"], m["object"], m.get("note", ""))
-    if data.get("episode"):
+        subj, rel, obj = m["subject"], m["relation"], m["object"]
+        # Not the speaker and not her: "first heard about Krich" while Krich is the
+        # one talking is a wasted turn_context line, and everything he said about
+        # himself is already a fact she can see. Episodes are for third parties.
+        fresh = subj not in (TIWA, user) and canonical(db, subj).lower() not in known_before
+        flipped = remember(db, subj, rel, obj, m.get("note", ""))
+        if flipped:
+            surprises.append(f"{subj} {rel} {obj} now — {flipped} before")
+        elif fresh:
+            surprises.append(f"first heard about {subj}")
+    episode = data.get("episode") or "; ".join(dict.fromkeys(surprises))
+    if episode:
         db.execute(
             "INSERT INTO episodes(user, text, ts) VALUES(?,?,?)",
-            (user, data["episode"], time.time()),
+            (user, episode, time.time()),
         )
         # bounded per person: old chatter is not worth carrying forever
         db.execute(

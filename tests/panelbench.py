@@ -46,6 +46,12 @@ memory.log_llm("openrouter", "vl-8b", 800, 900,  # not "qwen3-*": the provider
                                                 # filter check below greps for it
                "[system]\nYou are describing an image for someone who is about to REACT",
                "a cat on a keyboard")
+memory.log_llm("openrouter", "deepseek", 1100, 260,
+               "[system]\nYou are ทิวา's memory settling while nobody is talking",
+               "Krich only ever shows up to complain")
+memory.log(db, "reflect", "Krich only ever shows up to complain", 1100)
+# a reflection that concluded nothing: a watermark row, never an event
+memory.reflect(db, "")
 db.commit()
 
 srv = HTTPServer(("127.0.0.1", 8788), dashboard.H)
@@ -89,7 +95,15 @@ check("llm pass filter", "private memory judgment"
       not in get("/?view=llm&pass=thinking"))
 check("vision filters to itself",
       "memory judgment" not in get("/?view=llm&pass=seeing"))
+check("llm names the reflection pass", "reflecting" in lg and "only ever shows up" in lg)
+check("reflection filters to itself",
+      "memory judgment" not in get("/?view=llm&pass=reflecting"))
 check("llm provider filter", "qwen3" not in get("/?view=llm&prov=openrouter"))
+check("log explains the reflect kind", "idle-time conclusion" in get("/?view=log"))
+# the blank watermark row must never render as an episode she lived
+mem = get("/?view=memory")
+check("blank watermark hidden", "1 of 1 episodes" in mem
+      and "guitar recording" in mem)
 check("log kind filter", "Bad Apple" not in get("/?view=log&kind=turn"))
 check("log text search", "Bad Apple" in get("/?view=log&q=bad"))
 

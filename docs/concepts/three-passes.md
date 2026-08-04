@@ -18,6 +18,11 @@ Two more calls exist but only fire on the turns that need them, and neither is a
 
 So a plain text turn is 3 calls, a turn with a picture is 4.
 
+Two more run when **nobody is talking**, on the 30-minute heartbeat: `idle()` decides
+whether to say something unprompted, and [`_settle()`](memory.md#reflection) turns what
+she has lived into what she thinks. Neither is on the path between your message and her
+reply.
+
 ## Why it's here
 
 One model call would have to do three jobs with conflicting requirements at once:

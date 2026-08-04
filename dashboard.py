@@ -166,6 +166,7 @@ KIND_WORDS = {
     "tool": "a tool she called",
     "music": "playback",
     "voice": "something heard in voice chat",
+    "reflect": "an idle-time conclusion about someone",
 }
 
 CSS = """*{box-sizing:border-box}
@@ -310,6 +311,8 @@ def which_pass(req: str) -> str:
         return "idle"
     if "describing an image" in req:
         return "seeing"
+    if "memory settling" in req:
+        return "reflecting"
     if "[inner-state" in req:
         return "her reply"
     return "other"
@@ -480,7 +483,9 @@ def view_memory(db, env, args, flash):
             for rid, rel, o, note, ts in groups[s]) + "</table></div>"
         for i, s in enumerate(order)) or "<div class='card empty'>nothing matches</div>"
 
-    epq = list(db.execute("SELECT id, user, text, ts FROM episodes ORDER BY ts DESC"))
+    # text != '': blank rows are reflection watermarks, not events (memory.reflect)
+    epq = list(db.execute(
+        "SELECT id, user, text, ts FROM episodes WHERE text != '' ORDER BY ts DESC"))
     ephits = [e for e in epq if not q or q in f"{e[1]} {e[2]}".lower()]
     eps = "".join(
         f"<tr><td class=ms>{when(ts)}</td><td class=kind>{esc(u)}</td><td>{esc(t)}</td>"
@@ -538,7 +543,7 @@ def view_llm(db, env, args, flash):
     passes = "".join(
         "<a class='chip%s' href='%s'>%s</a>"
         % (" on" if want == p else "", qs(args, view="llm", **{"pass": p}), p or "all")
-        for p in ("", "thinking", "her reply", "remembering", "seeing", "idle"))
+        for p in ("", "thinking", "her reply", "remembering", "seeing", "reflecting", "idle"))
     provs = "".join(
         "<a class='chip%s' href='%s'>%s</a>"
         % (" on" if prov == p else "", qs(args, view="llm", prov=p), p or "both")

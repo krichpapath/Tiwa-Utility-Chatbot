@@ -353,8 +353,59 @@ gives a real reason, output one short thought she'd share unprompted.
 Never greet, never "just checking in", never summarize the episodes back."""
 
 
+_REFLECT_SYSTEM = f"""You are {TIWA}'s memory settling while nobody is talking to her.
+You are NOT a reply and nobody will read this — it is what she will still know next week.
+You get things that happened recently. Write ONE short sentence: what they add up to about
+a person she knows. A pattern, a conclusion, something that changes how she treats them.
+Write it as her, in the first person, in the language the events are written in.
+GOOD: "Gateaux only ever shows up to complain about his team, never to actually play"
+BAD: "Gateaux plays Marvel Rivals" — that is already a fact, not a conclusion.
+BAD: anything you cannot point at in the events below. Never invent an event.
+If they add up to nothing yet, output exactly NOTHING."""
+
+
+async def _settle(db):
+    """Sleep-time pass: turn what she has lived into what she thinks about someone.
+
+    Fires only when REFLECT_EVERY episodes have piled up unprocessed, so a quiet
+    day costs zero calls. It runs on the heartbeat, which already wakes ~28 times
+    a day and mostly decides to stay silent — that is thinking time bought and
+    thrown away. Nobody is waiting on this, so it gets the expensive model: the
+    one pass where latency genuinely does not matter.
+    """
+    new = memory.unreflected(db)
+    if len(new) < memory.REFLECT_EVERY:
+        return
+    t0 = time.perf_counter()
+    lived = "\n".join(f"with {u}: {t}" for u, t in reversed(new))
+    try:
+        resp = await asyncio.to_thread(
+            llm.chat,
+            model=PERSONA_MODEL,
+            messages=[{"role": "system", "content": _REFLECT_SYSTEM},
+                      {"role": "user", "content": lived}],
+            options={"num_ctx": 4096, "temperature": 0.4},
+            provider=PERSONA_PROVIDER,
+        )
+    except Exception as e:
+        # deliberately no watermark: the events stay unreflected and the next
+        # tick retries. A provider outage must not silently eat her week.
+        memory.log(db, "reflect", f"failed: {type(e).__name__}: {e}")
+        return
+    thought = _clean(resp["content"] or "")
+    if "NOTHING" in thought[:30].upper():
+        thought = ""
+    # An empty conclusion is still written: the row is the watermark, or the same
+    # three episodes get re-reflected every 30 minutes forever. idle_fuel skips
+    # blanks so "" never reaches her as something she lived.
+    memory.reflect(db, thought)
+    memory.log(db, "reflect", thought or "nothing worth concluding yet",
+               (time.perf_counter() - t0) * 1000)
+
+
 async def idle(db) -> str:
     """Heartbeat turn: usually returns "" (stay quiet), sometimes an unprompted message."""
+    await _settle(db)  # settle what happened before deciding whether to speak
     eps = memory.idle_fuel(db)
     if not eps:
         return ""  # nothing lived yet = nothing to say; 8B won't stay quiet on its own

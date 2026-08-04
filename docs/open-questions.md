@@ -57,7 +57,18 @@ than deleted — [F6](reference/findings.md#f6).
 
 ## Still open
 
-Nothing blocking. Two soft ones, for whenever they matter:
+One real bug, found while building [reflection](reference/decisions.md#adr-024) and
+deliberately **not** fixed there because it is older and unrelated:
+
+- **A provider outage kills the heartbeat, permanently.** `pipeline.idle()`'s speak pass
+  is unguarded, so when Ollama is down `_tool_chat` raises straight out of the tick.
+  discord.py's `tasks.loop` logs the exception and **stops the loop** unless a
+  `@loop.error` handler is registered, and none is — so she goes silent until the process
+  restarts, with nothing on screen to say why. `_settle()` catches its own errors
+  (`tests/test_memory.py` asserts it); the older pass around it does not. The fix is a
+  `try` in `idle_turn()` or a `@idle_turn.error` handler, plus a log row.
+
+Then two soft ones, for whenever they matter:
 
 - **Verbatim parroting.** The API model has been caught copying an example from
   `tiwa.md` word for word. Watch for it in real chat; the fix is rewriting the example,

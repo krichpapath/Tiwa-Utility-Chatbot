@@ -24,9 +24,9 @@ Recommended canon. Run these and you know the system is sound:
 
 | Bench | Kind | Protects | Runs offline? |
 |---|---|---|---|
-| `test_memory.py` | check | **The guards.** Coercion + confabulation regressions by name | yes |
+| `test_memory.py` | check | **The guards**, coercion + confabulation by name, plus the episode rate, belief supersession and the reflection pass | yes |
 | `djbench.py` | check | The whole DJ engine — queue, skip, auto-advance, stop, action state | yes |
-| `panelbench.py` | check | Control panel: 34 assertions incl. "never writes secrets" | yes |
+| `panelbench.py` | check | Control panel: 38 assertions incl. "never writes secrets" | yes |
 | `toolbench.py` | measure | Right tool, right argument, latency per provider | no |
 | `pickbench.py` | measure | Music asks with **no song named** — the newest regression | no |
 | `searchbench.py` | both | Search mechanics offline; `--live` shows the keywords she picks | partly |

@@ -3,7 +3,7 @@
 ## What this is
 
 A local web page at <http://127.0.0.1:8787> for seeing and changing everything about her.
-`dashboard.py` — ~720 lines, stdlib `http.server`, no framework, no JavaScript build.
+`dashboard.py` — ~725 lines, stdlib `http.server`, no framework, no JavaScript build.
 
 ```bash
 py -X utf8 dashboard.py --open
@@ -41,7 +41,7 @@ you.</figcaption>
 | **status** | mode in plain words · health of Discord token, OpenRouter key, Ollama, music decoder, calendar auth, listening · tokens spent today · replies and average reply time (24 h) · recent songs |
 | **settings** | every knob grouped by subsystem, each with an explanation and its default. Empty box = default. **Reset all to defaults** at the bottom |
 | **memory** | facts grouped per person with a jump index, searchable, `forget` per row, plus forget-everything |
-| **llm** | every model call labelled by pass — **thinking** / **her reply** / **remembering** / **seeing** / **idle** — filterable by pass, provider and text. Click a row for the exact prompt and reply |
+| **llm** | every model call labelled by pass — **thinking** / **her reply** / **remembering** / **seeing** / **reflecting** / **idle** — filterable by pass, provider and text. Click a row for the exact prompt and reply |
 | **log** | turns, tool calls, music, voice — filter by kind or text. See [reading the tool rows](#reading-the-tool-rows) |
 
 Exports on every tab: `memory.json`, `memory.csv`, `episodes.csv`, `llm.json`,
@@ -67,6 +67,8 @@ did she do that":
 - **her reply** — what rules were injected this turn?
 - **remembering** — what did extraction propose, before the guards?
 - **seeing** — what did the vision model actually make of the image? ([her eyes](eyes.md))
+- **reflecting** — what did she conclude about someone while nobody was talking?
+  ([reflection](../concepts/memory.md#reflection))
 - **idle** — a heartbeat tick, which usually decides to stay quiet
 
 ### Reading the tool rows {#reading-the-tool-rows}
