@@ -2,7 +2,7 @@
 
 ## What this is
 
-Twenty scripts in `tests/`. Not unit tests — each one runs real code and **prints a
+Twenty-one scripts in `tests/`. Not unit tests — each one runs real code and **prints a
 markdown table you read and judge**. No pytest, no fixtures, no CI.
 
 ## Why it's here
@@ -81,6 +81,12 @@ phrasings), `noisebench.py`, `ttsbench.py`, `dumpbench.py`, `routerbench.py`
 (asserts the voice_recv patch is installed).
 
 **Music** — `musicbench.py` does a real search and decode; needs network.
+
+**Calendar** — `calbench.py`. Offline it asserts the ✅ gate: `calendar_write` queues a
+sentence and reaches nothing else. `--live` runs seven asks through the tool pass and
+counts how many actually queued a write — the failure it exists for is her *saying* she
+put something in the calendar without calling the tool. See
+[getting it called](../surfaces/calendar.md#getting-it-called).
 
 ## How to write one
 

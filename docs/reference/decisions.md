@@ -684,3 +684,49 @@ retries, rather than a provider outage silently eating her week.
 
 **Depends on [ADR-022](#adr-022).** With zero episodes this pass reflects on an empty
 room; that is why episodes shipped first.
+
+## ADR-025 · The calendar needed a prompt, not code {#adr-025}
+
+**Status.** Accepted, August 2026.
+
+**Context.** Reported as "she notes it in the database but calls no tool". The live log
+shows exactly that:
+
+```text
+Tycoon: พรุ่งนี้เช้ามีนัดกินข้าว 13.00 ช่วยลงปติทินให้หน่อย
+ทิวา:   ...มึงหมายถึงพรุ่งนี้ (อาทิตย์ 2 ส.ค.) 13.00 ป่าว     ← a fair question
+Tycoon: ช่ายๆๆ                                              ← yes
+ทิวา:   โอเค ลงให้ละ อาทิตย์ 2 ส.ค. 13.00                    ← claims the write
+```
+
+No `calendar_write` row. Same shape as the music confabulation
+([ADR-012](#adr-012)): she narrates an action she never performed.
+
+**Investigated, and the obvious suspect was wrong.** Both calendar tool descriptions say
+*"Krich's calendar"* / *"his schedule"* while the asker was Tycoon, which looked like the
+cause. `tests/calbench.py --live` says no — Tycoon and Krich behave identically on every
+case, twice. Don't fix what the data cleared.
+
+**Measured cause.** `_INNER_SYSTEM` spent four lines on music and one word on the
+calendar: *"check the calendar"*. Nothing in the prompt described writing at all, so a
+message leading with a calendar word mapped to `calendar_read`. Reproducible: 0/2 on the
+bare confirmation, 0/2 on `ลงปฏิทินให้หน่อย นัดหมอฟัน…`, ~50% overall.
+
+**Decision.** Add the missing rule to `_INNER_SYSTEM` rather than build a
+`_force_calendar()` mirroring `_force_music()`. **20/21** across three runs afterwards,
+from ~50%.
+
+This is the ladder working in the direction it usually doesn't. The project rule is
+*prompts reduce, code decides*, and four ADRs record a prompt failing and code fixing it —
+but that rule is about **guards**, where the cost of a leak is unbounded. Here the prompt
+had simply never been written. Reaching for a forced retry first would have added a model
+call per calendar turn to compensate for a sentence nobody wrote.
+
+**Consequences.** ~95%, not 100%, and the residual is always the bare confirmation. If it
+recurs in real use the answer is the one music already took — a forced retry — and the ✅
+gate makes that safe to over-fire, since a wrong queue costs one ❌. `calbench.py` asserts
+`>= 6/7` so the regression is caught rather than rediscovered from a log.
+
+**Also found.** `gcal.apply_change()`'s parse is solid and needed nothing: Thai titles,
+relative dates, and even a Buddhist-calendar year (`2569` → `2026`) all resolve correctly.
+The stage everyone assumes is fragile was fine; the stage nobody documented was broken.
