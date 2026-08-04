@@ -63,6 +63,8 @@ You're up to speed when you can answer these without looking:
 5. What does `TIWA_MODE=api` change, and what does it cost?
 6. Why does music start *after* she speaks?
 7. What does a `ponytail:` comment mean?
+8. What has to happen in a turn before she writes an episode — and why isn't a model
+   asked to decide it?
 
 Any you can't answer points at a page that didn't do its job. Say so — see
 [docs maintenance](../reference/docs-maintenance.md).

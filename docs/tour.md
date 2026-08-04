@@ -107,12 +107,22 @@ erDiagram
     EPISODES { int id string user string text float ts }
 ```
 
-<figcaption><b>Facts</b> are permanent triples. <b>Episodes</b> are things that mattered,
-capped at 25 per person. Feelings are stored nowhere at all.</figcaption>
+<figcaption><b>Facts</b> are things that are true. <b>Episodes</b> are things that
+happened. Feelings are stored nowhere at all.</figcaption>
 
-That last part is deliberate and worth internalising: **there is no mood table.** How
-she feels is re-derived each turn from the chat you can see. A fight lasts exactly as
-long as it's still on screen. See [memory](concepts/memory.md).
+The split is the thing to internalise. `Steven plays guitar` is a **fact** — still true
+next month. `first heard about Steven` is an **episode** — it happened once. If everything
+were an episode she'd keep a diary; if everything were a fact she'd remember that you said
+hello.
+
+An episode gets written when the turn **surprised** her: she met someone new, or something
+she believed turned out to be wrong. Everything else passes without a trace, the same way
+you don't remember an ordinary drive to work. Then, while nobody is talking to her, she
+reads a few of those back and draws a conclusion — and that conclusion is stored as an
+episode too, so she can use it later. [Memory](concepts/memory.md) has the details.
+
+And **there is no mood table.** How she feels is re-derived each turn from the chat you
+can see. A fight lasts exactly as long as it's still on screen.
 
 ## The part you must not break
 

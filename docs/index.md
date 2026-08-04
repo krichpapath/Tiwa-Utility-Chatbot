@@ -14,8 +14,9 @@ needing the original author.
   which one you probably want to change.
 - [How the same bot runs on your GPU, on a paid API, or split between them](concepts/modes.md)
   — one environment variable.
-- [How her memory is a graph, not a chat log](concepts/memory.md), and why episodes and
-  facts are different things.
+- [How her memory is a graph, not a chat log](concepts/memory.md) — why *things that are
+  true* and *things that happened* are stored differently, how she decides a moment was
+  worth remembering, and what she concludes about you when nobody is talking.
 - [Why users can never write her beliefs](concepts/guards.md) — the security property this
   project exists to protect, enforced in code.
 - [How to give her a new ability](concepts/tools.md) by writing one function.

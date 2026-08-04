@@ -6,6 +6,8 @@ Project and domain terms, including the Thai you'll meet in the code.
 
 **Pass**
 : One model call within a turn. There are three: [inner/tools, persona, extraction](../concepts/three-passes.md).
+Two more fire only when needed (*seeing* an image, forcing music search terms), and two
+run when nobody is talking (*idle*, *reflecting*).
 
 **Brief**
 : The short plain-text note pass 1 writes *to her* — what she knows, what she doesn't.
@@ -29,8 +31,31 @@ in the long persona prompt. The strongest prompt-level lever in the project.
 deleted.
 
 **Episode**
-: A short sentence about something that mattered and has a future — a promise, a plan, a
-real conflict. Capped at 25 per person. *Not* a transcript.
+: A short sentence about something that *happened*, as opposed to something that is
+true. `Steven plays guitar` is a fact; `first heard about Steven` is an episode. Written
+only when the turn [surprised](#surprise) her, capped at 25 per person. *Not* a transcript.
+
+**Surprise** {#surprise}
+: The test that decides whether a turn is worth an episode: did it **move the graph**?
+Either she met a subject she'd never met, or a belief flipped. Nothing else counts.
+Named after how brains work — you remember the drive where a deer ran out, not the other
+four hundred. [How it works](../concepts/memory.md#surprise).
+
+**Reflection**
+: A conclusion she draws while nobody is talking to her, from several episodes at once —
+*"Krich is always the one telling me about other people."* Stored as an episode under her
+own name, so it becomes something she can recall later.
+[How it works](../concepts/memory.md#reflection).
+
+**Watermark**
+: The bookmark that says "I've already thought about everything up to here." It's just her
+newest reflection's timestamp — no extra table. A reflection that concluded nothing still
+writes a **blank** row so the bookmark moves; blanks are filtered everywhere she reads.
+
+**Axis**
+: A group of relations that are competing answers to the *same question*. `likes` and
+`hates` are one axis, so the newer one replaces the older. `plays` and `likes` are not —
+you can play a game and like it. There is exactly one axis today (`feel`).
 
 **Entity**
 : A node in her graph — a person, character, or thing. Case-insensitive names, no aliases
@@ -75,7 +100,8 @@ text and calls the same pipeline. **A surface is not a brain.**
 
 **Pass label**
 : On the panel's llm tab, which pass a logged call belongs to: *thinking*, *her reply*,
-*remembering*, *idle*.
+*remembering*, *seeing*, *reflecting*, *idle*. The fastest way to answer "why did she do
+that?"
 
 **Bench**
 : A runnable script in `tests/` that prints a table you read and judge. Not a unit test.

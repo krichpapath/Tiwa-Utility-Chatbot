@@ -131,17 +131,21 @@ its own as the graph fills — new people get rarer, and only flips remain.
 
 ### A new belief replaces the old one
 
-The primary key is `(src, rel, dst)`, so these were two valid rows and **both** were
-injected every turn:
+People change their minds; her graph only ever appended. Say *"Tycoon likes Marvel
+Rivals"* today and *"Tycoon hates Marvel Rivals"* tomorrow and she believed **both** —
+because a row is keyed on `(subject, relation, object)`, and `likes` and `hates` are
+different relations, so they never collided:
 
 ```text
 Tycoon likes Marvel Rivals
 Tycoon hates Marvel Rivals
 ```
 
-She read a flat contradiction and picked one at random. `_supersede()` fixes it with a
-hand-listed **axis**: relations that are two answers to the same question compete, and
-the newer one wins.
+Both got injected every turn, so she read a flat contradiction and picked one at random.
+
+`_supersede()` fixes it with an **axis** — a group of relations that are competing answers
+to the *same question*. Two facts on one axis about one pair can't both be true, so the
+newer one wins and the old row is deleted.
 
 | written | result |
 |---|---|
@@ -153,6 +157,9 @@ the newer one wins.
 up, not before.
 
 ### She thinks about it while nobody is watching {#reflection}
+
+Episodes are raw — *what happened*. A reflection is what they **add up to**, and she works
+it out in her own time rather than during a conversation.
 
 The heartbeat wakes every 30 minutes from 09:00–23:00 — **about 28 model calls a day** —
 and is rate-limited to *speaking* once every 3 hours. Almost all of those calls decided
