@@ -125,6 +125,21 @@ anything) is a real request and would otherwise be swallowed.
 Both directions are locked in `tests/djbench.py` using the exact strings from the log —
 that table fails 4/4 against the old trigger.
 
+### She is told the deck is empty only when asked {#empty-deck}
+
+`_doing()` says nothing about music on a silent turn — and that left her with **zero
+state on the one turn it matters**: someone asks what's on while nothing is playing, and
+she names a song. There is no live state saying "nothing", so the persona fills the gap.
+
+The fix keeps the narrowness. `_asked_deck()` matches the same deck-question phrases the
+retry already uses to veto itself (`_DECK_Q`), and only then does `_doing()` say the deck
+is empty. An ordinary quiet turn still costs nothing.
+
+The phrase list is deliberately made of *phrases*, never the bare word `อะไร` — a looser
+`เพลงอะไร` swallows `เปิดเพลงอะไรก็ได้` ("put on anything"), which is a real request. That
+one is asserted in `djbench.py`, because it broke there the moment it was written too
+loosely.
+
 ### The negative is narrow on purpose
 
 It used to say "no music is playing" on *every* quiet turn. That's a rule about music

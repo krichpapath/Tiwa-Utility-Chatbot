@@ -103,7 +103,11 @@ assert good >= 5, "regressed"          # exit non-zero on failure
 Rules that come from real pain:
 
 - **Never touch `data/tiwa.db`.** Use `:memory:` or a temp file. `panelbench.py`
-  monkeypatches `memory.connect` for exactly this.
+  monkeypatches `memory.connect` for exactly this. **Importing `bot` is not enough** —
+  `bot.db` is already the real database and `_start()` logs `playing <title>` to it, so
+  `djbench.py` quietly wrote its six fixtures into the live activity log on every run.
+  Found while reading that log for a real music bug, with `Bad Apple (video)` ×5 sitting
+  in the middle of the evidence. If a bench drives `bot`, reassign `bot.db` first.
 - **Import `bot`, don't reimplement it.** Bugs lived in the glue between the code and
   discord.py precisely because that glue was untestable. `bot.py` is import-safe now.
 - **Test the class Discord actually drives.** A `NotImplementedError` shipped because the

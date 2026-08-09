@@ -187,6 +187,19 @@ amount of result filtering should override.
   positive plays a song nobody asked for. See
   [action state](../concepts/action-state.md#the-retry-does-not-care-whats-already-playing)
   for why it ignores the current deck.
+- **A youtube link is not a question, but it looks like one.** `_QUESTION` contains `"?"`
+  and every `youtube.com/watch?v=…` carries one, so the retry was dead for **every link
+  anyone pasted**. `_missed_music()` now strips URLs before the question test and only
+  before that test — the verb test needs the trailing space in `"queue "`.
+- **Thai verbs come without "เพลง" glued on.** `ขอ ATLAS-The Score` reached none of the
+  lists: `ขอเพลง` didn't match, and no prefix covered a bare `ขอ`. The prefixes now
+  include `"ขอ "`, `"เปิด "`, `"เล่น "`, `"ต่อ "` **with the space** — Thai doesn't space
+  its own words, so a space means a foreign title follows, which is what keeps `ขอโทษ`
+  (sorry) and `ขอบคุณ` (thanks) out.
+- **Loosening detection needs a veto.** Because those prefixes also start `ขอ ยืมตังหน่อย`
+  (lend me money), `_force_music()` now accepts `NONE` from the terms model and queues
+  nothing. Playing a random song over an unrelated message is worse than the silence the
+  retry exists to fix.
 - **Don't let it pad a named song.** `_force_music`'s terms prompt is told to output a named
   song plus at most its artist or game, nothing else. It once turned *"Red Line"* (Warframe)
   into `Red Line Warframe chase` — picking up "escape the police" from the sentence — and

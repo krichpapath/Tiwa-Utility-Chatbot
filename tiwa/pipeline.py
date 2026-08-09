@@ -136,7 +136,10 @@ async def _inner_brief(db, author: str, text: str, recent: str = "", seen: str =
 _MUSIC_ASK = ("เปิดเพลง", "ขอเพลง", "อยากฟัง", "อยากได้เพลง", "ฟังเพลง", "หาเพลง",
               "จัดเพลง", "เปิดอะไร", "play some", "play music", "play a song",
               "play something", "put on some", "want to hear", "wanna hear",
-              "some music")
+              "some music",
+              # "เพลงไม่ออกใส่ queue ด้วย" — a queue ask with the verb in the
+              # middle, so no prefix in _MUSIC_VERB could ever reach it
+              "ใส่คิว", "ใส่ queue", "เข้าคิว", "ลงคิว")
 
 # A bare imperative — "play <title>", "queue <title>" — is the most common ask
 # there is, and none of the phrases above match it. Live log, four turns in a
@@ -148,15 +151,34 @@ _MUSIC_ASK = ("เปิดเพลง", "ขอเพลง", "อยากฟ
 # this sees it, so "@Tiwa play X" works — but "หนู play X" does not. Parse the
 # first word properly if leading filler turns out to be common.
 _MUSIC_VERB = ("play ", "queue ", "put on ", "เปิดเพลง", "เล่นเพลง", "ต่อคิว",
-               "เปลี่ยนเพลง")
+               "เปลี่ยนเพลง",
+               # Thai verb + a title, with no "เพลง" glued on: "ขอ ATLAS-The
+               # Score" reached none of the lists above and she claimed she had
+               # put it on. The trailing space is what keeps "ขอโทษ" (sorry) and
+               # "ขอบคุณ" (thanks) out — Thai does not space its own words, so a
+               # space here means a foreign title follows.
+               "ขอ ", "เปิด ", "เล่น ", "ต่อ ")
 
 # ...but an imperative is not always a request. "ตอนนี้เปิดเพลงอะไรอยู่" (what
 # song is on right now?) matched _MUSIC_ASK, so _force_music searched that
 # literal sentence and played a random Thai song over the top of her answer.
 # That is worse than the silence this whole retry exists to fix.
 # Phrases, not the bare word อะไร: "เปิดอะไรก็ได้" (put on anything) is a real ask.
-_QUESTION = ("?", "อะไรอยู่", "อะไรบ้าง", "ชื่ออะไร", "ไหม", "มั้ย", "ทำไม", "เมื่อไหร่",
-             "what song", "which song", "what's playing", "what is playing")
+# Split out, because these two do different jobs. _DECK_Q means "they are asking
+# ABOUT the deck" — which vetoes the retry AND, when nothing is on, is the one
+# moment telling her the deck is empty is worth the tokens.
+# Phrases, never the bare word อะไร — "เปิดเพลงอะไรก็ได้" (put on anything) is a
+# real ask, and a looser "เพลงอะไร" swallows it. djbench catches that one.
+_DECK_Q = ("อะไรอยู่", "ชื่ออะไร", "เล่นเพลงไร", "เพลงไรอยู่",
+           "what song", "which song", "what's playing", "what is playing",
+           "what are you playing")
+_QUESTION = _DECK_Q + ("?", "อะไรบ้าง", "ไหม", "มั้ย", "ทำไม", "เมื่อไหร่")
+
+# A youtube link always carries "?v=", and "?" is in _QUESTION — so every
+# `queue https://www.youtube.com/watch?v=...` was read as a question and the
+# retry never fired. Strip links before asking "is this a question?", never
+# before the verb check, which needs the trailing space in "queue ".
+_URL = re.compile(r"https?://\S+")
 
 _TERMS_SYSTEM = (
     "Turn this request into YouTube search terms for music. Output ONLY the terms, "
@@ -166,7 +188,9 @@ _TERMS_SYSTEM = (
     "'sad') finds a different song. Measured: 'Red Line' from Warframe became "
     "'Red Line Warframe chase' and played the wrong track. "
     "Only when they named no song at all — just a mood, a genre, a game or an "
-    "activity — invent terms that fit it."
+    "activity — invent terms that fit it. "
+    "If the message is NOT asking for music at all, output exactly NONE. "
+    "'ขอ ยืมตังหน่อย' (lend me money) is NONE. 'เปิด ประตู' (open the door) is NONE."
 )
 
 
@@ -188,7 +212,7 @@ def _missed_music(text: str) -> bool:
     if tools.PENDING_MUSIC is not None or tools.DJ:
         return False
     low = text.lower().strip()
-    if any(q in low for q in _QUESTION):
+    if any(q in _URL.sub("", low) for q in _QUESTION):
         return False  # asking about music is not asking for music
     return low.startswith(_MUSIC_VERB) or any(k in low for k in _MUSIC_ASK)
 
@@ -212,12 +236,24 @@ async def _force_music(db, text: str) -> None:
         options={"temperature": 0.3, "num_ctx": 1024},
     )
     terms = _terms(resp["content"])
-    if terms:
-        tools.play_music(db, terms)
-        memory.log(db, "tool", f"play_music({terms!r}) -> forced, the tool pass skipped it")
+    # The veto. _MUSIC_VERB now matches bare Thai verbs ("ขอ ", "เปิด ") to catch
+    # "ขอ ATLAS-The Score", and those also start "ขอ ยืมตังหน่อย". Playing a random
+    # song over an unrelated message is worse than the silence this retry exists
+    # to fix, so the model that reads the sentence gets the last word.
+    if not terms or terms.strip(" .").upper() == "NONE":
+        memory.log(db, "tool", f"play_music -> not a music ask after all: {text[:60]!r}")
+        return
+    tools.play_music(db, terms)
+    memory.log(db, "tool", f"play_music({terms!r}) -> forced, the tool pass skipped it")
 
 
-def _doing(missed_music: bool = False, blind: bool = False) -> str:
+def _asked_deck(text: str) -> bool:
+    """They asked what is on. The one moment an empty deck is worth telling her."""
+    return any(q in text.lower() for q in _DECK_Q)
+
+
+def _doing(missed_music: bool = False, blind: bool = False,
+           asked_deck: bool = False) -> str:
     """What she is actually doing, read from live state — never from what the
     model believes it did.
 
@@ -241,6 +277,15 @@ def _doing(missed_music: bool = False, blind: bool = False) -> str:
             line += " Queued next: " + ", ".join(t["title"] for t in music.QUEUE[:3]) + "."
         out.append(line + " You know this without looking it up — if they ask"
                           " what is on, just tell them.")
+    elif asked_deck:
+        # The deck is empty and they asked what is on. _doing() otherwise says
+        # NOTHING on a silent turn — deliberately, because a standing "no music is
+        # playing" is paid for on every message and used on almost none. But that
+        # left her with zero state on exactly the turn someone asks, so she
+        # invented a song. Narrow beats standing: this fires only when asked.
+        out.append("NOTHING is playing right now and the queue is empty. Do NOT name"
+                   " a song, do not say you are playing anything — you are not."
+                   " Tell them nothing is on and offer to put something on.")
     # what she set in motion THIS turn: it is happening, whatever she thinks
     queued = list(tools.DJ) + ([("play", tools.PENDING_MUSIC)]
                                if tools.PENDING_MUSIC else [])
@@ -310,7 +355,8 @@ async def respond(db, hist: list, author: str, text: str, images=()) -> str:
         "they care about it, whether it is any good — ask, and ask like the answer "
         "matters to you. A real question beats a safe take every time."
     )
-    doing = _doing(missed, blind=bool(images) and not seen)
+    doing = _doing(missed, blind=bool(images) and not seen,
+                   asked_deck=_asked_deck(text))
     if doing:  # quiet turn = not one wasted token
         rules += " " + doing
     if seen:

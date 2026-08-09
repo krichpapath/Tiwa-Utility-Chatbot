@@ -51,6 +51,12 @@ class FakeChannel:
 async def main():
     import bot  # noqa: E402  (imports discord, does not connect)
 
+    # bot.db is the REAL data/tiwa.db, and _start() logs "playing <title>" to it.
+    # Every run of this bench wrote its six fixtures into the live activity log —
+    # found while reading that log for a genuine music bug, where "Bad Apple
+    # (video)" x5 sat in the middle of the evidence. Benches never touch it.
+    bot.db = memory.connect(":memory:")
+
     vc = FakeVC()
     channel = FakeChannel(vc)
     bot.client.loop = asyncio.get_running_loop()
@@ -185,6 +191,25 @@ async def main():
         # a bare `play` substring must NOT fire — this is why _MUSIC_VERB anchors
         ("my dad plays Warframe", None, False),
         ("he plays guitar", None, False),
+        # --- live log 2026-08-01/02. Three claimed-but-never-played turns out of
+        # 107, and all three reached _missed_music as False for a DIFFERENT reason.
+        # A youtube link always carries "?v=", and "?" is in _QUESTION, so every
+        # `queue <link>` was read as a question and the retry never ran:
+        ("queue https://www.youtube.com/watch?v=ftIfmQYUvVw", None, True),
+        ("play https://www.youtube.com/watch?v=gVQzCR5h4Y8", "BIBBIDIBA", True),
+        # a Thai verb with a foreign title and no "เพลง" glued on:
+        ("ขอ ATLAS-The Score", None, True),
+        ("เปิด Unstoppable-The score", "ATLAS", True),
+        # the verb in the middle of the sentence, so no prefix could reach it:
+        ("เพลงไม่ออกใส่ queue ด้วย", None, True),
+        # ...and the cost of loosening: these must still NOT fire. "ขอ " and
+        # "เปิด " are prefixes now, and Thai does not space its own words, so the
+        # space is what separates a foreign title from ordinary speech.
+        ("ขอโทษนะ", None, False),
+        ("ขอบคุณมาก", None, False),
+        ("เปิดประตูให้หน่อย", None, False),
+        # a real question that happens to contain a link is still a question
+        ("เพลงนี้ชื่ออะไร https://www.youtube.com/watch?v=abc", "BIBBIDIBA", False),
     ]
     for ask, deck, want in cases:
         tools.PENDING_MUSIC, tools.DJ[:] = None, []
@@ -198,6 +223,21 @@ async def main():
     tools.PENDING_MUSIC = ""  # stop_music fired -> do NOT start one instead
     assert not pipeline._missed_music("ปิดเพลง เปิดเพลงใหม่ไม่ต้อง")
     tools.PENDING_MUSIC = None
+
+    # --- she must know when the deck is EMPTY, but only when asked -----------
+    # _doing() stays silent on an ordinary quiet turn, on purpose. The gap was
+    # the turn where someone asks what is on with nothing playing: she had zero
+    # state and named a song anyway.
+    music.NOW["title"] = None
+    assert pipeline._doing(asked_deck=True).startswith("NOTHING is playing")
+    assert pipeline._doing(asked_deck=False) == "", "a standing negative came back"
+    music.NOW["title"] = "Bad Apple (video)"
+    on = pipeline._doing(asked_deck=True)
+    assert "NOTHING is playing" not in on and "Bad Apple" in on, on
+    music.NOW["title"] = None
+    for q, want in [("มึงเล่นเพลงไรอยู่เนี่ย", True), ("what song is this", True),
+                    ("เปิดเพลงอะไรก็ได้", False), ("play some lofi", False)]:
+        assert pipeline._asked_deck(q) is want, q
 
     # model output arrives padded; only the terms may reach the search
     assert pipeline._terms('<think>hmm</think>\n"hype gaming EDM".') == "hype gaming EDM"
