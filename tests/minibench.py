@@ -31,16 +31,17 @@ def fake_chat(**kw):
 
 
 llm.chat = fake_chat
+minis.MINIS.clear()  # fixtures only — the real dj has its own bench and its own model
 
 
 @minis.mini("plays and queues music. give it the song, mood or 'their favourite'.",
             ("playing", "artist"))
-def dj(db, task):
+def fakedj(db, task):
     return {"playing": task, "artist": "unknown"}
 
 
 @minis.mini("reads and changes Krich's calendar.", ("events",))
-def calendar(db, task):
+def fakecal(db, task):
     return {"events": []}
 
 
@@ -61,7 +62,7 @@ def schema():
     s = minis._schema()
     strict(s)
     assert s["properties"]["dispatch"]["items"]["properties"]["mini"]["enum"] == \
-        ["calendar", "dj"], "enum must be the live registry, sorted"
+        ["fakecal", "fakedj"], "enum must be the live registry, sorted"
     print("schema ok   — strict-mode legal at every depth, mini names are an enum")
 
 
@@ -71,25 +72,32 @@ def prompt_says_json():
     system = sent["messages"][0]["content"]
     assert "json" in system.lower(), "DeepSeek returns empty content without the word"
     assert sent["options"]["temperature"] == 0, "dispatch must not be creative"
-    for name in ("dj", "calendar"):
+    for name in ("fakedj", "fakecal"):
         assert f"- {name}:" in system, f"{name} missing from the prompt"
-    assert minis.MINIS["dj"]["description"] in system
+    assert minis.MINIS["fakedj"]["description"] in system
     print("prompt ok   — says 'json', temp 0, and lists every registered mini")
 
 
 def routing():
     cases = [
         ("nothing", '{"dispatch":[],"ask":null}', [], ""),
-        ("one job", '{"dispatch":[{"mini":"dj","task":"their favourite song"}],"ask":null}',
-         [("dj", "their favourite song")], ""),
-        ("two jobs", '{"dispatch":[{"mini":"dj","task":"lofi"},'
-                     '{"mini":"calendar","task":"cancel friday"}],"ask":null}',
-         [("dj", "lofi"), ("calendar", "cancel friday")], ""),
+        ("one job", '{"dispatch":[{"mini":"fakedj","task":"their favourite song"}],"ask":null}',
+         [("fakedj", "their favourite song")], ""),
+        ("two jobs", '{"dispatch":[{"mini":"fakedj","task":"lofi"},'
+                     '{"mini":"fakecal","task":"cancel friday"}],"ask":null}',
+         [("fakedj", "lofi"), ("fakecal", "cancel friday")], ""),
         ("ambiguous", '{"dispatch":[],"ask":"which friday did they mean"}',
          [], "which friday did they mean"),
         ("invented mini", '{"dispatch":[{"mini":"lights","task":"off"}],"ask":null}',
          [], ""),
         ("junk", "sorry, I can't help with that", [], ""),
+        # valid JSON, wrong shape. OpenRouter's strict schema cannot produce
+        # these; the cost ceiling falling back to local ollama can, and .get()
+        # on a list raised AttributeError straight out of the turn.
+        ("json array", "[1, 2]", [], ""),
+        ("json null", "null", [], ""),
+        ("json string", '"just a sentence"', [], ""),
+        ("empty content", "", [], ""),
     ]
     print(f"\n{'case':14} | {'dispatch':40} | ask")
     print(f"{'-'*14}-+-{'-'*40}-+-{'-'*30}")

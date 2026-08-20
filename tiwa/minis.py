@@ -138,6 +138,12 @@ def parse(content: str) -> dict:
         d = json.loads(content or "{}")
     except json.JSONDecodeError:
         return {"dispatch": [], "ask": ""}
+    # valid JSON that is not an object: "null", "[]", a bare string. OpenRouter's
+    # strict schema cannot produce it, but the cost ceiling silently falls back to
+    # local ollama (llm.chat), whose `format` is not strict — and .get() on a list
+    # is an AttributeError that eats the whole turn.
+    if not isinstance(d, dict):
+        return {"dispatch": [], "ask": ""}
     jobs = [
         (j["mini"], str(j.get("task") or ""))
         for j in (d.get("dispatch") or [])
@@ -171,8 +177,90 @@ async def dispatch(db, author: str, text: str, recent: str = "") -> dict:
     return parse(resp["content"])
 
 
+# ---------------------------------------------------------------- DJ Tiwa
+
+_DJ_SYSTEM = """You are the DJ. Decide what to do with the deck and what to search for. Answer in json.
+
+ACTION — pick one:
+- play  : put something on now. Also the right answer when a song is already on and they want a DIFFERENT one instead.
+- queue : they want more music AFTER what is on, not instead of it.
+- skip  : they are bored of the current song. Thai: 'ข้ามเพลง', 'เปลี่ยนเพลง', 'ถัดไป', 'ไม่เอาเพลงนี้'.
+- stop  : music off, queue cleared. Thai: 'หยุดเพลง', 'ปิดเพลง', 'พอแล้ว'.
+- none  : this is not a request for music at all.
+
+TERMS — what to search YouTube for. Empty string for skip, stop and none.
+If they NAMED a song, output that name plus at most the artist or the game it is from, and NOTHING else. A descriptive word they did not say finds a different song: 'Red Line' from Warframe became 'Red Line Warframe chase' and played the wrong track.
+Only when they named no song at all — just a mood, a genre, a game or an activity — invent terms that fit it. They do not have to name a song, and asking them which genre instead of picking one is a failure.
+
+none is the veto and it matters: 'ขอ ยืมตังหน่อย' (lend me money) is none. 'เปิด ประตู' (open the door) is none. Putting a random song over an unrelated message is worse than doing nothing."""
+
+_DJ_FORMAT = {
+    "type": "object",
+    "properties": {
+        "action": {"type": "string", "enum": ["play", "queue", "skip", "stop", "none"]},
+        "terms": {"type": "string"},
+    },
+    "required": ["action", "terms"],
+    "additionalProperties": False,
+}
+
+
+@mini(
+    "plays, queues, skips or stops music. Give it what they want to hear — a song, "
+    "an artist, a mood, a game, or 'whatever you like'. It reads the deck and picks "
+    "the search terms itself, so you never decide between play and queue. Thai asks "
+    "count the same: เปิดเพลง, ขอเพลง, อยากฟัง, ใส่คิว, ข้ามเพลง, หยุดเพลง.",
+    ("action", "terms", "playing", "queued"),
+)
+def dj(db, task: str) -> dict:
+    """One call decides the action AND the search terms; the deck is read, not asked.
+
+    This is `_TERMS_SYSTEM` plus the play/queue/skip/stop choice that used to cost
+    Main Tiwa four competing tools. She now sees one mini instead, and the deck
+    state reaches the decision as a FACT rather than as a tool call she had to
+    remember to make.
+    """
+    from . import music, tools  # lazy: music pulls in av, tools imports memory
+
+    now = music.NOW["title"]
+    deck = (f"Playing right now: {now}. {len(music.QUEUE)} song(s) queued."
+            if now else "Nothing is playing and the queue is empty.")
+    resp = llm.chat(
+        model=llm.TOOL_MODEL if llm.PROVIDER == "openrouter" else MODEL,
+        messages=[{"role": "system", "content": _DJ_SYSTEM},
+                  {"role": "user", "content": f"{deck}\n\nThey want: {task}"}],
+        fmt=_DJ_FORMAT,
+        options={"temperature": 0, "num_ctx": 1024},
+    )
+    try:
+        out = json.loads(resp["content"] or "{}")
+        action, terms = out["action"], (out.get("terms") or "").strip()
+    except (json.JSONDecodeError, KeyError, TypeError, AttributeError):
+        return {}  # run() logs it; she asks instead of guessing
+
+    # The tool functions still do the acting, so they still write to the Turn and
+    # bot._flush_music still drains it unchanged. What changed is who decides.
+    if action in ("play", "queue") and not terms:
+        action = "none"  # a play with no terms would search the empty string
+    if action == "play":
+        tools.play_music(db, terms)
+    elif action == "queue":
+        tools.queue_music(db, terms)
+    elif action == "skip":
+        tools.skip_music(db, "")
+    elif action == "stop":
+        tools.stop_music(db, "")
+
+    # facts only. play_music's return value is a paragraph of "do NOT name the
+    # artist" — that is a prohibition, it belongs to pipeline._doing(), and it is
+    # exactly what rule 2 exists to keep out of a mini's return.
+    return {"action": action, "terms": terms, "playing": now,
+            "queued": len(music.QUEUE)}
+
+
 if __name__ == "__main__":  # runnable check: the contract, offline
     db = memory.connect(":memory:")
+    MINIS.clear()  # the real registry is not the fixture; dj has its own bench
 
     @mini("test mini", ("title", "count", "tags"))
     def demo(db, task):

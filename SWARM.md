@@ -338,19 +338,66 @@ asserts the second, but only on a live call — and a live call needs a key.
 and six routing cases including an invented mini and non-JSON junk). No key, no
 network, no model.
 
-### S2 · DJ Tiwa
+### S2 · DJ Tiwa ✅ built 2026-08-21 · not yet wired
 
-**Do:** move music into a mini. `_TERMS_SYSTEM`, `_missed_music`, `_force_music`,
-the deck state — all of it. Main Tiwa's 4 music tools become 1 dispatch target.
+**This gate was written wrong and reading `djbench` is what showed it.** The plan
+said move `_TERMS_SYSTEM`, `_missed_music`, `_force_music` and the deck state into
+the mini. Two of those must not move, and one of them for a reason that matters
+more than the test.
 
-**Check:** `djbench` passes **unchanged.** It's already the music regression
-suite with all the hard-won Thai edge cases (bare verbs vs. polite words,
-youtube links reading as questions). If it still passes, the move was clean.
+#### `_missed_music` stays in the turn layer — it is the net UNDER the router
+
+It fires when the model **failed to notice** a music ask — about 1 ask in 4–6.
+Put it inside DJ Tiwa and it only ever runs on turns where the router already
+dispatched DJ, which is exactly the turns that never needed it. A safety net
+inside the thing it is catching is not a safety net.
+
+So it stays in `pipeline`, deterministic, on every turn, in front of dispatch.
+That is the cheap layer of a hybrid router, and it is already built and already
+measured — 24 cases in `djbench`, every one traced to a dated live-log failure.
+
+`_doing()` and `_asked_deck()` stay too: they compose Main Tiwa's state from
+*every* mini, not just music.
+
+#### What actually moved
+
+`_TERMS_SYSTEM` plus the play/queue/skip/stop choice, into `minis.dj`. One
+schema-constrained call at temp 0 returns `{action, terms}`.
+
+The deck is **read**, never asked for — `music.NOW` and `music.QUEUE` go into the
+prompt as facts. That is the tool call this mini deletes: Main Tiwa used to need
+four competing tools and had to remember which one the deck state called for.
+
+The action is then applied through the existing tool functions, so they still
+write to the `Turn` and `bot._flush_music` still drains it **unchanged**.
+
+Facts out: `action`, `terms`, `playing`, `queued`. Not `play_music`'s return
+value — that is a paragraph of *"do NOT name the artist, album or year"*, which
+is a prohibition, belongs to `_doing()`, and is precisely what rule 2 keeps out
+of a mini. `djminibench` asserts none of it leaks.
+
+#### Not wired yet
+
+`pipeline.respond()` is untouched and the four music tools are still registered.
+Wiring means removing them from Main's list in the same change that starts
+calling dispatch — otherwise music gets decided twice. That belongs with S3,
+which has to make dispatch concurrent anyway; serial dispatch would add ~2s to
+every turn for no gain.
+
+**Check:** `tests/djminibench.py` — the contract, the deck reaching the decision,
+each action landing on the `Turn`, the empty-terms veto, and junk leaving the
+deck untouched. Offline, canned model.
+
+`djbench` passes **unmodified** — `git diff tests/djbench.py` is empty.
 
 ### S3 · Fork the reply — the latency gate
 
 **Do:** persona pass starts at t=3ms, concurrently with dispatch. She stops
 waiting to be told what she already knows.
+
+**Absorbed from S2:** wire dispatch into `respond()` and drop the four music
+tools from Main's list in the same change. This is the first gate that alters
+live behaviour rather than adding beside it.
 
 **Check:** new `latbench.py` reads `llm_log` (already has `ms`, `tokens`).
 Report **time-to-first-token-of-her-reply**, not time-to-everything-settled.
