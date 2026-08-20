@@ -278,30 +278,65 @@ return one shared `Turn`.
 
 `djbench`, `panelbench`, `test_memory` pass unmodified.
 
-### S1 · The mini contract
+### S1 · The mini contract ✅ done 2026-08-21
 
-**Do:** `tiwa/minis/__init__.py` — a `@mini` decorator mirroring `@tool`, a
-return validator that drops anything not parseable as structured data, and the
-dispatch call.
+**Did:** `tiwa/minis.py` — registry plus dispatch, one module, exactly the shape
+`tools.py` already has. (Not a package: `tools.py` holds the decorator *and* all
+ten tools in 270 lines, and there is no reason minis differ. It becomes a package
+the day one mini needs its own file.)
 
-Dispatch schema:
+**Nothing calls it.** `pipeline.py` is untouched — S1 ships the contract, S2 moves
+music onto it. The gate is additive and revertable on its own.
+
+A mini is `fn(db, task: str) -> dict`, registered with a description and **the
+list of fact keys it may return**:
+
+```python
+@mini("plays and queues music. give it the song, mood or 'their favourite'.",
+      ("playing", "artist"))
+def dj(db, task): ...
+```
+
+**Declared fields are how rule 2 is enforced**, and they are the only automatic
+part of it. You cannot reliably detect `"tell them it's playing"` at runtime — but
+you can make adding a field a visible edit someone reviews. A mini that starts
+smuggling voice has to say so in its own signature first. `clean()` drops
+undeclared keys, nested objects, and non-dict returns.
+
+`run()` degrades to `{}` on a crash, an unknown mini, or an unusable return —
+never raises. Same stance as tools: a bad mini is a no-op she asks about, not a
+dead turn.
+
+Dispatch schema, as built:
 
 ```json
 {
   "dispatch": [{"mini": "dj", "task": "their favourite song"}],
-  "ask": "which album did they mean"
+  "ask": "which friday did they mean"
 }
 ```
 
-- `"dispatch": []` is the **common** case — 59% of turns need no mini. It must be
-  the cheapest, most obvious output, not a fallthrough.
+- `"dispatch": []` is the **common** case — 59% of turns need no mini. The prompt
+  says so in those words: *"An empty list is the normal answer, not a failure."*
 - Ambiguous? Empty dispatch + a populated `ask`. Not new — the inner pass already
   emits `ask them: ...` lines.
+- `mini` is a **strict enum of the live registry**. The tool pass has to cope with
+  invented names; this pass cannot produce one.
+- The task is a **goal, not a plan** — "their favourite song", not the user's
+  sentence and not steps. The mini works out the rest.
 - No `blocking` field. One rule instead: **LLM dispatches never block; code
   (recall, action state) runs inline.** A knob here is a knob that gets set wrong.
 
-**Check:** validator rejects prose, accepts JSON. Ship with one trivial mini so
-the contract is exercised.
+**Two traps this repo has already been bitten by, both now checked offline:**
+OpenRouter rejects a strict `json_schema` whose properties are not *all* required
+(`gcal._EVENT_FORMAT` carries the same note), and DeepSeek returns **empty
+content** unless the prompt literally contains the word "json". `llm.chat`
+asserts the second, but only on a live call — and a live call needs a key.
+
+**Check:** `py -X utf8 -m tiwa.minis` (registry contract) and
+`tests/minibench.py` (schema strictness at every depth, the "json" word, temp 0,
+and six routing cases including an invented mini and non-JSON junk). No key, no
+network, no model.
 
 ### S2 · DJ Tiwa
 
@@ -379,18 +414,19 @@ git switch -c swarm
 
 ```
 tiwa/
+  tools.py         # S0: Turn lives here, next to the flags it replaced
+  minis.py         # S1: @mini + clean() + dispatch(). S2 adds DJ Tiwa here
   pipeline.py      # untouched — the control arm for A/B
-  turn.py          # new: concurrent turn
-  minis/
-    __init__.py    # @mini decorator + validator + dispatch
-    dj.py
-    search.py
-    calendar.py
-  record.py        # new: JSONL export, tagged
+  record.py        # later: JSONL export, tagged
 tests/
-  dispatchbench.py # routing accuracy
-  latbench.py      # p50/p95 per arch
+  turnbench.py     # S0: concurrency
+  minibench.py     # S1: dispatch layer, offline
+  dispatchbench.py # later: routing accuracy, live
+  latbench.py      # later: p50/p95 per arch
 ```
+
+One module per layer until a file gets long enough to hurt — `tools.py` carries a
+registry and ten tools in 270 lines and nobody has wanted it split.
 
 One knob, mirroring `TIWA_MODE`: `TIWA_TURN=serial|concurrent`, default `serial`.
 
