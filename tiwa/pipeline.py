@@ -80,7 +80,8 @@ _INNER_OPTS = {"temperature": 0.3, "top_p": 0.8, "top_k": 20, "num_ctx": 4096}
 async def _tool_chat(db, msgs: list) -> str:
     """Shared tool loop: chat with the registry until the model outputs text."""
     model = llm.TOOL_MODEL if llm.PROVIDER == "openrouter" else MODEL
-    tools.SEEN_URLS.clear()  # a repeat search inside one turn must return new pages
+    # SEEN_URLS used to be cleared here; tools.new_turn() owns that boundary now,
+    # so a repeat search inside one turn still returns new pages.
     for _ in range(3):  # ponytail: max 3 tool rounds, plenty for one message
         resp = await asyncio.to_thread(
             llm.chat,
@@ -321,6 +322,7 @@ async def respond(db, hist: list, author: str, text: str, images=()) -> str:
     turn, and an empty list costs exactly nothing — no vision call is made.
     """
     turn0 = time.perf_counter()
+    tools.new_turn()  # everything the tools flag this turn is scoped to this task
     recent = "\n".join(
         m["content"] if m["role"] == "user" else f"{TIWA}: {m['content']}"
         # lines before the current message: resolve "he/she", and show whether a
@@ -459,6 +461,9 @@ async def _settle(db):
 async def idle(db) -> str:
     """Heartbeat turn: usually returns "" (stay quiet), sometimes an unprompted message."""
     await _settle(db)  # settle what happened before deciding whether to speak
+    # the heartbeat is ONE long-lived task, so its context outlives a tick —
+    # without this the last idle turn's flags leak into the next one
+    tools.new_turn()
     eps = memory.idle_fuel(db)
     if not eps:
         return ""  # nothing lived yet = nothing to say; 8B won't stay quiet on its own

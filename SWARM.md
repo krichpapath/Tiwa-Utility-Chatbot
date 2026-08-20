@@ -1,0 +1,439 @@
+# SWARM — the Mini Tiwa plan
+
+Status: **not started.** This is the picture to argue with before any code moves.
+
+Companion to `PLAN.md`. Same rules: every gate ships alone, every gate has one
+runnable check, and a gate that can't be judged by running something isn't done.
+
+---
+
+## The one-sentence version
+
+Main Tiwa decides **what** to do. Mini Tiwas figure out **how**.
+
+She says "put on their favourite song." DJ Tiwa works out who "they" are, what
+they like, finds it, and plays it. Main Tiwa never learns any of that.
+
+---
+
+## Why (the honest ranking)
+
+Four reasons were on the table. They are not equally good, and the plan is
+built on the strong ones.
+
+| reason | holds up? |
+|---|---|
+| **Growth** — add skills without breaking the ones that work | **Yes. This is the whole reason.** |
+| **Fewer details in her head** — facts instead of "don't say X" | **Yes**, and stronger than it first looked |
+| **Latency** — she talks while work happens | **Partly.** Real, but the cause isn't what it looked like |
+| **Prompt dilution** — long prompt hurting attention | **No.** Her prompts are ~2.6k tokens; the effect starts an order of magnitude higher |
+
+### Growth is the real one
+
+`docs/concepts/tools.md` already says it:
+
+> More tools = worse tool selection. `now_playing` was deleted for this reason.
+> Every tool you add competes with `play_music` for attention.
+
+You deleted a working tool to protect the others. That's the ceiling, and it's
+self-diagnosed. Home Assistant is next on the roadmap — lights, locks, garage,
+heat — which is 5-6 more tools onto a list of 10.
+
+Under this design, **Main Tiwa's list stays flat forever.** She sees ~4 minis.
+DJ Tiwa can have nine tools inside it and Main never knows.
+
+`now_playing` can even come back. It only had to die because it competed.
+
+### "Facts instead of prohibitions"
+
+Look at what's in her **voice** prompt today (`pipeline._doing()`):
+
+> "Never say you do not know the song... Do not sing or quote its lyrics.
+> You have not seen the search result yet, so do NOT name an artist, album
+> or year for it."
+
+Three prohibitions, all because she doesn't know what got played. If DJ Tiwa
+hands back `{"playing": "ATLAS", "artist": "The Score", "queued": 2}`, all three
+lines delete themselves. She has the artist. Nothing to forbid.
+
+**Prohibitions are expensive. Facts are cheap.** Every capability you add today
+brings its own pile of "don't say X." That's what actually bloats her.
+
+### Latency — measured, not guessed
+
+From her own log, 111 real turns:
+
+| | p50 | p95 |
+|---|---|---|
+| whole turn | **6,431 ms** | 13,622 ms |
+| inner pass (deciding about tools) | 2,597 ms | 4,173 ms |
+| persona pass (her voice) | 1,958 ms | 3,243 ms |
+| **the tools actually running** | **3 ms** | 4,337 ms |
+
+The tools are free. The six seconds is her thinking about tools *before* she's
+allowed to start talking. Splitting capabilities doesn't fix that — **letting
+her talk and dispatch at the same time does** (gate S3).
+
+---
+
+## What it looks like
+
+### Today
+
+```mermaid
+flowchart LR
+    U[user] --> I["inner pass<br/>2.6s<br/>sees all 10 tools"]
+    I --> T["tools run<br/>3ms"]
+    T --> P["persona pass<br/>2.0s<br/>+ music mechanics<br/>+ don't-say-X rules"]
+    P --> R[reply]
+    R --> X["extraction<br/>fire and forget"]
+```
+
+<figcaption>One line. Every step waits for the one before it. 6.4s.</figcaption>
+
+### After
+
+```mermaid
+flowchart TB
+    U[user] --> C["code, 3ms<br/>memory + what she's doing<br/>+ music keyword check"]
+    C --> M["MAIN TIWA<br/>her voice, full persona<br/>~2.0s"]
+    C --> D["DISPATCH<br/>low temp JSON<br/>sees 4 minis, not 10 tools"]
+    M --> R[reply on screen]
+    D --> DJ[DJ Tiwa]
+    D --> CAL[Calendar Tiwa]
+    D --> S[Search Tiwa]
+    DJ --> F["actions flush<br/>after she speaks"]
+    CAL --> F
+    S --> L["late result<br/>follow-up message"]
+```
+
+<figcaption>Main Tiwa never waits on a mini. That's the rule everything else
+depends on.</figcaption>
+
+### One turn, start to finish
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant U as Krich
+    participant B as bot.py
+    participant M as Main Tiwa
+    participant D as dispatch
+    participant DJ as DJ Tiwa
+    U->>B: "put on the song I like"
+    B->>B: recall + action state (3ms, code)
+    par she talks
+        B->>M: persona + memory + state
+        M-->>B: "got it, one sec"
+        B-->>U: reply on screen (~2.0s)
+    and work happens
+        B->>D: which mini?
+        D-->>B: {"mini":"dj","task":"their favourite song"}
+        B->>DJ: task
+        DJ->>DJ: recall(Krich) -> likes The Score
+        DJ->>DJ: search -> ATLAS
+        DJ-->>B: {playing, artist, queued}
+    end
+    B-->>U: now playing (flush, after she spoke)
+```
+
+---
+
+## The rules that don't bend
+
+These are guarantees, not preferences. Each one has already been broken once in
+this project's history, which is why it's written down.
+
+1. **Only Main Tiwa speaks.** Minis return structured data. Ever.
+2. **Minis return facts, never instructions.** The moment a mini returns
+   `"tell them it's playing"`, the prompt bloat has moved into a new file and
+   the voice can leak. Facts plus a completeness flag; **code** turns the flag
+   into a guard line if one is needed.
+3. **Minis read, they never write beliefs.** `recall` yes. Anything that sets a
+   memory, no. Offline reflection stays the only thing that changes what she
+   thinks. (`docs/concepts/guards.md`)
+4. **One writer.** Minis return data; `bot.py` acts on it. Already true today —
+   "tools set flags, they don't act."
+5. **The check-mark gate is untouched.** Calendar Tiwa can decide *what* to
+   write. Krich still confirms it with a reaction.
+6. **Nothing a mini does blocks her reply.** DeepSeek freed your GPU, not your
+   clock. Each hop is still ~2 seconds.
+7. **Minis get taste, never voice.** Taste = who "they" are and what they like
+   (memory data). Voice = the Thai register, the sass, the escalation ladder.
+   DJ Tiwa needs taste to find a favourite song. It never needs voice. If a mini
+   seems to need voice, it's doing Main's job.
+
+---
+
+## The minis
+
+### DJ Tiwa — first, and the template
+
+53% of all tool calls today. Half of it already exists as `_TERMS_SYSTEM`.
+
+**Its own tools:** `recall` (read), `web_search` (read), `play`, `queue`, `skip`,
+`stop`, `now_playing`
+
+**What it handles that Main Tiwa currently has to:**
+
+- their favourite song → recall who they are, what they like, then search
+- "something like this one" → read the deck, find similar
+- play vs queue vs skip — the deck state decides, not her
+- naming search terms (`_TERMS_SYSTEM` moves here whole)
+- the missed-ask retry (`_missed_music` / `_force_music` move here)
+- knowing what's on without a tool call
+
+**Main Tiwa's music tools: 4 → 1.** Her `_doing()` music block shrinks to facts.
+
+### Calendar Tiwa — the judgment, not the mechanics
+
+Half of calendar is built and must **not** become an agent. The other half
+doesn't exist and can only be an agent.
+
+| work | who does it |
+|---|---|
+| parse a date, build the event, list events | code + `gcal._EVENT_FORMAT` (exists) |
+| the write itself | check-mark gate (exists, never an agent's call) |
+| "this Tuesday or next Tuesday?" | **Calendar Tiwa** |
+| "does this clash with something?" | **Calendar Tiwa** |
+| **"is this worth bringing up right now?"** | **Calendar Tiwa** |
+
+That last row is why it earns the name. *Should I mention this?* is a judgment,
+not a lookup — and constraint #5 says **she is not a butler**, so it has to be a
+judgment she's allowed to make. Nothing in the current design can do it.
+
+It also unblocks the grounded heartbeat on the roadmap: "lights still on at 1am,
+you asleep?" is the same question.
+
+### Search Tiwa — read-only, off the critical path
+
+8 calls in 135, but the worst tail latency (p95 4.3s). The only mini shape that
+*both* sides of the industry argument endorse: read-only workers that add
+intelligence, not actions.
+
+**Its own tools:** `web_search`, `recall` (read)
+
+**Handles:** multi-hop ("who directed it" → "what else did they do"), dedupe
+(`SEEN_URLS` already exists), and "I don't recognise this" → search instead of
+hedge.
+
+### Memory Tiwa — deferred, on purpose
+
+`recall` is a 3ms sqlite lookup. An LLM in front of it buys two seconds and no
+new ability. It also can't write, by rule — so it has nothing to reason about.
+
+**Build it when:** a mini asks something `recall` can't answer in one lookup.
+Entity normalization ("Gojo" vs "Gojo Satoru") is the trigger already on the
+roadmap.
+
+---
+
+## Gates
+
+Each ships alone. Each has one runnable check. Stop at any point and what's
+merged still works.
+
+```mermaid
+timeline
+    title Swarm gates
+    Prerequisite : S0 Turn object
+    Foundation : S1 mini contract : S2 DJ Tiwa
+    The payoff : S3 fork the reply : S4 late results
+    Growth : S5 Search Tiwa : S6 Calendar Tiwa : S7 prove the property
+```
+
+### S0 · Turn object — kill the globals ✅ done 2026-08-21
+
+**Did:** the six per-turn globals moved onto a `Turn` dataclass held in a
+`contextvars.ContextVar` (`tiwa/tools.py`). asyncio copies the context into every
+Task, and `asyncio.to_thread` carries it across the thread boundary — which is
+the path a tool actually takes.
+
+`pipeline.respond()` and `pipeline.idle()` call `tools.new_turn()`. The heartbeat
+needs its own call because `tasks.loop` is one long-lived Task whose context
+outlives a tick.
+
+**The old names still work.** A module-level `__getattr__`/`__setattr__` shim maps
+`tools.PENDING_MUSIC` onto the current turn, so `bot.py`, `chat.py`,
+`dashboard.py` and seven benches did not change. That is deliberate: it is what
+makes *"no behaviour changed"* checkable by running those benches **unmodified**.
+Marked `ponytail:` in the source with its upgrade path — delete the shim once the
+minis land and every caller says `current()` anyway.
+
+**What it was hiding.** With one shared Turn, two concurrent turns produce:
+
+| | old | now |
+|---|---|---|
+| metal turn's `PENDING_MUSIC` | `'lofi'` | `'metal'` |
+| lofi turn's DJ list | 3 jobs, 2 from the other channel | its own |
+| `PENDING_CALENDAR` | both channels' writes merged | separate |
+
+The last row is the real one: a calendar change requested in one channel
+appearing in another channel's ✅ gate.
+
+**Check:** `tests/turnbench.py` — concurrency, the thread hop, the heartbeat
+reset, and that assigning `tools.PENDING_MUSIC = None` doesn't shadow the shim.
+No Discord, no network, no model. Verified to fail when `current()` is forced to
+return one shared `Turn`.
+
+`djbench`, `panelbench`, `test_memory` pass unmodified.
+
+### S1 · The mini contract
+
+**Do:** `tiwa/minis/__init__.py` — a `@mini` decorator mirroring `@tool`, a
+return validator that drops anything not parseable as structured data, and the
+dispatch call.
+
+Dispatch schema:
+
+```json
+{
+  "dispatch": [{"mini": "dj", "task": "their favourite song"}],
+  "ask": "which album did they mean"
+}
+```
+
+- `"dispatch": []` is the **common** case — 59% of turns need no mini. It must be
+  the cheapest, most obvious output, not a fallthrough.
+- Ambiguous? Empty dispatch + a populated `ask`. Not new — the inner pass already
+  emits `ask them: ...` lines.
+- No `blocking` field. One rule instead: **LLM dispatches never block; code
+  (recall, action state) runs inline.** A knob here is a knob that gets set wrong.
+
+**Check:** validator rejects prose, accepts JSON. Ship with one trivial mini so
+the contract is exercised.
+
+### S2 · DJ Tiwa
+
+**Do:** move music into a mini. `_TERMS_SYSTEM`, `_missed_music`, `_force_music`,
+the deck state — all of it. Main Tiwa's 4 music tools become 1 dispatch target.
+
+**Check:** `djbench` passes **unchanged.** It's already the music regression
+suite with all the hard-won Thai edge cases (bare verbs vs. polite words,
+youtube links reading as questions). If it still passes, the move was clean.
+
+### S3 · Fork the reply — the latency gate
+
+**Do:** persona pass starts at t=3ms, concurrently with dispatch. She stops
+waiting to be told what she already knows.
+
+**Check:** new `latbench.py` reads `llm_log` (already has `ms`, `tokens`).
+Report **time-to-first-token-of-her-reply**, not time-to-everything-settled.
+
+**Target: p50 under 3,500ms** (from 6,431ms). Miss it and S3 reverts — the rest
+of the plan still stands, it just doesn't get faster.
+
+### S4 · Late results
+
+**Do:** three policies, no config.
+
+| situation | what happens |
+|---|---|
+| mini finishes before she speaks | folded into her reply |
+| mini finishes after, topic still live | **follow-up message** (never an edit) |
+| mini finishes after, she's moved on | next turn's `[inner-state]` |
+| mini times out (~6s) | an explicit "you tried to look up X, nothing came back" line |
+
+**Never a silent drop.** Silent drops are how she starts bluffing.
+
+Cancellation, one rule: dispatches that produce **speech** are cancelled when a
+new message arrives; dispatches that produce **actions** are not. A queued song
+still plays. A stale search doesn't interrupt.
+
+`_flush_music` already does the follow-up pattern and it works. Reuse it.
+
+**Check:** a late result produces a follow-up; a timeout produces a next-turn
+line, not silence.
+
+### S5 · Search Tiwa
+
+Read-only, off the critical path, multi-hop. **Check:** `searchbench`.
+
+### S6 · Calendar Tiwa
+
+Judgment layer over the existing `gcal` code. Check-mark gate untouched.
+**Check:** `calbench`, plus a new case: an ambiguous date produces an `ask`,
+not a guess.
+
+### S7 · Prove the property — the whole thesis in one number
+
+**Do:** add a trivial 4th mini (a timer, whatever). Count Main Tiwa's prompt
+tokens before and after.
+
+**They must be the same.**
+
+If Main's prompt grew when you added a mini, the contract leaked and this design
+didn't do the thing it exists for. You find that out in an afternoon rather than
+a month.
+
+---
+
+## Repo
+
+Feature branch. Not a separate repo — `memory.py` and its guards are shared, and
+two diverging copies means one of them stops being the guarantee.
+
+```
+git switch -c swarm
+```
+
+```
+tiwa/
+  pipeline.py      # untouched — the control arm for A/B
+  turn.py          # new: concurrent turn
+  minis/
+    __init__.py    # @mini decorator + validator + dispatch
+    dj.py
+    search.py
+    calendar.py
+  record.py        # new: JSONL export, tagged
+tests/
+  dispatchbench.py # routing accuracy
+  latbench.py      # p50/p95 per arch
+```
+
+One knob, mirroring `TIWA_MODE`: `TIWA_TURN=serial|concurrent`, default `serial`.
+
+### Fine-tune data stays clean
+
+The recorder doesn't exist yet (`PLAN.md:345` lists it as unbuilt), so design it
+once, now. Every row gets `arch`, `turn_id`, `pass`.
+
+The persona training set is `WHERE pass='persona'` — **identical under both
+architectures**, because Main Tiwa's call shape doesn't change. Mini traces are
+different `pass` values and never match the filter.
+
+### Abandon if
+
+- p50 turn latency isn't under 3,500ms after S3, **and** S7 shows Main's prompt
+  growing anyway — then you got neither thing you came for
+- dispatch accuracy is worse than today's tool selection (`dispatchbench`)
+- **`test_memory.py` needs a single line changed to pass**
+
+That last one is not a test to update. It's the exit condition firing. The
+coercion guarantee lives below the turn layer; if concurrency reaches it,
+something is in the wrong place.
+
+---
+
+## How to know it worked
+
+| question | how you check |
+|---|---|
+| Does adding a skill stay cheap? | **S7.** Main's prompt token count doesn't move |
+| Does she pick the right mini? | `dispatchbench` — labels mined free from the 135 tool calls already in `log`, weighted by real traffic (53% music, 41% recall, 6% search). Report the **false-positive rate on the 59% of turns that should dispatch nothing** |
+| Is she faster? | `latbench` — p50 < 3,500ms |
+| Does she still sound like herself? | Blind A/B: same input, serial vs concurrent, judge picks which is more Tiwa. **Not** 1-5 scoring — LLM judges only hit ~69% on role identification vs 90.8% for humans. Weight the set toward the escalation ladder, since sharp personas drift hardest |
+| Is she still coercion-proof? | `test_memory.py`, unchanged, green |
+
+---
+
+## Open
+
+1. **`note_provisional`** — the one genuinely new write path. Needs a TTL and a
+   guard chain, and tests written *before* the tool exists. Or drop it.
+2. **Voice or text?** If the 2s target is for voice, the budget is ~800ms and the
+   answer is streaming + filler phrases — a different project.
+3. **Heartbeat first?** A provider outage permanently kills the idle loop today
+   (`docs/open-questions.md`, still open). Adding threads around an unguarded
+   loop makes it intermittent instead of reproducible. It's a `try` block.

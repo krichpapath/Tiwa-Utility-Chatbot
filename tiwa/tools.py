@@ -4,10 +4,81 @@ Every tool takes ONE string argument named "name" — deliberate: the 8B mangles
 nested/renamed structured args (see pipeline._arg_name), so structure is minted
 later by schema-constrained calls, never by the tool-calling model.
 """
+import contextvars
+import dataclasses
+import sys
+import types
+
 from . import memory
 from .memory import TIWA
 
 TOOLS = {}  # name -> {"schema": ollama tool spec, "fn": callable(db, arg) -> str}
+
+
+@dataclasses.dataclass
+class Turn:
+    """What one turn asked for. These six were module globals until 2026-08-21.
+
+    Field names are the old global names on purpose — see the module shim below.
+    """
+
+    DJ: list = dataclasses.field(default_factory=list)
+    PENDING_MUSIC: "str | None" = None
+    PENDING_CALENDAR: list = dataclasses.field(default_factory=list)
+    PENDING_JOIN: bool = False
+    PENDING_LEAVE: bool = False
+    SEEN_URLS: set = dataclasses.field(default_factory=set)
+
+
+# A ContextVar, not a global and not threading.local: asyncio copies the context
+# into every new Task, and asyncio.to_thread carries it across the thread
+# boundary — which is exactly the path a tool takes (_tool_chat runs each tool in
+# a thread). discord.py dispatches every message as its own Task, so two channels
+# talking at once get two Turns for free. A plain global gave them one, and
+# `locks[channel.id]` only ever serialized WITHIN a channel.
+_TURN = contextvars.ContextVar("tiwa_turn")
+
+
+def current() -> Turn:
+    """The turn in flight. Creates one if nobody called new_turn() — benches and
+    `python -m tiwa.tools` poke tools directly and should keep working."""
+    try:
+        return _TURN.get()
+    except LookupError:
+        return new_turn()
+
+
+def new_turn() -> Turn:
+    """Start a fresh turn. Called by pipeline.respond() and pipeline.idle()."""
+    t = Turn()
+    _TURN.set(t)
+    return t
+
+
+# ponytail: the six names above stay readable and writable as `tools.PENDING_MUSIC`
+# so bot.py, chat.py, dashboard.py and seven benches did not have to change — which
+# is what makes "no behaviour changed" checkable by running them unmodified.
+# Module-level code inside THIS file writes f_globals directly and never reaches
+# here, so tools below must say current().X explicitly. Upgrade path: when the
+# minis land and every caller says current() anyway, delete this class and the
+# aliases with it.
+_PER_TURN = {f.name for f in dataclasses.fields(Turn)}
+
+
+class _TurnScoped(types.ModuleType):
+    def __getattr__(self, name):
+        if name in _PER_TURN:
+            return getattr(current(), name)
+        raise AttributeError(name)
+
+    def __setattr__(self, name, value):
+        if name in _PER_TURN:
+            setattr(current(), name, value)
+        else:
+            super().__setattr__(name, value)
+
+
+sys.modules[__name__].__class__ = _TurnScoped
 
 
 def tool(description: str, arg_desc: str):
@@ -43,9 +114,6 @@ def recall(db, arg: str) -> str:
     return memory.lookup(db, arg)
 
 
-SEEN_URLS = set()  # cleared per turn by pipeline._tool_chat
-
-
 @tool(
     "Search the web. Use it whenever the answer depends on something you cannot "
     "know from memory: news, scores, prices, a game or show or person they "
@@ -79,8 +147,9 @@ def web_search(db, arg: str) -> str:
         return f"search failed: {e}"
     # ponytail: dedupe by url within the turn only. Across turns she is allowed to
     # find the same page again — that is a fresh question, not a repeat.
-    fresh = [h for h in hits if h["href"] not in SEEN_URLS]
-    SEEN_URLS.update(h["href"] for h in fresh)
+    seen = current().SEEN_URLS
+    fresh = [h for h in hits if h["href"] not in seen]
+    seen.update(h["href"] for h in fresh)
     if not fresh:
         return ("every result was one you already saw this turn — these keywords are "
                 "spent, search something different or answer with what you have")
@@ -100,10 +169,6 @@ def calendar_read(db, arg: str) -> str:
     return gcal.upcoming()
 
 
-PENDING_JOIN = False  # set by the tool, acted on by bot.py after the reply
-PENDING_LEAVE = False
-
-
 @tool(
     "Join the voice channel the speaker is sitting in, RIGHT NOW. Call it ONLY if "
     "they want you in there this second: 'come join the vc', 'get in here'. "
@@ -113,8 +178,7 @@ PENDING_LEAVE = False
     "ignored",
 )
 def join_voice(db, arg: str) -> str:
-    global PENDING_JOIN
-    PENDING_JOIN = True
+    current().PENDING_JOIN = True
     # ponytail: a tool cannot reach Discord objects, so flag it and let bot.py
     # act. It can only ever join the speaker's own channel — a wrong call is a
     # no-op, never her barging into someone else's call.
@@ -131,19 +195,14 @@ def join_voice(db, arg: str) -> str:
     "ignored",
 )
 def leave_voice(db, arg: str) -> str:
-    global PENDING_LEAVE
-    PENDING_LEAVE = True
+    current().PENDING_LEAVE = True
     # same shape as join_voice: a tool cannot reach Discord objects, so flag it
     # and let bot.py act after she has finished speaking.
     return "leaving the voice channel"
 
 
-# DJ actions she asked for this turn: [(action, arg)]. bot.py drains it after
-# the reply, so a song never blocks her talking.
-DJ = []
-PENDING_MUSIC = None  # kept for the old play/stop path; bot.py drains both
-
-
+# Turn.DJ holds the actions she asked for this turn: [(action, arg)]. bot.py
+# drains it after the reply, so a song never blocks her talking.
 @tool(
     "Play music in the voice channel. Call this whenever someone wants to HEAR "
     "something, in any language. Thai asks for music like this: "
@@ -162,8 +221,8 @@ PENDING_MUSIC = None  # kept for the old play/stop path; bot.py drains both
     "song, artist, genre or mood to search for — invent one if they did not say",
 )
 def play_music(db, arg: str) -> str:
-    global PENDING_MUSIC
-    if PENDING_MUSIC:
+    turn = current()
+    if turn.PENDING_MUSIC:
         # Second play this turn. PENDING_MUSIC holds one string, so a plain
         # assignment would drop the first song on the floor — while this function
         # had already told her "it will start playing in a moment" about it. That
@@ -171,9 +230,9 @@ def play_music(db, arg: str) -> str:
         # ways: two play_music calls in one round, or one per tool round (the
         # loop allows 3). Queue it instead: nothing is lost, and it cannot
         # double-start the deck.
-        DJ.append(("queue", arg))
+        turn.DJ.append(("queue", arg))
     else:
-        PENDING_MUSIC = arg
+        turn.PENDING_MUSIC = arg
     # She used to answer "never heard of it" while the track was already
     # starting: her never-bluff rule fired on a song title she did not know.
     # Knowing a song is not required to play one.
@@ -194,8 +253,7 @@ def play_music(db, arg: str) -> str:
     "ignored",
 )
 def stop_music(db, arg: str) -> str:
-    global PENDING_MUSIC
-    PENDING_MUSIC = ""
+    current().PENDING_MUSIC = ""
     return "stopping the music"
 
 
@@ -210,7 +268,7 @@ def stop_music(db, arg: str) -> str:
     "song, artist or genre to queue",
 )
 def queue_music(db, arg: str) -> str:
-    DJ.append(("queue", arg))
+    current().DJ.append(("queue", arg))
     return (f"'{arg}' is queued to play next. You do NOT need to recognise it — "
             f"the search handles that.")
 
@@ -222,7 +280,7 @@ def queue_music(db, arg: str) -> str:
     "ignored",
 )
 def skip_music(db, arg: str) -> str:
-    DJ.append(("skip", ""))
+    current().DJ.append(("skip", ""))
     return "skipping"
 
 
@@ -232,16 +290,14 @@ def skip_music(db, arg: str) -> str:
 
 
 
-PENDING_CALENDAR = []  # plain-language change requests awaiting Krich's ✅ in Discord
-
-
+# Turn.PENDING_CALENDAR holds plain-language change requests awaiting Krich's ✅
 @tool(
     "Request a change to Krich's calendar (add or cancel an event). Pass ONE "
     "plain sentence, e.g. 'add dentist tomorrow 15:00'. Queued until Krich confirms.",
     "the change in one sentence",
 )
 def calendar_write(db, arg: str) -> str:
-    PENDING_CALENDAR.append(arg)
+    current().PENDING_CALENDAR.append(arg)
     return "queued — Krich must confirm with ✅ before it happens"
 
 
@@ -251,20 +307,26 @@ if __name__ == "__main__":  # runnable check: registry shape + dispatch
     for t in TOOLS.values():
         assert "name" in t["schema"]["function"]["parameters"]["properties"]  # _arg_name contract
     assert "Steven" in TOOLS["recall"]["fn"](db, "Steven")
+    turn = new_turn()
     assert "confirm" in TOOLS["calendar_write"]["fn"](db, "add x tomorrow")
-    assert PENDING_CALENDAR == ["add x tomorrow"]
+    assert turn.PENDING_CALENDAR == ["add x tomorrow"]
     TOOLS["join_voice"]["fn"](db, "")
-    assert PENDING_JOIN is True
+    assert turn.PENDING_JOIN is True
     TOOLS["leave_voice"]["fn"](db, "")
-    assert PENDING_LEAVE is True
+    assert turn.PENDING_LEAVE is True
     TOOLS["play_music"]["fn"](db, "lofi")
-    assert PENDING_MUSIC == "lofi"
+    assert turn.PENDING_MUSIC == "lofi"
+    # the module still answers to the old names, which is what let seven benches
+    # and dashboard.py stay untouched through this refactor
+    assert sys.modules[__name__].PENDING_MUSIC == "lofi"
     # calling the same tool twice in one turn is normal — 6 of the 7 multi-call
     # rounds in the live log were the SAME tool twice. A second play must not
     # overwrite the first, because she was already told the first was happening.
     TOOLS["play_music"]["fn"](db, "jazz")
-    assert PENDING_MUSIC == "lofi", "second play_music silently dropped the first"
-    assert DJ[-1] == ("queue", "jazz"), DJ
+    assert turn.PENDING_MUSIC == "lofi", "second play_music silently dropped the first"
+    assert turn.DJ[-1] == ("queue", "jazz"), turn.DJ
     TOOLS["stop_music"]["fn"](db, "")
-    assert PENDING_MUSIC == ""
+    assert turn.PENDING_MUSIC == ""
+    # a new turn starts empty — the old globals carried the last song forever
+    assert new_turn().PENDING_MUSIC is None
     print("tools ok:", ", ".join(TOOLS))
