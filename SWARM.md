@@ -717,6 +717,52 @@ flips the flag and re-runs all ten cases under `full`, so turning voice back on
 is one env var rather than a rewrite. It also asserts `voice.join()` is **not**
 gated, because music is what the channel is still for.
 
+## Live results — 2026-08-22
+
+All four measurements run against a real model. The key in `.env` was never being
+read: `load_env()` uses `os.environ.setdefault` and there is an
+`OPENROUTER_API_KEY` in the Windows environment shadowing it. Worth deciding
+whether OS-wins is the precedence you want — it failed silently.
+
+| | serial | concurrent | |
+|---|---|---|---|
+| turn latency p50 | 5,059 ms | **2,695 ms** | ✅ under the 3,500 ms target |
+| routing accuracy | 70.3% | **93.7%** | ✅ 111 hand-corrected real turns |
+| false positives, turns needing nothing | 6.2% | **12.5%** | worse, down from 43.8% |
+| persona, blind pairwise | 4 wins | 3 wins, 5 ties | ✅ no regression |
+| coercion (`test_memory`) | green | green | ✅ unchanged |
+
+**All three abandon conditions pass.**
+
+### What only a live model showed
+
+- **A 507-second turn.** No model call over 60s — a stalled search in a worker
+  thread, held through `asyncio.run`'s executor shutdown. `gather()` has no
+  deadline, so her words sat finished since 1.9s while she stayed mute. Bounded
+  now: `ACT_TIMEOUT`, `DISPATCH_TIMEOUT`, `LATE_TIMEOUT`.
+- **She invented three song titles.** Told only "putting a song on" she answered
+  *"The Calling, Monody, และ Unity"*, none of which she had seen. Quoting their
+  message back fixed it and broke something worse — she echoed it, and the
+  persona A/B went 0/12. The prohibition alone carries it.
+- **She bluffed a scoreline.** *"Man City. 2-1. Haaland scored both"* at 1.9s,
+  corrected to *"Arsenal 2-1 Chelsea"* when the search returned. Fixed by moving
+  dispatch **in front of** her reply — see below.
+- **The follow-up answered in the wrong language.** `_voice` writes its own state
+  block, so it inherited none of `_state`'s code-decided language rule.
+- **Search Tiwa has no real cases.** All 8 logged `web_search` calls were the old
+  system identifying a *track* before playing it. DJ does that itself now. In 111
+  real turns there is not one true Search Tiwa case.
+
+### The one design reversal
+
+**Dispatch now runs BEFORE the persona call, not beside it.** She cannot decline
+to answer something she does not know is being looked up, and that is exactly what
+made her bluff. It costs almost nothing: persona ~1.9s, dispatch ~0.9s, a mini
+~1.5s — the turn was *already* bounded by dispatch+mini, so correctness comes out
+of slack that was being spent anyway.
+
+What still never blocks her: the **work**. Only the routing decision does.
+
 ## Where it stands
 
 All eight gates are built and every offline bench is green. `TIWA_TURN` still

@@ -93,10 +93,16 @@ def forked():
     took = time.perf_counter() - t0
 
     assert reply == "ok whatever", reply
-    assert len(calls) == 2, f"expected persona + dispatch, got {len(calls)}: {calls}"
+    assert len(calls) == 2, f"expected dispatch + persona, got {len(calls)}: {calls}"
     assert not any("inner thoughts" in c for c in calls), "the tool pass still ran"
-    assert took < DELAY * 1.8, f"ran serially: {took:.2f}s for 2 x {DELAY}s calls"
-    print(f"fork ok     — 2 calls in {took:.2f}s, not {DELAY * 2:.2f}s; no tool pass")
+    # She waits for the ROUTING DECISION but never for the WORK. Dispatch moved in
+    # front of her deliberately — she cannot decline to answer something she does
+    # not know is being looked up, and that is what made her bluff a scoreline.
+    # So two calls, not three: the tool pass and its rounds are what went away.
+    assert took < DELAY * 2.6, f"a third call crept back in: {took:.2f}s"
+    assert took >= DELAY * 1.8, "dispatch is not actually in front of the reply"
+    print(f"fork ok     — dispatch then persona in {took:.2f}s, no tool pass "
+          f"(serial would be {DELAY * 3:.2f}s+)")
 
 
 def net_under_the_router():
@@ -125,9 +131,8 @@ def cannot_name_what_she_has_not_heard():
         assert must in state, f"missing from a mid-dispatch turn: {must}"
     assert "came up empty" not in state, "told her it failed before it had run"
     # Measured in the live A/B: told only that "a song" was going on, she invented
-    # three track names. She is anchored to their own words now — the one thing
-    # she can repeat without making it up.
-    assert "เปิดเพลงอะไรก็ได้" in state, "she is not anchored to what they asked for"
+    # three track names. Quoting their message back fixed that and broke something
+    # worse — she echoed it. The prohibition carries the guarantee on its own.
 
     quiet = pipeline._state(db, "Krich", "how are you")
     assert "It IS happening" not in quiet, "a standing music line came back"

@@ -302,7 +302,7 @@ def _asked_voice(text: str) -> str:
 
 def _doing(missed_music: bool = False, blind: bool = False,
            asked_deck: bool = False, dispatching_music: bool = False,
-           asked: str = "") -> str:
+           asked: str = "", looking_up: str = "") -> str:
     """What she is actually doing, read from live state — never from what the
     model believes it did.
 
@@ -347,8 +347,13 @@ def _doing(missed_music: bool = False, blind: bool = False,
         # "เปิด Fat Rat ให้มึง 3 เพลงก่อนนะ — The Calling, Monody, และ Unity",
         # three titles she had never seen. A vacuum gets furnished. So she is
         # anchored to the only words that ARE grounded: the ones they typed.
+        # Do NOT quote their message back here. Restating it made her echo it —
+        # "alright, venom - eminem. coming up." — instead of reacting to it, and
+        # the persona A/B went 0/12. Their message is already in `hist`; she can
+        # read it herself. What she needs from this line is the prohibition, not
+        # the words.
         what = (", ".join(f"{act} {arg}".strip() for act, arg in queued)
-                if queued else f"putting on what they just asked for ({asked[:80]})")
+                if queued else "putting on what they just asked for")
         out.append(f"You have just done this: {what}. It IS happening — say so in"
                    " your own way. Never say you do not know the song or cannot"
                    " find it; you do not need to recognise a song to put it on."
@@ -363,6 +368,18 @@ def _doing(missed_music: bool = False, blind: bool = False,
         out.append("They asked for music but the search came up empty and nothing"
                    " is queued — do NOT say you are putting a song on. Say it did"
                    " not work.")
+    if looking_up:
+        # She is about to speak while a lookup runs. Without this she fills the
+        # gap: traced live, "who won the premier league last night" got "Man City.
+        # 2-1. Haaland scored both" at 1.9s, corrected to "Arsenal 2-1 Chelsea"
+        # when the search actually returned. Same shape as the music guard —
+        # something IS happening, and she has not seen the answer.
+        out.append(f"You are looking up {looking_up} RIGHT NOW and the answer has"
+                   " not come back yet. You do NOT know it. Do not state a result,"
+                   " a score, a price, a number or a name for it — anything"
+                   " specific you say here you are inventing. Say you are checking,"
+                   " or say you do not know yet, in your own words. You will be"
+                   " told the answer in a moment and can say it then.")
     if blind:
         # same shape as the music guard: the picture is right there in the channel,
         # so bluffing about it is caught instantly. Cheaper to admit it.
@@ -412,7 +429,7 @@ async def respond(db, hist: list, author: str, text: str, images=(),
 
 def _state(db, author: str, text: str, seen: str = "", inner: str = "",
            missed: bool = False, blind: bool = False, extra: str = "",
-           dispatching_music: bool = False) -> str:
+           dispatching_music: bool = False, looking_up: str = "") -> str:
     """Everything the persona pass is told this turn, besides the persona itself.
 
     Extracted so turn.py's concurrent path builds the SAME block from the same
@@ -442,7 +459,8 @@ def _state(db, author: str, text: str, seen: str = "", inner: str = "",
         "matters to you. A real question beats a safe take every time."
     )
     doing = _doing(missed, blind=blind, asked_deck=_asked_deck(text),
-                   dispatching_music=dispatching_music, asked=text)
+                   dispatching_music=dispatching_music, asked=text,
+                   looking_up=looking_up)
     if doing:  # quiet turn = not one wasted token
         rules += " " + doing
     if seen:
