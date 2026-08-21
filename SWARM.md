@@ -647,6 +647,43 @@ something is in the wrong place.
 
 ---
 
+### Completeness pass ✅ 2026-08-21
+
+Two gaps found by auditing the registry against the plan rather than by any bench.
+
+**Voice was orphaned.** The concurrent path has no tool pass and no mini owns
+voice, so nothing could set `PENDING_JOIN` / `PENDING_LEAVE` — *"come join the
+vc"* silently did nothing. Every bench passed; the serial path still worked. Now
+`pipeline._asked_voice()`, a phrase list plus the measured `voice.wants_now()`
+veto. 0 join/leave calls in 135 logged, so a model round trip for it would be
+absurd — but losing it *silently* is the failure this codebase minds most.
+
+`growthbench` now requires **every tool to name an owner**, so this cannot
+recur. Writing that check found two more (`recall`, `calendar_read`) which turned
+out to be superseded by code rather than dead — the check had been asking "is
+this function called" instead of "is this capability reachable".
+
+**`record.py` was promised and never built.** It is the filter, not new plumbing:
+`llm_log` already had every call. A persona row is one whose **first system
+message IS `prompts/tiwa.md`** — string equality against the file, not a keyword
+guess. Every other pass opens differently, so mini traces cannot match. On the
+real log: 400 rows in, **80 out**, every other pass falling out by its own system
+prompt.
+
+No `arch` tag, and none is needed: `pipeline.say()` is shared and `forkbench`
+asserts both paths build a byte-identical state block, so a persona row is the
+same row either way.
+
+`--drop-state` exists because there is one real judgment call here and it is not
+mine — `next.md` wants fine-tuning so she sounds like herself *"without prompt
+crutches"*, and training with the `[inner-state]` block in teaches her to need it.
+Export both and compare.
+
+**One more caught in passing:** `_asked_voice` imported `voice` (discord,
+whisper, onnxruntime — 0.24s) on every turn to run a pure-text veto. `forkbench`
+caught it as 0.54s for two 0.3s calls. It now imports only when a phrase actually
+matched.
+
 ## Where it stands
 
 All eight gates are built and every offline bench is green. `TIWA_TURN` still

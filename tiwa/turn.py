@@ -146,6 +146,16 @@ async def respond(db, hist: list, author: str, text: str, images=(),
     # everything below is code, ~3ms, and it is all she needs to start talking
     third = memory.mentioned(db, text, skip=author)
     asked_music = pipeline._missed_music(text)
+
+    # Voice has no mini and there is no tool pass here, so without this nothing
+    # could set the flags and "come join the vc" would silently do nothing.
+    # 0 join/leave calls in 135 logged — not worth a model, very much worth a
+    # phrase list. bot.py reads the same flags either way.
+    want = pipeline._asked_voice(text)
+    if want == "join":
+        tools.join_voice(db, "")
+    elif want == "leave":
+        tools.leave_voice(db, "")
     state = pipeline._state(
         db, author, text, seen,
         inner="",  # there is no tool pass on this path — `extra` is its replacement

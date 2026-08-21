@@ -262,6 +262,37 @@ def _asked_deck(text: str) -> bool:
     return any(q in text.lower() for q in _DECK_Q)
 
 
+# Straight out of the join_voice / leave_voice tool descriptions. On the
+# concurrent path there is no tool pass, and no mini owns voice — 0 calls in 135
+# logged, so an LLM round trip for it would be absurd. But losing it SILENTLY is
+# the failure this codebase minds most, so it becomes a classifier instead.
+# ponytail: phrase match, precision over recall, same stance as _MUSIC_ASK. A
+# miss means you type `join`; a false positive drags her into a live call.
+_JOIN = ("come join the vc", "join the vc", "join vc", "get in here", "hop in",
+         "เข้ามา", "เข้าห้อง", "เข้ามาหน่อย", "เข้าวอย")
+# "wanting the MUSIC to stop is NOT wanting you gone" — the leave_voice
+# description says so, and stop_music shares no phrase with any of these.
+_LEAVE = ("leave the vc", "leave vc", "get out", "ออกไป", "ออกห้อง",
+          "ออกจากห้องเสียง", "ไปได้แล้ว")
+
+
+def _asked_voice(text: str) -> str:
+    """"join", "leave" or "". Vetoed by voice.wants_now() for a FUTURE time —
+    'join us later tonight' is a plan, not an ask, and that veto is measured."""
+    low = text.lower()
+    want = ("leave" if any(p in low for p in _LEAVE)
+            else "join" if any(p in low for p in _JOIN) else "")
+    if not want:
+        return ""  # the common case never imports voice — see below
+    # `voice` pulls in discord, whisper and onnxruntime, ~0.24s the first time.
+    # Importing it per turn to run a pure-text veto put that on EVERY turn for
+    # chat.py, the dashboard and the benches (forkbench caught it: 0.54s for two
+    # 0.3s calls). It loads only when a phrase actually matched — 0 times in 135.
+    from . import voice
+
+    return want if voice.wants_now(text) else ""
+
+
 def _doing(missed_music: bool = False, blind: bool = False,
            asked_deck: bool = False, dispatching_music: bool = False) -> str:
     """What she is actually doing, read from live state — never from what the

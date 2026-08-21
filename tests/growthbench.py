@@ -83,6 +83,60 @@ def one_line_buys_a_whole_subsystem():
     print(f"contain ok  — {old // dj_line}x less, and it stays flat as DJ gains tools")
 
 
+def nothing_is_orphaned():
+    """Every tool must have an owner on the CONCURRENT path too.
+
+    This check exists because two did not. The concurrent turn has no tool pass,
+    and no mini owns voice, so nothing could set PENDING_JOIN or PENDING_LEAVE —
+    "come join the vc" silently did nothing. Silently is the word: the serial
+    path still worked, every bench passed, and only reading the registry found it.
+
+    A new tool now fails here until somebody says who calls it.
+    """
+    OWNER = {
+        # superseded by code — the tool still exists for the serial path
+        "recall": "code: memory.mentioned() + memory.turn_context()",
+        "calendar_read": "code: gcal.upcoming(), read by the calendar mini",
+        "join_voice": "code: pipeline._asked_voice()",
+        "leave_voice": "code: pipeline._asked_voice()",
+        # owned by a mini
+        "play_music": "mini: dj", "stop_music": "mini: dj",
+        "queue_music": "mini: dj", "skip_music": "mini: dj",
+        "web_search": "mini: search",
+        "calendar_write": "mini: calendar",
+    }
+    missing = sorted(set(tools.TOOLS) - set(OWNER))
+    stale = sorted(set(OWNER) - set(tools.TOOLS))
+    assert not missing, (
+        f"{missing} has no owner on the concurrent path. There is no tool pass "
+        "there, so a tool nobody calls is dead — and dead silently. Name who "
+        "calls it, or say why it is superseded.")
+    assert not stale, f"{stale} is claimed by an owner but no longer exists"
+    for name, who in OWNER.items():
+        if who.startswith("mini: "):
+            assert who[6:] in minis.MINIS, f"{name} claims {who}, which is not registered"
+    print(f"owners ok   — all {len(tools.TOOLS)} tools have a named owner without"
+          " the tool pass")
+
+
+def voice_still_answers():
+    """The gap this check was written for, driven directly."""
+    cases = [
+        ("come join the vc", "join"), ("เข้ามาหน่อย", "join"),
+        ("get out", "leave"), ("ออกไป", "leave"),
+        # the measured veto: a future time is a plan, not an ask
+        ("join us later tonight", ""), ("ออกไปตอนดึกนะ", ""),
+        # wanting the music off is not wanting her gone
+        ("หยุดเพลง", ""), ("ปิดเพลง", ""), ("พอแล้ว", ""),
+        ("how are you", ""),
+    ]
+    print()
+    for text, want in cases:
+        got = pipeline._asked_voice(text)
+        assert got == want, f"{text!r} -> {got!r}, wanted {want!r}"
+    print(f"voice ok    — {len(cases)} cases; join/leave answer without a model call")
+
+
 def acts_are_declared_not_guessed():
     """Every registered mini is either an action or speech. A new one that is
     neither would silently become speech and never reach bot.py's flush."""
@@ -95,5 +149,7 @@ def acts_are_declared_not_guessed():
 before_and_after()
 main_has_no_tool_list()
 one_line_buys_a_whole_subsystem()
+nothing_is_orphaned()
+voice_still_answers()
 acts_are_declared_not_guessed()
 print("\ngrowth ok — a mini costs Main Tiwa nothing. That was the whole bet.")
