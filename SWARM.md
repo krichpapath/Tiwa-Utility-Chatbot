@@ -390,20 +390,62 @@ deck untouched. Offline, canned model.
 
 `djbench` passes **unmodified** — `git diff tests/djbench.py` is empty.
 
-### S3 · Fork the reply — the latency gate
+### S3 · Fork the reply ✅ built 2026-08-21 · live latency unmeasured
 
-**Do:** persona pass starts at t=3ms, concurrently with dispatch. She stops
-waiting to be told what she already knows.
+**Did:** `tiwa/turn.py`. She starts talking at t≈3ms while dispatch runs beside
+her. `TIWA_TURN=serial|concurrent` picks the path *inside* `pipeline.respond()`,
+so `bot.py`, `chat.py`, `dashboard.py` and every bench are untouched — same trick
+as `TIWA_MODE` in `llm.py`. Default stays `serial`.
 
-**Absorbed from S2:** wire dispatch into `respond()` and drop the four music
-tools from Main's list in the same change. This is the first gate that alters
-live behaviour rather than adding beside it.
+**The tool pass is gone from this path**, because the log says it was never the
+work that was slow:
 
-**Check:** new `latbench.py` reads `llm_log` (already has `ms`, `tokens`).
-Report **time-to-first-token-of-her-reply**, not time-to-everything-settled.
+| | p50 |
+|---|---|
+| whole turn | 6,431 ms |
+| inner pass | 2,597 ms **× 1.7 rounds** |
+| persona | 1,958 ms |
+| **tools actually running** | **3 ms** |
 
-**Target: p50 under 3,500ms** (from 6,431ms). Miss it and S3 reverts — the rest
-of the plan still stands, it just doesn't get faster.
+1.7 × 2,597 + 1,958 ≈ 6,373. The six seconds was her deciding what to look up
+before she was allowed to open her mouth. Where each tool went:
+
+| tool | calls | now |
+|---|---|---|
+| `recall` | 55 | `memory.mentioned()` — sqlite, 3 ms |
+| music | 71 | DJ Tiwa, dispatched, flushed after she speaks |
+| `web_search` | 8 | Search Tiwa, arrives late (S4) |
+| `calendar_read` | 1 | Calendar Tiwa |
+
+**`memory.mentioned()`** is what makes the fork safe. `turn_context()` already
+covered the person talking; `recall` existed for third parties, and it was the
+single most common reason the tool pass ran a second round. It is a substring
+scan over 25 entities. Precision-biased like `_MUSIC_ASK`, with `MENTION_MIN`
+keeping short Thai names out of unrelated words.
+
+**Sight stays on the critical path** on purpose. She is reacting to a picture
+already on screen, "I can't see it" a second later is worse than waiting, and it
+is the rarest turn there is.
+
+**The confabulation guard had to survive being early.** On a music turn she
+speaks *while* DJ searches, so there is nothing in the `Turn` to name.
+`_doing(dispatching_music=True)` gives her the same text minus the title: *it IS
+happening, and you have not seen the result, so name no artist, album or year.*
+True either way, and if DJ finds nothing the follow-up (S4) corrects it.
+
+**Both paths share the words.** `pipeline._state()` and `pipeline.say()` were
+extracted so serial and concurrent build the identical inner-state block with
+identical sampling. `forkbench` asserts it — if the blocks differ, the A/B is
+measuring two things at once.
+
+**Check:** `tests/forkbench.py` — wall-clock proof of overlap (2 calls in 1×
+delay, not 2×), no tool pass, the env switch routing both ways, `mentioned()`,
+the safety net still catching a music ask the router missed, and the guard text
+holding mid-dispatch. Offline.
+
+**Not yet measured live: p50 latency.** `OPENROUTER_API_KEY` returns 401, so the
+3,500 ms target is unverified. The bench proves the calls overlap; only a live
+run proves the number.
 
 ### S4 · Late results
 

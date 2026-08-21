@@ -14,6 +14,15 @@ PERSONA = (Path(__file__).parents[1] / "prompts" / "tiwa.md").read_text(encoding
 # where her voice runs is decided by TIWA_MODE (see llm._MODES). On the API path
 # expect hosted filters to soften her escalation and coercion refusals — that is
 # a measured tradeoff (tests/smoke.py), not a free swap.
+# One knob, same shape as TIWA_MODE in llm.py: "serial" is the three-pass path
+# below, "concurrent" is turn.py. Default serial — the swarm proves itself before
+# it becomes the default, and every caller (bot, chat, dashboard, benches) keeps
+# calling respond() either way.
+TURN_MODE = os.environ.get("TIWA_TURN", "serial")
+if TURN_MODE not in ("serial", "concurrent"):
+    print(f"[tiwa] TIWA_TURN={TURN_MODE!r} unknown — using 'serial'.")
+    TURN_MODE = "serial"
+
 PERSONA_PROVIDER = llm.PERSONA_PROVIDER
 PERSONA_MODEL = os.environ.get("TIWA_PERSONA_MODEL") or (
     llm.PERSONA_API_MODEL if PERSONA_PROVIDER == "openrouter" else MODEL
@@ -254,7 +263,7 @@ def _asked_deck(text: str) -> bool:
 
 
 def _doing(missed_music: bool = False, blind: bool = False,
-           asked_deck: bool = False) -> str:
+           asked_deck: bool = False, dispatching_music: bool = False) -> str:
     """What she is actually doing, read from live state — never from what the
     model believes it did.
 
@@ -290,8 +299,13 @@ def _doing(missed_music: bool = False, blind: bool = False,
     # what she set in motion THIS turn: it is happening, whatever she thinks
     queued = list(tools.DJ) + ([("play", tools.PENDING_MUSIC)]
                                if tools.PENDING_MUSIC else [])
-    if queued:
-        what = ", ".join(f"{act} {arg}".strip() for act, arg in queued)
+    if queued or dispatching_music:
+        # On the concurrent path DJ Tiwa has not run yet — she is speaking WHILE
+        # it searches — so there is nothing in the Turn to name. The guarantee is
+        # the same either way and it is the second half of this text that carries
+        # it: she has not seen a result, so she invents no artist and no title.
+        what = (", ".join(f"{act} {arg}".strip() for act, arg in queued)
+                if queued else "putting a song on")
         out.append(f"You have just done this: {what}. It IS happening — say so in"
                    " your own way. Never say you do not know the song or cannot"
                    " find it; you do not need to recognise a song to put it on."
@@ -321,6 +335,10 @@ async def respond(db, hist: list, author: str, text: str, images=()) -> str:
     `images` = attachment urls on the current message. Empty on every ordinary
     turn, and an empty list costs exactly nothing — no vision call is made.
     """
+    if TURN_MODE == "concurrent":
+        from . import turn  # late: turn.py imports this module
+
+        return await turn.respond(db, hist, author, text, images)
     turn0 = time.perf_counter()
     tools.new_turn()  # everything the tools flag this turn is scoped to this task
     recent = "\n".join(
@@ -336,6 +354,24 @@ async def respond(db, hist: list, author: str, text: str, images=()) -> str:
     if missed:
         await _force_music(db, text)
 
+    state = _state(db, author, text, seen, inner, missed,
+                   blind=bool(images) and not seen)
+    reply = await say(db, hist, state)
+    memory.log(db, "turn", f"{author}: {text[:100]} -> {reply[:120]}",
+               (time.perf_counter() - turn0) * 1000)
+    return reply
+
+
+def _state(db, author: str, text: str, seen: str = "", inner: str = "",
+           missed: bool = False, blind: bool = False, extra: str = "",
+           dispatching_music: bool = False) -> str:
+    """Everything the persona pass is told this turn, besides the persona itself.
+
+    Extracted so turn.py's concurrent path builds the SAME block from the same
+    code — the whole point of the A/B is that only the timing differs. `inner` is
+    the tool pass's brief on the serial path and "" on the concurrent one, where
+    the same ground arrives as `auto` + `extra` without a model call.
+    """
     auto = memory.turn_context(db, author)
 
     # ponytail: 8B forgets rules buried in the long persona prompt — restate the three
@@ -357,8 +393,8 @@ async def respond(db, hist: list, author: str, text: str, images=()) -> str:
         "they care about it, whether it is any good — ask, and ask like the answer "
         "matters to you. A real question beats a safe take every time."
     )
-    doing = _doing(missed, blind=bool(images) and not seen,
-                   asked_deck=_asked_deck(text))
+    doing = _doing(missed, blind=blind, asked_deck=_asked_deck(text),
+                   dispatching_music=dispatching_music)
     if doing:  # quiet turn = not one wasted token
         rules += " " + doing
     if seen:
@@ -378,27 +414,29 @@ async def respond(db, hist: list, author: str, text: str, images=()) -> str:
         "ashamed. You are not the one who did something wrong. Stay sharp while it "
         "is still going, and let it go once they do."
     )
-    state = "\n".join(x for x in (rules, auto, inner) if x)
+    # `extra` is the concurrent path's replacement for what the tool pass used to
+    # fetch: facts about third parties named in the message, read from sqlite.
+    return "\n".join(x for x in (rules, auto, extra, inner) if x)
 
-    messages = [
-        {"role": "system", "content": PERSONA},
-        {"role": "system", "content": f"[inner-state — background, do not recite]\n{state}"},
-        *hist,
-    ]
+
+async def say(db, hist: list, state: str) -> str:
+    """The persona call itself. Shared so both paths speak with identical settings."""
     resp = await asyncio.to_thread(
         llm.chat,
         model=PERSONA_MODEL,
-        messages=messages,
+        messages=[
+            {"role": "system", "content": PERSONA},
+            {"role": "system",
+             "content": f"[inner-state — background, do not recite]\n{state}"},
+            *hist,
+        ],
         # Qwen3 vendor-recommended sampling for non-thinking chat; default/greedy
         # decoding is explicitly warned against (flat voice, repetition loops)
         options={"num_ctx": 8192, "temperature": 0.7, "top_p": 0.8, "top_k": 20,
                  "repeat_penalty": 1.05},
         provider=PERSONA_PROVIDER,
     )
-    reply = _clean(resp["content"])
-    memory.log(db, "turn", f"{author}: {text[:100]} -> {reply[:120]}",
-               (time.perf_counter() - turn0) * 1000)
-    return reply
+    return _clean(resp["content"])
 
 
 _IDLE_SYSTEM = f"""You are {TIWA}'s idle thoughts. No one is talking to her right now.

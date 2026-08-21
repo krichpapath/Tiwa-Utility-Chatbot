@@ -234,6 +234,39 @@ def turn_context(db, user: str) -> str:
     return "\n".join(lines)
 
 
+MENTION_MIN = 3  # chars — below this a name matches inside ordinary words
+MENTION_MAX = 3  # entities per turn; a flat cap, same stance as TURN_FACTS
+
+
+def mentioned(db, text: str, skip: str = "") -> str:
+    """Facts about anyone NAMED in the message — the `recall` tool, without the call.
+
+    turn_context() already covers the person talking. This covers the third
+    parties recall existed for, and recall was 55 of 135 logged tool calls — the
+    single most common reason the tool pass ran a second round. A sqlite scan
+    costs 3ms; the round trip that used to fetch this cost about 2.6 seconds.
+
+    ponytail: substring match, precision-biased like _MUSIC_ASK. Thai does not
+    space its own words, so a short name can sit inside an unrelated word —
+    MENTION_MIN is what keeps อิง out of every sentence containing it. FTS5 or
+    embeddings when the graph is big enough that this misses more than it finds.
+    """
+    low = text.lower()
+    names = [
+        name
+        for (name,) in db.execute(
+            "SELECT name FROM entities WHERE name NOT IN (?, ?)", (TIWA, skip)
+        )
+        if len(name) >= MENTION_MIN and name.lower() in low
+    ]
+    out = []
+    for name in names[:MENTION_MAX]:
+        facts = lookup(db, name)
+        if not facts.startswith("no memory"):
+            out.append(f"you remember {name}:\n{facts}")
+    return "\n".join(out)
+
+
 def log(db, kind: str, text: str, ms: float = 0):
     """One line of what she did. Feeds the dashboard, later the cost guard."""
     db.execute(
