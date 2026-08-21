@@ -88,6 +88,22 @@ Spend is tracked in `data/spend.json`, resets at midnight, and going over prints
 warning and falls back to local for the rest of the day. It's one of
 [the guards](guards.md) that must stay in code.
 
+## The other two knobs
+
+`TIWA_MODE` decides **where** each pass runs. Two siblings decide **what shape** the turn
+has and **how much of voice is live**. All three are read once at import, all three warn
+and fall back rather than exiting.
+
+| Knob | Default | What changes |
+|---|---|---|
+| `TIWA_MODE` | `local` | which provider runs each pass |
+| `TIWA_TURN` | `serial` | `serial` = [three passes](three-passes.md); `concurrent` = [the swarm](the-swarm.md) |
+| `TIWA_VOICE` | `dj` | `dj` = the voice channel is a speaker for music only; `full` = she can join and leave on her own |
+
+`TIWA_TURN` is picked up inside `pipeline.respond()`, so `bot.py`, `chat.py`, the
+dashboard and every bench call the same function either way and none of them changed
+when the swarm landed.
+
 ## Gotchas
 
 - **Mode is read once, at import.** Changing `.env` needs a restart. The control panel

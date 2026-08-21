@@ -73,6 +73,10 @@ same sequence about three times.
 Gated steps still go through the ✅ gate. Hermes Agent (Nous Research, MIT) is the
 reference for the *shape* — copy the idea, not the code.
 
+[The swarm](../concepts/the-swarm.md) is the substrate this wants. A skill is a mini she
+wrote herself, and a flat tool registry cannot hold one without every skill competing with
+`play_music` for attention — which is the ceiling the swarm was built to lift.
+
 ### Entity normalization
 
 "Gojo" and "Gojo Satoru" are two nodes, so facts about one are invisible to a recall of the
@@ -103,7 +107,17 @@ messages become *"lights still on at 1am, you asleep?"* instead of poetry.
 
 LoRA/SFT on collected transcripts, so she sounds like herself without prompt crutches.
 Cannot be started early and cannot be shortcut with more prompt work: it needs roughly a
-thousand good exchanges to exist first. Logging and a JSONL export are the prerequisite.
+thousand good exchanges to exist first.
+
+**The export exists now** — `py -X utf8 -m tiwa.record` writes
+`data/persona.jsonl` in OpenAI Chat Completions shape. A persona row is one whose *first
+system message is `prompts/tiwa.md` itself*, string equality against the file, so no
+[mini](../concepts/the-swarm.md) trace can reach the training set. On the real log that is
+400 rows in, **80 out**. Still 920 short of the thousand.
+
+`--drop-state` strips the per-turn `[inner-state]` block, and which way to export is the
+one open judgment: keeping it is faithful to what she saw, dropping it is what *"without
+prompt crutches"* actually asks for. Export both and compare.
 
 ## Explicitly deferred
 
@@ -118,7 +132,10 @@ Whatever you build, these hold:
 1. **8 GB VRAM.** Never plan two resident 8B models.
 2. **Guards are code, never prompt.** Coercion, the ✅ gate, the heartbeat throttle, the
    cost ceiling.
-3. **No agent framework.** The registry is the framework.
+3. **No agent framework.** The registry is the framework. [The swarm](../concepts/the-swarm.md)
+   holds to this — `minis.py` is a decorator and a dict, the same shape as `tools.py`, and
+   there is no LangChain or agent library underneath it. "Multi-agent" here means three
+   functions with descriptions, not a runtime.
 4. **A surface is not a brain.** If a new surface needs changes inside
    `pipeline.respond()`, something is wrong.
 5. **She is not a butler.** She's allowed to refuse, argue, and have taste. Features that

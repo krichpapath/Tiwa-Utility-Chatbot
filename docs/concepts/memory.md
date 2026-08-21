@@ -99,6 +99,17 @@ opens knowing you, with no tool call.
     [deleting `now_playing`](../reference/decisions.md#adr-012). `recall` still earns its
     place — for **third parties**, someone mentioned who isn't the one talking.
 
+**Third parties, without a tool call either** — `mentioned()` scans the message for known
+entity names and injects what she knows about each. It exists because `recall` was **55 of
+135 logged tool calls**, the single most common reason the tool pass ran a second round,
+and the round trip cost about 2.6 seconds to fetch a sqlite lookup that takes 3ms. Only
+[the swarm](the-swarm.md) uses it — the serial path still has the tool.
+
+Precision-biased, like [`_MUSIC_ASK`](../surfaces/music.md): `MENTION_MIN = 3` characters,
+capped at `MENTION_MAX = 3` entities. Thai does not space its own words, so a short name
+can sit inside an unrelated one — that minimum is what keeps `อิง` out of every sentence
+containing it.
+
 ### An episode is written when she is surprised {#surprise}
 
 Your brain doesn't record the drive to work — it went exactly as predicted. It records

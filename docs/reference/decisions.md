@@ -730,3 +730,50 @@ gate makes that safe to over-fire, since a wrong queue costs one ❌. `calbench.
 **Also found.** `gcal.apply_change()`'s parse is solid and needed nothing: Thai titles,
 relative dates, and even a Buddhist-calendar year (`2569` → `2026`) all resolve correctly.
 The stage everyone assumes is fragile was fine; the stage nobody documented was broken.
+
+## ADR-026 · Mini Tiwas, and dispatch in front of her voice {#adr-026}
+
+**Status.** Built and measured live, behind `TIWA_TURN=concurrent`. **Not the default.**
+Full plan, gates and numbers in `SWARM.md` at the repo root; this entry is the decision,
+not the record.
+
+**Context.** [The tool registry](../concepts/tools.md) had already recorded its own
+ceiling — *"every tool you add competes with `play_music` for attention"* — and a working
+tool, `now_playing`, was deleted to protect the others. Home Assistant is next with five
+or six more. Separately, her own log said a turn took **6,431 ms p50** while the tools
+themselves ran in **3 ms**: the cost was deciding what to look up, not looking it up.
+
+**Decision.** Split *what* from *how*. Main Tiwa dispatches a goal in one phrase; small
+single-purpose [Mini Tiwas](../concepts/the-swarm.md) work out the rest and return
+declared facts. The tool pass leaves that path entirely — `recall` becomes a sqlite scan
+(`memory.mentioned()`), music becomes DJ Tiwa, search and calendar become minis.
+
+**Measured, live, on real turns.**
+
+| | serial | concurrent |
+|---|---|---|
+| turn latency p50 | 5,059 ms | **2,695 ms** |
+| routing accuracy, 111 hand-corrected turns | 70.3% | **93.7%** |
+| false positives on turns needing nothing | 6.2% | 12.5% |
+| persona, blind pairwise A/B | 4 wins | 3 wins, 5 ties |
+| what Main Tiwa reads to handle music | 1,643 chars | **312 chars** |
+
+Adding a fourth mini changed Main Tiwa's prompt by **0 characters**. That was the bet.
+
+**The one reversal.** Dispatch was supposed to run *beside* her reply, and did, until it
+was measured: asked *"who won the premier league last night"* she answered *"Man City.
+2-1. Haaland scored both"* — invented — because nothing in her state block said a lookup
+was running. **She cannot decline to answer something she does not know is being looked
+up.** Dispatch moved in front of the persona call. It costs almost nothing, because the
+turn was already bounded by dispatch-plus-mini rather than by her words. The *work* still
+never blocks her; only the routing decision does.
+
+**Consequences.** Three new deadlines, each from a real failure — one live turn ran 507
+seconds on a stalled search held through `asyncio.run`'s executor shutdown. The router
+over-fires on short Thai (12.5% against 6.2%), which costs a spurious song. And in 111
+real turns there was **not one true Search Tiwa case**: all eight logged `web_search`
+calls were the old system identifying a track before playing it, which DJ does itself now.
+
+**Not adopted.** `note_provisional`, the one proposed write path, was never built —
+[the guards](../concepts/guards.md) are the reason offline reflection is the only thing
+that changes a belief, and a runtime writer would need its own guard chain first.

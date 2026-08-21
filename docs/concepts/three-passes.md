@@ -1,10 +1,15 @@
 # The three passes
 
+!!! info "This is the default path"
+    `TIWA_TURN=serial`, and that is the default. There is a second path —
+    [the swarm](the-swarm.md) — which replaces passes 1 and 2 with a dispatch call
+    and a set of Mini Tiwas. Pass 3 and everything below it is shared.
+
 ## What this is
 
-Every time Tiwa answers, three separate model calls happen. One decides what to
-do, one writes her reply, one decides what to remember. They use different prompts,
-different temperatures, and can run on different providers.
+On the default path, every time Tiwa answers, three separate model calls happen.
+One decides what to do, one writes her reply, one decides what to remember. They
+use different prompts, different temperatures, and can run on different providers.
 
 All three live in `tiwa/pipeline.py` — about 360 lines.
 

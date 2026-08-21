@@ -2,7 +2,7 @@
 
 ## What this is
 
-Twenty-one scripts in `tests/`. Not unit tests — each one runs real code and **prints a
+Thirty-four scripts in `tests/`. Not unit tests — each one runs real code and **prints a
 markdown table you read and judge**. No pytest, no fixtures, no CI.
 
 ## Why it's here
@@ -81,6 +81,29 @@ phrasings), `noisebench.py`, `ttsbench.py`, `dumpbench.py`, `routerbench.py`
 (asserts the voice_recv patch is installed).
 
 **Music** — `musicbench.py` does a real search and decode; needs network.
+
+**[The swarm](../concepts/the-swarm.md)** — thirteen benches. The nine offline ones need
+no key, no network and no model: `llm.chat` is replaced by a sleeper or a canned answer.
+The four live ones are the evidence the design was accepted on:
+
+| Bench | Kind | Protects |
+|---|---|---|
+| `turnbench.py` | check | Two turns at once must not read each other's flags. Drives the real path — tools run inside `asyncio.to_thread`, so the fix only works if the context survives the thread hop |
+| `minibench.py` | check | The dispatch layer: strict-schema legality at every depth, the literal word "json" in the prompt (DeepSeek returns empty without it), and six routing shapes including an invented mini and non-JSON junk |
+| `forkbench.py` | check | The tool pass is gone but nothing she needed from it is. Wall-clock proves the shape — two calls, not three — and the guard still holds mid-dispatch |
+| `latebench.py` | check | Actions land before she speaks, speech lands after, neither is silent. Uses the *measured* uneven delays; equal ones hid a real bug once |
+| `djminibench.py` | check | DJ Tiwa's action choice, the deck reaching the decision as a fact, and none of `play_music`'s instruction paragraph leaking into its return |
+| `searchminibench.py` | check | Keywords not sentences, today's year in the prompt, a flake staying quiet — plus a source scan asserting **no mini can reach a memory write** |
+| `calminibench.py` | check | Ambiguous date asks and queues nothing; a clash is flagged but still queued; the reply always lands before the follow-up |
+| `growthbench.py` | check | **The thesis.** Register a fourth mini, assert Main Tiwa's prompt did not grow. Also that every tool has a named owner — two were silently orphaned once |
+| `latbench.py` | measure | Same real turns through both arms, timed. p50 2.7s concurrent vs 5.1s serial. Writes `data/ab.json` |
+| `dispatchbench.py` | measure | Routing accuracy on 111 hand-corrected real turns: 93.7% vs the tool pass's 70.3% |
+| `personabench.py` | measure | Blind pairwise A/B on `data/ab.json`, each pair judged twice with the sides swapped. Not 1–5 scoring — [LLM judges hit ~69% on role identification](https://arxiv.org/pdf/2508.10014) where humans hit 90.8% |
+| `livechat.py` | measure | One real scripted conversation end to end. The only thing that shows a *sequence* — deck carrying between turns, follow-ups landing, her staying in character while a mini works |
+
+`recordbench.py` closes the set: one logged row of every pass that exists goes in, and
+exactly one — hers — comes out. That is the guarantee that multi-agent traces cannot
+pollute the fine-tune set, checked rather than trusted.
 
 **Calendar** — `calbench.py`. Offline it asserts the ✅ gate: `calendar_write` queues a
 sentence and reaches nothing else. `--live` runs seven asks through the tool pass and

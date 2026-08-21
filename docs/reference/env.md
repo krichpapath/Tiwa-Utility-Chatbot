@@ -1,7 +1,7 @@
 # Environment variables
 
 Everything she reads from `.env` at startup. **Twenty-two variables.** All of these are
-also on the [control panel](../surfaces/panel.md) settings tab with the same explanations.
+also on the [control panel](../surfaces/panel.md) **Settings** tab with the same explanations.
 
 !!! note "Two rules for all of them"
     1. **Read once, at import.** Changing `.env` needs a restart.
@@ -26,6 +26,8 @@ Never rendered by the panel, never committed, gitignored.
 | `TIWA_EXTRACT_MODEL` | `deepseek/deepseek-v4-flash` | Decides what she remembers, when that runs on the API (`api` mode only) |
 | `TIWA_PERSONA_MODEL` | auto | Force one specific model for her replies on whichever path is active. Leave empty unless testing |
 | `TIWA_DAILY_TOKENS` | `2000000` | Runaway insurance, **not a budget**. Past this she falls back to local for the rest of the day and says so. 2M ≈ $0.30 and is far more than a day of chatting |
+| `TIWA_TURN` | `serial` | Which shape a turn has. `serial` = [the three passes](../concepts/three-passes.md). `concurrent` = [the swarm](../concepts/the-swarm.md) — dispatch plus Mini Tiwas, measured 2.7s p50 against serial's 5.1s. Not the default yet |
+| `TIWA_VOICE` | `dj` | `dj` = the voice channel is a speaker for music and nothing else; join/leave tools answer honestly instead of acting. `full` = she can also decide to join or leave mid-conversation. Also gates `TIWA_LISTEN` |
 
 ## Discord
 

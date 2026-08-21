@@ -36,19 +36,24 @@ is fire-and-forget for the same reason.
 
 | Pass | Job | Sees | Can |
 |---|---|---|---|
-| **1 · inner** | decide and gather | your message, 8 previous lines | call all 9 tools |
+| **1 · inner** | decide and gather | your message, 8 previous lines | call all 10 tools |
 | **2 · persona** | be Tiwa | full persona prompt, chat history, pass 1's brief | nothing but talk |
 | **3 · extraction** | decide what she keeps | the exchange that just happened | write to the graph |
 
 Pass 2 has **no tools on purpose**. Acting and speaking are separate so a slow search
 never delays a reply. Details: [the three passes](concepts/three-passes.md).
 
+There is a **second shape** for a turn, off by default: `TIWA_TURN=concurrent` replaces
+passes 1 and 2 with one dispatch call and a set of [Mini Tiwas](concepts/the-swarm.md).
+Same pass 3, same guards, same persona prompt. Come back to it once the three passes make
+sense — it is the same idea taken one step further, and it only reads well in that order.
+
 ## Where the code lives
 
 ```
 bot.py          Discord glue. History, locks, and the order things flush in.
 chat.py         Same brain, terminal. Start here when debugging.
-dashboard.py    Control panel on :8787. Settings, memory, every model call.
+dashboard.py    Control panel on :8787. Chat, settings, memory, every model call.
 tiwa/
   pipeline.py   THE turn. Three passes, per-turn rules, action state.
   llm.py        One chat() for every model call. Modes, cost ceiling, logging.

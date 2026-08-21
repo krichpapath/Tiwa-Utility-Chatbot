@@ -104,7 +104,10 @@ function, decorate it, run `py -X utf8 -m tiwa.tools`.
 
 - **More tools = worse tool selection.** `now_playing` was deleted for this reason once
   [action state](action-state.md) made it redundant. Every tool you add competes with
-  `play_music` for attention.
+  `play_music` for attention. This is the ceiling [the swarm](the-swarm.md) exists to
+  lift: under `TIWA_TURN=concurrent` the four music tools sit *inside* DJ Tiwa and Main
+  Tiwa reads one line instead of four descriptions — 312 chars instead of 1,643, and
+  flat as DJ gains more. On that path `now_playing` could come back.
 - **Thai trigger phrases must be in the description.** The model does not generalise
   from English examples to Thai ones. `เปิดเพลง`, `ขอเพลง`, `อยากฟัง` are all listed
   explicitly.

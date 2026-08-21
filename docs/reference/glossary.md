@@ -15,7 +15,25 @@ Never shown to the user. Labelled "background, do not recite".
 
 **Turn**
 : One user message and everything that happens because of it: up to three model calls,
-tool flushes, and a memory write.
+tool flushes, and a memory write. Also the *object* of that name — `tools.Turn`, holding
+everything this turn asked for. It lives in a `contextvars.ContextVar`, so two channels
+talking at once get one each. Read a flag outside the task that set it and you get a
+different Turn; that is why the flush lives in the same task as the reply.
+
+**Mini Tiwa**
+: A single-purpose agent — `dj`, `search`, `calendar` — that works out *how* to do
+something Main Tiwa asked for. Returns facts, never prose, and only the fields it
+declared. Only under `TIWA_TURN=concurrent`. See [the swarm](../concepts/the-swarm.md).
+
+**Dispatch**
+: The one low-temperature call that decides which minis a message needs. Answers with a
+goal in a phrase — "their favourite song" — never a plan. An empty list is the normal
+answer.
+
+**Late result**
+: A mini that finished after she already replied. It reaches the chat as a **second
+message in her voice**, never as an edit and never as raw facts. Cancelled if the same
+person speaks again.
 
 **Inner state**
 : The second system message handed to pass 2, rebuilt every turn from live state:
@@ -99,7 +117,7 @@ calendar writes; intended for anything risky.
 text and calls the same pipeline. **A surface is not a brain.**
 
 **Pass label**
-: On the panel's llm tab, which pass a logged call belongs to: *thinking*, *her reply*,
+: On the panel's **Model calls** tab, which pass a logged call belongs to: *thinking*, *her reply*,
 *remembering*, *seeing*, *reflecting*, *idle*. The fastest way to answer "why did she do
 that?"
 

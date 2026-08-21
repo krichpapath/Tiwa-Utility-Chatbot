@@ -92,6 +92,7 @@ nav:
       - The 10-minute tour: tour.md
   - Core concepts:
       - The three passes: concepts/three-passes.md
+      - The swarm — Mini Tiwas: concepts/the-swarm.md
       - Modes — where she runs: concepts/modes.md
       - Memory — the knowledge graph: concepts/memory.md
       - The guards: concepts/guards.md
