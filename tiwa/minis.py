@@ -258,6 +258,63 @@ def dj(db, task: str) -> dict:
             "queued": len(music.QUEUE)}
 
 
+# ---------------------------------------------------------------- Search Tiwa
+
+_SEARCH_SYSTEM = """Turn this into web search KEYWORDS. Output ONLY the keywords, nothing else.
+
+Never the sentence they typed. Strip 'what is', 'do you know', 'มึงรู้ไหมว่า', 'อยากรู้ว่า'. Keep names and numbers.
+
+Add the year for anything current — a model dates itself from its training data, and a wrong year is a wrong page back. Today's date is given below; use that year.
+
+Search in the language the answer lives in. A Thai question about Thai football wants Thai keywords; a question about a game or a film usually wants English ones.
+
+  'มึงรู้ไหมว่าใครชนะบอลเมื่อคืน' -> ผลบอลเมื่อคืน
+  "what's that new gojo thing everyone's on about" -> Jujutsu Kaisen new season
+  'is the new iphone any good' -> iPhone review
+  'เห็นเขาบอกว่าร้านนี้ดี จริงไหม' -> รีวิว ร้าน[ชื่อร้าน]"""
+
+
+@mini(
+    "looks something up on the web. Give it the question — a score, a price, some "
+    "news, a game or show or person she does not recognise. It picks the keywords "
+    "itself. Not for people she should already remember.",
+    ("query", "found"),
+)
+def search(db, task: str) -> dict:
+    """Keywords, then one search. Read-only, and never on the path to her mouth.
+
+    The keyword rules were measured on the `web_search` tool description and move
+    here whole. What changes is that they are the ONLY thing in this prompt —
+    they used to be one of ten tool descriptions competing for attention, and
+    tools.md already records that every added tool costs the others.
+
+    ponytail: one hop. Multi-hop was the argument for Search being a real agent
+    rather than a function, but it is 8 calls in 135 and nothing has missed yet.
+    Add the second hop when a real question needs one, not before.
+    """
+    from . import pipeline, tools  # lazy: neither imports this module
+
+    now = datetime.datetime.now()
+    resp = llm.chat(
+        model=llm.TOOL_MODEL if llm.PROVIDER == "openrouter" else MODEL,
+        messages=[{"role": "system", "content": _SEARCH_SYSTEM},
+                  {"role": "user", "content": f"today is {now:%Y-%m-%d}\n{task}"}],
+        options={"temperature": 0, "num_ctx": 1024},
+    )
+    # _terms() already does this job for the music retry: _clean() to drop the
+    # <think> and <tool_call> the 8B leaks as text, then the first real line,
+    # unquoted, capped. Reimplementing it here got the <think> case wrong.
+    query = pipeline._terms(resp["content"]) or task[:80]
+    hits = tools.web_search(db, query)
+    if hits.startswith("search failed") or hits.startswith("every result"):
+        # tools never raise, so a network flake arrives as text. It is not an
+        # answer, and handing it to her as one is how she quotes an error at
+        # someone. Empty found -> _late() says nothing at all.
+        memory.log(db, "mini", f"search({query!r}) -> {hits[:80]}")
+        return {"query": query, "found": ""}
+    return {"query": query, "found": hits[:800]}
+
+
 if __name__ == "__main__":  # runnable check: the contract, offline
     db = memory.connect(":memory:")
     MINIS.clear()  # the real registry is not the fixture; dj has its own bench

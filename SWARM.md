@@ -491,9 +491,38 @@ one event loop per scenario and holds it open: `asyncio.run()` cancels pending
 tasks when its coroutine returns, which would kill every late task the instant
 she stopped speaking. `bot.py` has one long-lived loop, so that is the real shape.
 
-### S5 · Search Tiwa
+### S5 · Search Tiwa ✅ done 2026-08-21
 
-Read-only, off the critical path, multi-hop. **Check:** `searchbench`.
+Keywords, then one search. Read-only, and never on the path to her mouth — it is
+the p95 tool (4,337 ms) and S4 is what makes that free.
+
+The keyword rules move here **whole** from the `web_search` tool description:
+strip `what is` / `มึงรู้ไหมว่า`, keep names and numbers, add the current year,
+search in the language the answer lives in. Nothing about them is new. What
+changed is that they are now the **only** thing in the prompt instead of one of
+ten tool descriptions competing for attention.
+
+**One hop, not multi.** Multi-hop was the argument for Search being a real agent
+rather than a function — but it is 8 calls in 135 and nothing has missed yet.
+Marked `ponytail:` with the trigger: add the second hop when a real question
+needs one.
+
+**A failed search returns nothing, not an error.** `web_search` never raises, so
+a network flake arrives as the string `"search failed: …"`. Handing that back as
+a finding is how she ends up reading an exception at someone. Empty `found` means
+`_late()` says nothing at all.
+
+**Reused rather than rewritten:** `pipeline._terms()` already strips the
+`<think>` the 8B leaks, takes the first real line, unquotes and caps it — it does
+this for the music retry. The first draft reimplemented it and got `<think>`
+wrong; the bench caught it.
+
+**Check:** `tests/searchminibench.py` — the rules are present, the model's answer
+is parsed rather than pasted, today's date reaches the prompt (she was searching
+*"ราคา RTX 5090 2025"* in July 2026), a blank answer falls back to the task rather
+than searching `""`, and a flake stays quiet. Plus a source scan asserting **no
+mini can reach a memory write** — the coercion guarantee, checked rather than
+trusted. `searchbench` still owns the live index.
 
 ### S6 · Calendar Tiwa
 
