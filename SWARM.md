@@ -1,8 +1,9 @@
 # SWARM — the Mini Tiwa plan
 
-Status: **all eight gates built, behind `TIWA_TURN=concurrent`. Nothing live yet
-— the default is still `serial`, and no live numbers exist.** See
-[Where it stands](#where-it-stands).
+Status: **all eight gates built and measured live. All three abandon conditions
+pass.** Still behind `TIWA_TURN=concurrent` — the default is `serial`, and
+flipping it is a decision, not a formality. See
+[Live results](#live-results--2026-08-22).
 
 Companion to `PLAN.md`. Same rules: every gate ships alone, every gate has one
 runnable check, and a gate that can't be judged by running something isn't done.
