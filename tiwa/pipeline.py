@@ -329,7 +329,8 @@ def _doing(missed_music: bool = False, blind: bool = False,
     return " ".join(out)
 
 
-async def respond(db, hist: list, author: str, text: str, images=()) -> str:
+async def respond(db, hist: list, author: str, text: str, images=(),
+                  on_late=None) -> str:
     """One Tiwa turn. `hist` = chat messages incl. the current one. Caller appends the reply.
 
     `images` = attachment urls on the current message. Empty on every ordinary
@@ -338,7 +339,9 @@ async def respond(db, hist: list, author: str, text: str, images=()) -> str:
     if TURN_MODE == "concurrent":
         from . import turn  # late: turn.py imports this module
 
-        return await turn.respond(db, hist, author, text, images)
+        return await turn.respond(db, hist, author, text, images, on_late)
+    # `on_late` is ignored on the serial path: nothing there finishes after she
+    # speaks, which is the whole difference between the two.
     turn0 = time.perf_counter()
     tools.new_turn()  # everything the tools flag this turn is scoped to this task
     recent = "\n".join(

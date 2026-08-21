@@ -447,27 +447,49 @@ holding mid-dispatch. Offline.
 3,500 ms target is unverified. The bench proves the calls overlap; only a live
 run proves the number.
 
-### S4 · Late results
+### S4 · Late results ✅ done 2026-08-21
 
-**Do:** three policies, no config.
+**The split is actions vs speech**, and it falls straight out of `bot.py`: the
+flush runs the moment `respond()` returns, so anything that produces an **action**
+has to finish first. Anything that produces **speech** does not.
 
-| situation | what happens |
-|---|---|
-| mini finishes before she speaks | folded into her reply |
-| mini finishes after, topic still live | **follow-up message** (never an edit) |
-| mini finishes after, she's moved on | next turn's `[inner-state]` |
-| mini times out (~6s) | an explicit "you tried to look up X, nothing came back" line |
+| | minis | when |
+|---|---|---|
+| **actions** | `dj`, `calendar` | before she speaks — the flush needs them |
+| **speech** | `search`, anything new | after, as a follow-up message |
 
-**Never a silent drop.** Silent drops are how she starts bluffing.
+**Writing this found a real gap in S3.** `forkbench` gave every fake call the same
+delay, which hid the fact that `gather` waits for the *slowest* branch — so a
+music turn was still bound by dispatch + DJ ≈ 4.1s even though her words were
+ready at 2.0s. Two fixes:
 
-Cancellation, one rule: dispatches that produce **speech** are cancelled when a
-new message arrives; dispatches that produce **actions** are not. A queued song
-still plays. A stale search doesn't interrupt.
+- **DJ starts at t=0, not after dispatch.** `_missed_music` already knows it is a
+  music ask, deterministically and for free. Making the song wait ~2.6s for a
+  model to agree is the exact round trip this design exists to delete.
+- **Speech minis are spun off**, not awaited. `latebench` uses the *measured*
+  uneven delays — dispatch 2.6s, persona 2.0s, mini 1.5s, p95 search 4.3s — which
+  is what makes the difference visible at all.
 
-`_flush_music` already does the follow-up pattern and it works. Reuse it.
+**Only she speaks.** A late result does not reach the channel as facts; it goes
+through `pipeline.say()` and comes out in her voice, one line. `latebench`
+asserts the raw fact string never appears in what was sent.
 
-**Check:** a late result produces a follow-up; a timeout produces a next-turn
-line, not silence.
+**Never a silent drop.** A timeout at `LATE_TIMEOUT` (6s — tool p95 is 4,337ms)
+says nothing rather than something invented, and logs why. Silent drops are how
+she starts believing things nobody told her.
+
+**Cancellation, one rule:** a new message from the same person cancels their
+pending **speech**; actions are untouched. A stale search dies, the song they just
+asked for still plays. `latebench` drives exactly that pair.
+
+**`on_late`** is one optional async callable. `bot.py` passes the channel's send;
+`chat.py`, the dashboard and the benches pass nothing and late results are logged
+and dropped, because none of them can receive a second message.
+
+**Check:** `tests/latebench.py` — six scenarios, offline. Note the harness runs
+one event loop per scenario and holds it open: `asyncio.run()` cancels pending
+tasks when its coroutine returns, which would kill every late task the instant
+she stopped speaking. `bot.py` has one long-lived loop, so that is the real shape.
 
 ### S5 · Search Tiwa
 

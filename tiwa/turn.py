@@ -30,32 +30,91 @@ from . import eyes, memory, minis, pipeline, tools
 from .memory import TIWA
 
 
-async def _work(db, author: str, text: str, recent: str, asked_music: bool) -> dict:
-    """The other half of the fork. Never blocks her reply."""
-    out = await minis.dispatch(db, author, text, recent)
-    jobs = list(out["dispatch"])
+# Minis whose result is an ACTION bot.py has to flush — the deck, the ✅ gate.
+# These finish before she speaks, because the flush runs the moment respond()
+# returns. Everything else produces SPEECH and goes late.
+ACTS = {"dj", "calendar"}
+LATE_TIMEOUT = 6.0  # tool exec p95 is 4,337ms; past this she was not going to say it
 
-    # The net UNDER the router, not inside it. _missed_music fires when the model
-    # failed to notice a music ask — about 1 in 4-6 — and a net that only runs
-    # when the router already noticed is not a net. It is deterministic, it is
-    # measured across 24 dated cases in djbench, and it costs no call.
-    if asked_music and not any(name == "dj" for name, _ in jobs):
-        jobs.append(("dj", text))
-        memory.log(db, "mini", f"dj({text[:60]!r}) -> forced, dispatch skipped it")
+# author -> the speech work still running for them. Genuinely cross-turn, like
+# music.NOW — not a per-turn flag, so it does not belong on the Turn.
+# ponytail: unbounded dict keyed by author. Cap it if she ever has many users.
+_pending = {}
 
-    if not jobs:
-        return {"jobs": [], "results": [], "ask": out["ask"]}
-    # minis run concurrently with each other too — two jobs cost one job's wait
-    results = await asyncio.gather(
-        *(asyncio.to_thread(minis.run, db, name, task) for name, task in jobs)
+
+def _cancel_pending(author: str):
+    """They spoke again. A search for the message before this one is stale.
+
+    Only SPEECH is cancelled. A song they asked for still plays — that is the
+    rule from SWARM.md S4, and it is why ACTS never lands in here.
+    """
+    task = _pending.pop(author, None)
+    if task and not task.done():
+        task.cancel()
+
+
+async def _late(db, author: str, jobs: list, on_late) -> None:
+    """A mini finished after she spoke. She says it herself, one line, or not at all."""
+    try:
+        results = await asyncio.wait_for(
+            asyncio.gather(*(asyncio.to_thread(minis.run, db, n, t) for n, t in jobs)),
+            timeout=LATE_TIMEOUT,
+        )
+    except asyncio.TimeoutError:
+        # never a silent drop — a silent drop is how she starts believing she
+        # knows something nobody ever told her
+        memory.log(db, "mini", f"late({[n for n, _ in jobs]}) -> timed out")
+        return
+    except asyncio.CancelledError:
+        memory.log(db, "mini", f"late({[n for n, _ in jobs]}) -> cancelled, they moved on")
+        raise
+    facts = [f"{n}: {r}" for (n, _), r in zip(jobs, results) if r]
+    if not facts or on_late is None:
+        memory.log(db, "mini", f"late({[n for n, _ in jobs]}) -> {facts or 'nothing'}")
+        return
+    # Rule 1: only Main Tiwa speaks. The facts do not reach the channel, she does.
+    line = await pipeline.say(
+        db,
+        [{"role": "user", "content": f"{author}: (earlier message)"}],
+        "You just this second found out what you went to look up. Say it to "
+        f"{author} in ONE short line, in your own voice, as a follow-up to what "
+        "you already said. Do not greet them and do not explain that you looked "
+        "it up.\n" + "\n".join(facts),
     )
-    return {"jobs": jobs, "results": list(results), "ask": out["ask"]}
+    if line:
+        await on_late(line)
+    memory.log(db, "mini", f"late({[n for n, _ in jobs]}) -> {line[:120]}")
 
 
-async def respond(db, hist: list, author: str, text: str, images=()) -> str:
-    """One Tiwa turn, forked. Same signature as pipeline.respond()."""
+async def _work(db, author: str, text: str, recent: str, asked_music: bool,
+                on_late=None) -> dict:
+    """Decide, then act. Only ACTS are awaited; speech is spun off and goes late."""
+    out = await minis.dispatch(db, author, text, recent)
+    jobs = [j for j in out["dispatch"] if not (asked_music and j[0] == "dj")]
+
+    says = [j for j in jobs if j[0] not in ACTS]
+    if says:
+        _pending[author] = asyncio.create_task(_late(db, author, says, on_late))
+
+    acts = [j for j in jobs if j[0] in ACTS]
+    results = await asyncio.gather(
+        *(asyncio.to_thread(minis.run, db, name, task) for name, task in acts)
+    ) if acts else []
+    return {"jobs": acts, "results": list(results), "ask": out["ask"]}
+
+
+async def respond(db, hist: list, author: str, text: str, images=(),
+                  on_late=None) -> str:
+    """One Tiwa turn, forked.
+
+    `on_late` is an async callable taking one string — bot.py passes the channel's
+    send. Without it a late result is logged and dropped, which is what chat.py,
+    the dashboard and the benches want: nothing there can receive a second
+    message. Keyword-only in practice, so no existing caller changed.
+    """
     turn0 = time.perf_counter()
     tools.new_turn()
+    _cancel_pending(author)  # a search for their previous message is stale now
     recent = "\n".join(
         m["content"] if m["role"] == "user" else f"{TIWA}: {m['content']}"
         for m in hist[-9:-1]
@@ -76,13 +135,16 @@ async def respond(db, hist: list, author: str, text: str, images=()) -> str:
         dispatching_music=asked_music,
     )
 
-    reply, work = await asyncio.gather(
+    # DJ starts NOW, not after dispatch. The classifier already said this is a
+    # music ask, deterministically and for free — making the song wait ~2.6s for
+    # a model to agree is the exact round trip this whole design removes.
+    jobs = [asyncio.to_thread(minis.run, db, "dj", text)] if asked_music else []
+
+    reply, *_ = await asyncio.gather(
         pipeline.say(db, hist, state),
-        _work(db, author, text, recent, asked_music),
+        *jobs,
+        _work(db, author, text, recent, asked_music, on_late),
     )
-    # S4 turns `work` into a follow-up message or next turn's state. Until then it
-    # is logged, and the Turn flags it set are drained by bot.py after the reply —
-    # which is how music already behaved, so music is correct on this path today.
     memory.log(db, "turn", f"{author}: {text[:100]} -> {reply[:120]}",
                (time.perf_counter() - turn0) * 1000)
     return reply

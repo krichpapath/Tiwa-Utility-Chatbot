@@ -40,6 +40,16 @@ pending_confirms = {}  # confirm-message id -> plain-language calendar request
 voice_channel = {}  # guild id -> text channel to mirror the transcript into
 
 
+def _later(channel):
+    """How a mini that finished after she spoke reaches the chat: a second
+    message, never an edit. She sends it herself — the facts stay inside."""
+    async def send(line: str):
+        history[channel.id].append({"role": "assistant", "content": line})
+        await channel.send(line[:2000])
+
+    return send
+
+
 async def _heard(name: str, text: str):
     """Everything said in voice becomes chatlog (G6). The model runs ONLY when
     her name is in it (G7) — Whisper is cheap, the LLM is not."""
@@ -51,7 +61,8 @@ async def _heard(name: str, text: str):
         if asked is None:
             continue  # heard, logged, not answered. No tokens spent.
         async with locks[ch.id]:
-            reply = await pipeline.respond(db, list(history[ch.id]), name, asked)
+            reply = await pipeline.respond(db, list(history[ch.id]), name, asked,
+                                           on_late=_later(ch))
             if not reply:
                 continue
             history[ch.id].append({"role": "assistant", "content": reply})
@@ -335,7 +346,8 @@ async def on_message(message: discord.Message):
     async with locks[message.channel.id]:
         async with message.channel.typing():
             reply = await pipeline.respond(db, list(history[message.channel.id]),
-                                           author, text, images)
+                                           author, text, images,
+                                           on_late=_later(message.channel))
         # Queued actions must run whatever she says. An empty reply used to
         # `return` here and silently swallow the song she had already queued —
         # you asked for Bad Apple and nothing happened.
