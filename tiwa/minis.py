@@ -315,6 +315,80 @@ def search(db, task: str) -> dict:
     return {"query": query, "found": hits[:800]}
 
 
+# ---------------------------------------------------------------- Calendar Tiwa
+
+_CAL_SYSTEM = """You handle Krich's calendar. Answer in json.
+
+You are given the next 7 days. Decide ONE action:
+- read  : they asked what is on. The events are already below; you add nothing.
+- write : they want something added or cancelled. Put the WHOLE change in one plain sentence, e.g. "add dentist Tuesday 15:00" or "cancel Friday's meeting". Krich still has to confirm it, so a write is never the risky choice.
+- none  : the message is not about the calendar.
+
+ASK instead of guessing when the date is genuinely ambiguous. "next Tuesday" the week after this one, or the Tuesday coming? A day with no date when two of them are in range? Write the question in "ask", leave action as none, and change nothing. A guess that lands in someone's calendar is worse than a question.
+A time they did state is not ambiguous. Do not ask for confirmation of something they already said.
+
+CLASH: if the new thing overlaps something already on the calendar, say which one in "clash". Still do the write — Krich decides, you point it out.
+
+MENTION: worth bringing up unprompted only if it is genuinely soon and they seem not to know. Most turns this is false. She is not a butler and does not read the diary at people."""
+
+_CAL_FORMAT = {
+    "type": "object",
+    "properties": {
+        "action": {"type": "string", "enum": ["read", "write", "none"]},
+        "request": {"type": "string"},
+        "ask": {"type": "string"},
+        "clash": {"type": "string"},
+        "mention": {"type": "boolean"},
+    },
+    "required": ["action", "request", "ask", "clash", "mention"],
+    "additionalProperties": False,
+}
+
+
+@mini(
+    "reads and changes Krich's calendar. Give it what they said about a plan — "
+    "'put dentist on Tuesday', 'what have I got on', 'cancel Friday'. It reads the "
+    "week itself, spots clashes, and asks when a date is ambiguous instead of "
+    "guessing. Krich still confirms every change with a reaction.",
+    ("action", "events", "queued", "ask", "clash"),
+)
+def calendar(db, task: str) -> dict:
+    """The judgment half. The mechanics below it were already right.
+
+    Parsing a date into an event is `gcal._EVENT_FORMAT`, and it handles Thai
+    titles, relative dates and Buddhist years already. The write itself is the ✅
+    gate. Neither moves here, and neither is ever an agent's call — this decides
+    WHAT to propose, never that it happens.
+    """
+    from . import gcal, tools  # lazy: gcal pulls in the google client
+
+    week = gcal.upcoming()
+    now = datetime.datetime.now()
+    resp = llm.chat(
+        model=llm.TOOL_MODEL if llm.PROVIDER == "openrouter" else MODEL,
+        messages=[{"role": "system", "content": _CAL_SYSTEM},
+                  {"role": "user",
+                   "content": f"today is {now:%A %Y-%m-%d}\n\nnext 7 days:\n{week}"
+                              f"\n\nThey said: {task}"}],
+        fmt=_CAL_FORMAT,
+        options={"temperature": 0, "num_ctx": 2048},
+    )
+    try:
+        out = json.loads(resp["content"] or "{}")
+        action = out["action"]
+    except (json.JSONDecodeError, KeyError, TypeError, AttributeError):
+        return {}
+    ask, clash = (out.get("ask") or "").strip(), (out.get("clash") or "").strip()
+    request = (out.get("request") or "").strip()
+
+    if ask:
+        action = "none"  # asking and acting in the same breath is the guess it replaces
+    if action == "write" and request:
+        tools.calendar_write(db, request)  # queues only; Krich's ✅ is the write
+    return {"action": action, "events": week[:600] if action == "read" else "",
+            "queued": request if action == "write" else "", "ask": ask, "clash": clash}
+
+
 if __name__ == "__main__":  # runnable check: the contract, offline
     db = memory.connect(":memory:")
     MINIS.clear()  # the real registry is not the fixture; dj has its own bench

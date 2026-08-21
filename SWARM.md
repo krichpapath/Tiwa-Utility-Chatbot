@@ -524,11 +524,66 @@ than searching `""`, and a flake stays quiet. Plus a source scan asserting **no
 mini can reach a memory write** — the coercion guarantee, checked rather than
 trusted. `searchbench` still owns the live index.
 
-### S6 · Calendar Tiwa
+### S6 · Calendar Tiwa ✅ done 2026-08-21
 
-Judgment layer over the existing `gcal` code. Check-mark gate untouched.
-**Check:** `calbench`, plus a new case: an ambiguous date produces an `ask`,
-not a guess.
+The judgment half only. `gcal._EVENT_FORMAT` still parses the date — it already
+handles Thai titles, relative dates and Buddhist years, all measured — and the
+✅ gate is still the write. Neither moved, and neither is ever an agent's call.
+
+What is new is what did not exist: **which Tuesday did they mean, does it clash,
+is it worth bringing up.** It reads the week itself (`gcal.upcoming()`, no tool
+call) so the decision has the calendar in front of it.
+
+**Asking and acting are mutually exclusive.** A populated `ask` forces the action
+to `none` and queues nothing. A guess that lands in someone's calendar is worse
+than a question — and the ✅ gate makes the *opposite* error cheap, so the
+asymmetry is deliberate.
+
+**A clash is pointed out, not blocked.** It still queues; Krich decides.
+
+**"Not a butler" is in the prompt verbatim**, because the failure mode of a
+calendar agent is reading the diary at people. `calminibench` asserts the line is
+still there.
+
+**This gate exposed an ordering bug in S4.** An ACTION mini finishes *before* she
+speaks, so its facts cannot reach the state block — that was built at t=3ms. They
+go out as a follow-up instead, which meant a mini that finishes faster than the
+persona call could send its follow-up **first**, and she would answer a question
+she had not asked yet. `latebench` never saw it because its fake search was
+slower than its fake persona. Fixed with a `spoken` event: nothing follows up
+until her words are in hand. `calminibench` drives the fast-mini case.
+
+**Check:** `tests/calminibench.py` — strict schema, the week read not asked, a
+write that only queues, ambiguity asking and changing nothing, a clash flagged
+but not blocking, junk degrading, and the reply always landing first. Plus a
+source scan: no mini can reach `gcal.apply_change` or the calendar API.
+`calbench` passes unmodified.
+
+### S7 · Prove the property ✅ done 2026-08-21
+
+Registered a fourth mini and measured what grew:
+
+| | before | after | delta |
+|---|---|---|---|
+| minis registered | 3 | 4 | +1 |
+| **Main Tiwa's prompt** | 4,609 | 4,609 | **+0** |
+| dispatch prompt | 1,823 | 1,897 | +74 (one line) |
+
+And the containment, measured rather than asserted:
+
+| | chars Main reads |
+|---|---|
+| the 4 music tool descriptions she used to read | **1,643** |
+| the one `dj` line she reads instead | **312** |
+
+**5× less, and flat** — DJ can gain tools forever and that 312 does not move.
+That is the number `docs/concepts/tools.md` was worrying about when it deleted
+`now_playing`, and it is the reason Home Assistant's five or six new tools are
+now affordable.
+
+**Check:** `tests/growthbench.py` — the delta table above, plus assertions that
+`turn.py` never touches `tools.TOOLS`, never runs the tool pass, and that the
+action/speech split is declared rather than guessed.
 
 ### S7 · Prove the property — the whole thesis in one number
 
@@ -592,11 +647,40 @@ something is in the wrong place.
 
 ---
 
+## Where it stands
+
+All eight gates are built and every offline bench is green. `TIWA_TURN` still
+defaults to `serial` — the swarm proves itself before it becomes the default.
+
+```
+py -X utf8 -m tiwa.tools     py -X utf8 tests/turnbench.py    (S0)
+py -X utf8 -m tiwa.minis     py -X utf8 tests/minibench.py    (S1)
+py -X utf8 tests/djminibench.py                               (S2)
+py -X utf8 tests/forkbench.py                                 (S3)
+py -X utf8 tests/latebench.py                                 (S4)
+py -X utf8 tests/searchminibench.py                           (S5)
+py -X utf8 tests/calminibench.py                              (S6)
+py -X utf8 tests/growthbench.py                               (S7)
+```
+
+Untouched and still passing: `djbench`, `panelbench`, `test_memory`, `calbench`.
+
+**Still owed, and all of it blocked on one thing.** `OPENROUTER_API_KEY` returns
+401, so nothing below has been run against a real model:
+
+- `latbench` — live p50/p95, and whether S3 actually hits 3,500 ms
+- `dispatchbench` — routing accuracy on the labelled set
+- the persona A/B judge
+- one real conversation through `TIWA_TURN=concurrent`
+
+The offline benches prove the calls overlap, the guards hold and the containment
+is real. **They do not prove she still sounds like herself.** Only a live A/B does.
+
 ## How to know it worked
 
 | question | how you check |
 |---|---|
-| Does adding a skill stay cheap? | **S7.** Main's prompt token count doesn't move |
+| Does adding a skill stay cheap? | **S7, answered: +0 chars.** `growthbench` |
 | Does she pick the right mini? | `dispatchbench` — labels mined free from the 135 tool calls already in `log`, weighted by real traffic (53% music, 41% recall, 6% search). Report the **false-positive rate on the 59% of turns that should dispatch nothing** |
 | Is she faster? | `latbench` — p50 < 3,500ms |
 | Does she still sound like herself? | Blind A/B: same input, serial vs concurrent, judge picks which is more Tiwa. **Not** 1-5 scoring — LLM judges only hit ~69% on role identification vs 90.8% for humans. Weight the set toward the escalation ladder, since sharp personas drift hardest |
