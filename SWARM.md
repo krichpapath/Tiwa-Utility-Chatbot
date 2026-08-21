@@ -684,6 +684,33 @@ whisper, onnxruntime — 0.24s) on every turn to run a pure-text veto. `forkbenc
 caught it as 0.54s for two 0.3s calls. It now imports only when a phrase actually
 matched.
 
+### Voice is DJ-only ✅ 2026-08-21
+
+`TIWA_VOICE=dj` (the default) makes the voice channel a **speaker for music and
+nothing else**. `full` restores the rest.
+
+| | under `dj` |
+|---|---|
+| ears (Whisper, wake word) | off — `LISTEN` is held false regardless of `TIWA_LISTEN` |
+| TTS (`voice.say`) | no-op |
+| conversational join / leave | inert, and **says so** |
+| `_flush_music` auto-join | **live** — a song still pulls her into the channel |
+| typed `join` / `leave` | live — that is how you get her out |
+
+Most of this was already off: `TIWA_LISTEN` defaulted to `0`, and `voice.say()`
+is only reachable from `_heard`, which needs ears. The only thing genuinely still
+running was her deciding to join or leave mid-conversation.
+
+**Inert, not silent.** The two tools return *"you do not do voice chat right now
+— the voice channel is only for playing music. Say so; do not claim you joined or
+left."* A tool that quietly sets nothing is the confabulation shape this codebase
+keeps finding: she says she did it and did not.
+
+The `_asked_voice` classifier stays wired and stays correct — `growthbench`
+flips the flag and re-runs all ten cases under `full`, so turning voice back on
+is one env var rather than a rewrite. It also asserts `voice.join()` is **not**
+gated, because music is what the channel is still for.
+
 ## Where it stands
 
 All eight gates are built and every offline bench is green. `TIWA_TURN` still

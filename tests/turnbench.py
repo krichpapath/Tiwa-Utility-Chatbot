@@ -67,8 +67,10 @@ async def thread_hop():
     in respond()/idle() on the event loop, never inside a tool.
     """
     tools.new_turn()
-    await asyncio.to_thread(tools.join_voice, db, "")
-    assert tools.PENDING_JOIN is True, "flag set in a worker thread never came back"
+    # play_music, not join_voice: under TIWA_VOICE=dj the voice tools are inert
+    # by design, and a tool that sets nothing proves nothing about the thread hop.
+    await asyncio.to_thread(tools.play_music, db, "bad apple")
+    assert tools.PENDING_MUSIC == "bad apple", "flag set in a worker thread never came back"
     print("thread ok  — a flag set inside to_thread reaches the caller")
 
 
@@ -76,7 +78,9 @@ def sequential():
     """The heartbeat is ONE long-lived task, so its context outlives a tick."""
     tools.new_turn()
     tools.play_music(db, "first")
-    tools.leave_voice(db, "")
+    tools.current().PENDING_LEAVE = True  # set directly: the tool is inert under
+    #                                       TIWA_VOICE=dj, and this bench is about
+    #                                       the Turn's isolation, not about voice
     assert tools.PENDING_MUSIC == "first"
     assert tools.PENDING_LEAVE is True
 

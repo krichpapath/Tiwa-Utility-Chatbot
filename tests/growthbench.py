@@ -97,8 +97,8 @@ def nothing_is_orphaned():
         # superseded by code — the tool still exists for the serial path
         "recall": "code: memory.mentioned() + memory.turn_context()",
         "calendar_read": "code: gcal.upcoming(), read by the calendar mini",
-        "join_voice": "code: pipeline._asked_voice()",
-        "leave_voice": "code: pipeline._asked_voice()",
+        "join_voice": "off: TIWA_VOICE=dj (classifier ready for full)",
+        "leave_voice": "off: TIWA_VOICE=dj (classifier ready for full)",
         # owned by a mini
         "play_music": "mini: dj", "stop_music": "mini: dj",
         "queue_music": "mini: dj", "skip_music": "mini: dj",
@@ -119,22 +119,54 @@ def nothing_is_orphaned():
           " the tool pass")
 
 
-def voice_still_answers():
-    """The gap this check was written for, driven directly."""
-    cases = [
-        ("come join the vc", "join"), ("เข้ามาหน่อย", "join"),
-        ("get out", "leave"), ("ออกไป", "leave"),
-        # the measured veto: a future time is a plan, not an ask
-        ("join us later tonight", ""), ("ออกไปตอนดึกนะ", ""),
-        # wanting the music off is not wanting her gone
-        ("หยุดเพลง", ""), ("ปิดเพลง", ""), ("พอแล้ว", ""),
-        ("how are you", ""),
-    ]
-    print()
-    for text, want in cases:
-        got = pipeline._asked_voice(text)
-        assert got == want, f"{text!r} -> {got!r}, wanted {want!r}"
-    print(f"voice ok    — {len(cases)} cases; join/leave answer without a model call")
+def voice_is_dj_only():
+    """TIWA_VOICE=dj: the channel is a speaker for music, not a conversation.
+
+    Both halves matter. Conversational join/leave must be inert AND honest — a
+    tool that silently sets nothing is how she claims she joined and did not. And
+    the classifier must still be correct underneath, so `full` is one env var away.
+    """
+    from tiwa import tools as t, voice
+
+    assert voice.DJ_ONLY and not voice.LISTEN, "ears are on"
+    for text in ("come join the vc", "เข้ามาหน่อย", "get out", "ออกไป"):
+        assert pipeline._asked_voice(text) == "", f"{text!r} still routed to voice"
+
+    t.new_turn()
+    for fn in (t.join_voice, t.leave_voice):
+        note = fn(db, "")
+        assert "only for playing music" in note, note
+        assert "do not claim" in note, "she can still bluff about joining"
+    assert t.PENDING_JOIN is False and t.PENDING_LEAVE is False, "a flag was set anyway"
+
+    # ...and the classifier itself is still right, so `full` is one env var away
+    was, t.VOICE_DJ_ONLY = t.VOICE_DJ_ONLY, False
+    try:
+        live = [("come join the vc", "join"), ("เข้ามาหน่อย", "join"),
+                ("get out", "leave"), ("ออกไป", "leave"),
+                ("join us later tonight", ""), ("ออกไปตอนดึกนะ", ""),
+                ("หยุดเพลง", ""), ("ปิดเพลง", ""), ("พอแล้ว", ""),
+                ("how are you", "")]
+        for text, want in live:
+            got = pipeline._asked_voice(text)
+            assert got == want, f"under full: {text!r} -> {got!r}, wanted {want!r}"
+    finally:
+        t.VOICE_DJ_ONLY = was
+    print("voice ok    — dj-only: inert and honest; the classifier still correct")
+
+
+def music_still_gets_a_channel():
+    """The one thing voice is still FOR. Asking for a song brings her in."""
+    src = (Path(__file__).parents[1] / "bot.py").read_text(encoding="utf-8")
+    i = src.index("async def _flush_music")
+    body = src[i:src.index("async def _hang_up")]
+    assert "await voice.join(author)" in body, \
+        "music no longer brings her into the channel — voice is now FOR nothing"
+    from tiwa import voice
+    import inspect
+    assert "DJ_ONLY" not in inspect.getsource(voice.join), \
+        "voice.join() got gated — music cannot reach a channel"
+    print("dj ok       — a song still pulls her into the channel; join() ungated")
 
 
 def acts_are_declared_not_guessed():
@@ -150,6 +182,7 @@ before_and_after()
 main_has_no_tool_list()
 one_line_buys_a_whole_subsystem()
 nothing_is_orphaned()
-voice_still_answers()
+voice_is_dj_only()
+music_still_gets_a_channel()
 acts_are_declared_not_guessed()
 print("\ngrowth ok — a mini costs Main Tiwa nothing. That was the whole bet.")

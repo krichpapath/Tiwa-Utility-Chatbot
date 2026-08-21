@@ -149,8 +149,9 @@ async def respond(db, hist: list, author: str, text: str, images=(),
 
     # Voice has no mini and there is no tool pass here, so without this nothing
     # could set the flags and "come join the vc" would silently do nothing.
-    # 0 join/leave calls in 135 logged — not worth a model, very much worth a
-    # phrase list. bot.py reads the same flags either way.
+    # Returns "" under TIWA_VOICE=dj (the default) — the voice channel is a
+    # speaker for music, and _flush_music brings her in by itself. The classifier
+    # stays wired so TIWA_VOICE=full is one env var, not a rewrite.
     want = pipeline._asked_voice(text)
     if want == "join":
         tools.join_voice(db, "")

@@ -6,11 +6,20 @@ later by schema-constrained calls, never by the tool-calling model.
 """
 import contextvars
 import dataclasses
+import os
 import sys
 import types
 
 from . import memory
 from .memory import TIWA
+
+# Read here rather than importing voice, which pulls in discord, whisper and
+# onnxruntime. Same env var, same meaning — voice.DJ_ONLY is the definition.
+VOICE_DJ_ONLY = os.environ.get("TIWA_VOICE", "dj") != "full"
+# Honest text, not silence: she is told the channel is for music, so she says so
+# in her own words instead of claiming she joined and doing nothing.
+_DJ_ONLY_NOTE = ("you do not do voice chat right now — the voice channel is only "
+                 "for playing music. Say so; do not claim you joined or left.")
 
 TOOLS = {}  # name -> {"schema": ollama tool spec, "fn": callable(db, arg) -> str}
 
@@ -178,6 +187,8 @@ def calendar_read(db, arg: str) -> str:
     "ignored",
 )
 def join_voice(db, arg: str) -> str:
+    if VOICE_DJ_ONLY:
+        return _DJ_ONLY_NOTE
     current().PENDING_JOIN = True
     # ponytail: a tool cannot reach Discord objects, so flag it and let bot.py
     # act. It can only ever join the speaker's own channel — a wrong call is a
@@ -195,6 +206,8 @@ def join_voice(db, arg: str) -> str:
     "ignored",
 )
 def leave_voice(db, arg: str) -> str:
+    if VOICE_DJ_ONLY:
+        return _DJ_ONLY_NOTE
     current().PENDING_LEAVE = True
     # same shape as join_voice: a tool cannot reach Discord objects, so flag it
     # and let bot.py act after she has finished speaking.
@@ -310,10 +323,20 @@ if __name__ == "__main__":  # runnable check: registry shape + dispatch
     turn = new_turn()
     assert "confirm" in TOOLS["calendar_write"]["fn"](db, "add x tomorrow")
     assert turn.PENDING_CALENDAR == ["add x tomorrow"]
-    TOOLS["join_voice"]["fn"](db, "")
-    assert turn.PENDING_JOIN is True
-    TOOLS["leave_voice"]["fn"](db, "")
-    assert turn.PENDING_LEAVE is True
+    # TIWA_VOICE=dj (the default): the channel is a speaker for music, so these
+    # two answer honestly and set nothing. Silently setting nothing would be the
+    # confabulation shape — she would say she joined and not have.
+    assert "only for playing music" in TOOLS["join_voice"]["fn"](db, "")
+    assert "only for playing music" in TOOLS["leave_voice"]["fn"](db, "")
+    assert turn.PENDING_JOIN is False and turn.PENDING_LEAVE is False
+    globals()["VOICE_DJ_ONLY"] = False  # TIWA_VOICE=full is one env var away
+    try:
+        TOOLS["join_voice"]["fn"](db, "")
+        assert turn.PENDING_JOIN is True
+        TOOLS["leave_voice"]["fn"](db, "")
+        assert turn.PENDING_LEAVE is True
+    finally:
+        globals()["VOICE_DJ_ONLY"] = True
     TOOLS["play_music"]["fn"](db, "lofi")
     assert turn.PENDING_MUSIC == "lofi"
     # the module still answers to the old names, which is what let seven benches

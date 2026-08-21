@@ -379,15 +379,27 @@ class Ears(voice_recv.AudioSink):
             task.cancel()
 
 
-# Listening is OFF by default. Thai transcription on CPU is not good enough to
-# act on (whisper-base garbles it, small takes ~10s), so she takes commands by
-# text and only SPEAKS into voice. Set TIWA_LISTEN=1 to turn her ears back on.
-LISTEN = os.environ.get("TIWA_LISTEN", "0") != "0"
+# TIWA_VOICE decides how much of this file is live.
+#
+#   dj   — the voice channel is a SPEAKER for music and nothing else. Ears off,
+#          she does not talk out loud, and she does not decide to join or leave
+#          mid-conversation. _flush_music still brings her in when a song needs
+#          a channel, and `join` / `leave` typed by hand still work.
+#   full — ears, TTS and conversational join/leave as well.
+#
+# Default is dj: everything above the DJ line is either unfinished (Thai STT
+# garbles on whisper-base, ~10s on small) or unwanted while she is a text bot.
+DJ_ONLY = os.environ.get("TIWA_VOICE", "dj") != "full"
+
+# Listening was already OFF by default for the STT reason above; TIWA_VOICE=dj
+# now holds it off regardless, so TIWA_LISTEN=1 alone cannot turn her ears on.
+LISTEN = os.environ.get("TIWA_LISTEN", "0") != "0" and not DJ_ONLY
 
 
 def listen(guild, on_text, loop) -> str:
     if not LISTEN:
-        return "not listening (TIWA_LISTEN=0)"
+        return ("not listening (TIWA_VOICE=dj)" if DJ_ONLY
+                else "not listening (TIWA_LISTEN=0)")
     vc = guild.voice_client
     if vc is None:
         return "not in a voice channel"
@@ -524,6 +536,8 @@ async def say(guild, text: str) -> bool:
 
     import discord
 
+    if DJ_ONLY:
+        return False  # the channel is a speaker for music, not a mouth
     vc = guild.voice_client
     if vc is None or not text.strip():
         return False

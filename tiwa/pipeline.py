@@ -279,6 +279,8 @@ _LEAVE = ("leave the vc", "leave vc", "get out", "ออกไป", "ออก�
 def _asked_voice(text: str) -> str:
     """"join", "leave" or "". Vetoed by voice.wants_now() for a FUTURE time —
     'join us later tonight' is a plan, not an ask, and that veto is measured."""
+    if tools.VOICE_DJ_ONLY:
+        return ""  # TIWA_VOICE=dj — the channel is a speaker, not a conversation
     low = text.lower()
     want = ("leave" if any(p in low for p in _LEAVE)
             else "join" if any(p in low for p in _JOIN) else "")
