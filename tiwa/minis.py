@@ -92,6 +92,12 @@ Minis available:
 
 MOST MESSAGES NEED NO MINI. Ordinary chat, opinions, jokes, questions she can answer herself, someone insulting her — all of those are an empty dispatch list. Roughly three messages in five need nothing at all. An empty list is the normal answer, not a failure.
 
+These four are the measured over-firing, and Thai examples are given because the model does not generalise to them from English ones:
+- An AGREEMENT or a one-word reply is not a request. "ใช่", "ช่ายๆๆ", "อือ", "1", "ok", "yes" — dispatch NOTHING. Whatever she offered, she will handle in her reply.
+- A QUESTION ABOUT SOMETHING SHE ALREADY DID is not a request to do it again. "ข้ามคิวทำไม" (why did you skip), "ชื่อเพลง" / "เพลงนี้ชื่ออะไร" (what is this one called), "เปิดไปกี่เพลงแล้ว" — she knows what is on without looking. Dispatch NOTHING.
+- SOMEONE STATING A FACT is not asking for anything. "hsr มาจาก honkai star rail", "Maa Yan ชื่อ อิง", "มันเขียนผิด" — that is them talking. Dispatch NOTHING.
+- A CORRECTION OR A COMPLAINT about what is playing is only a music job if they asked for a different track. "เพลงห่วย" alone is an opinion; "เพลงห่วย เปลี่ยนที" is a job.
+
 Dispatch a mini only when the message asks for something a mini actually does. Requests in Thai count exactly the same as English ones.
 
 Give the mini the GOAL in one short phrase, not the user's sentence and not a plan. "their favourite song", "cancel Friday's dentist", "who won the match last night". The mini works out the rest — you do not tell it how.

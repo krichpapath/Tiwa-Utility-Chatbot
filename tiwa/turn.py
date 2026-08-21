@@ -35,6 +35,10 @@ from .memory import TIWA
 # returns. Everything else produces SPEECH and goes late.
 ACTS = {"dj", "calendar"}
 LATE_TIMEOUT = 6.0  # tool exec p95 is 4,337ms; past this she was not going to say it
+# Deadline on the work she DOES wait for. Measured live: dispatch p50 ~0.9s,
+# a mini ~1.5s. 10s is four times that, and it exists because a plain gather()
+# let one real turn run 507 seconds on a stalled search.
+ACT_TIMEOUT = 10.0
 
 # author -> the speech work still running for them. Genuinely cross-turn, like
 # music.NOW — not a per-turn flag, so it does not belong on the Turn.
@@ -105,11 +109,45 @@ async def _late(db, author: str, jobs: list, on_late, spoken=None) -> None:
                  on_late, spoken)
 
 
+def route(db, jobs: list, text: str, asked_music: bool,
+          dj_already_running: bool = False) -> list:
+    """The router's answer, with the deterministic rules applied over the top.
+
+    This is the hybrid: the classifier does not merely back the model up, it
+    also overrules it. Both directions were measured on 111 real turns
+    (`dispatchbench`), and both fire on real traffic.
+
+    Exported so the bench grades the SYSTEM rather than the model alone —
+    grading the raw dispatch call would measure something production never runs.
+    """
+    out = list(jobs)
+
+    # VETO. Dispatch answered `dj` to "มึงเล่นเพลงไรอยู่เนี่ย" (what song is even
+    # playing), which would start a track over her answer — the exact failure
+    # djbench exists for. _DECK_Q is the narrow list of phrases that are
+    # unambiguously questions ABOUT the deck and never requests, so it cannot
+    # swallow a polite ask or a youtube link the way the full _QUESTION list would.
+    if pipeline._asked_deck(text):
+        if any(n == "dj" for n, _ in out):
+            memory.log(db, "mini", f"dj vetoed — {text[:50]!r} asks what is on")
+        out = [j for j in out if j[0] != "dj"]
+        return out
+
+    # NET. The model failed to notice a music ask — measured at 1 in 4-6 before,
+    # and dispatch still misses some. In respond() DJ is already running by now,
+    # started at t=0; the bench has no such head start and asks for the job back.
+    if asked_music:
+        out = [j for j in out if j[0] != "dj"]
+        if not dj_already_running:
+            out.append(("dj", text))
+    return out
+
+
 async def _work(db, author: str, text: str, recent: str, asked_music: bool,
                 on_late=None, spoken=None) -> dict:
     """Decide, then act. Only ACTS are awaited; speech is spun off and goes late."""
     out = await minis.dispatch(db, author, text, recent)
-    jobs = [j for j in out["dispatch"] if not (asked_music and j[0] == "dj")]
+    jobs = route(db, out["dispatch"], text, asked_music, dj_already_running=True)
 
     says = [j for j in jobs if j[0] not in ACTS]
     if says:
@@ -171,11 +209,20 @@ async def respond(db, hist: list, author: str, text: str, images=(),
     jobs = [asyncio.to_thread(minis.run, db, "dj", text)] if asked_music else []
 
     spoken = asyncio.Event()  # nothing follows up before she has said the first thing
-    reply, *rest = await asyncio.gather(
-        pipeline.say(db, hist, state),
-        *jobs,
-        _work(db, author, text, recent, asked_music, on_late, spoken),
-    )
+    work_t = asyncio.gather(
+        *jobs, _work(db, author, text, recent, asked_music, on_late, spoken))
+
+    reply = await pipeline.say(db, hist, state)
+    # Her words are ready. Everything else gets a DEADLINE, because a plain
+    # gather() has none: latbench measured one live turn at 507 SECONDS with no
+    # model call over 60s — a stalled search in a worker thread, held through
+    # asyncio.run's executor shutdown. She had had the reply in hand since 1.9s.
+    # Losing a song is recoverable; making her mute for eight minutes is not.
+    work = None
+    try:
+        work = (await asyncio.wait_for(work_t, ACT_TIMEOUT))[-1]
+    except asyncio.TimeoutError:
+        memory.log(db, "mini", f"acts hit {ACT_TIMEOUT}s — replied without them")
     spoken.set()
     memory.log(db, "turn", f"{author}: {text[:100]} -> {reply[:120]}",
                (time.perf_counter() - turn0) * 1000)
@@ -184,7 +231,7 @@ async def respond(db, hist: list, author: str, text: str, images=(),
     # state block — that was built at t=3ms. Calendar's "which Tuesday did you
     # mean" has to reach them anyway, so it goes out the same way a late search
     # does: as a second line, in her voice.
-    said = [f"{v}" for r in rest[-1]["results"]
+    said = [f"{v}" for r in (work or {}).get("results", [])
             for k, v in r.items() if k in VOICE_FIELDS and v]
     if said:
         _pending[author] = asyncio.create_task(_voice(db, author, said, on_late))

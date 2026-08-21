@@ -180,6 +180,11 @@ _MUSIC_VERB = ("play ", "queue ", "put on ", "เปิดเพลง", "เล
 # Phrases, never the bare word อะไร — "เปิดเพลงอะไรก็ได้" (put on anything) is a
 # real ask, and a looser "เพลงอะไร" swallows it. djbench catches that one.
 _DECK_Q = ("อะไรอยู่", "ชื่ออะไร", "เล่นเพลงไร", "เพลงไรอยู่",
+           # measured in dispatchbench: the router answered `dj` to a bare
+           # "ชื่อเพลง" (song name) and would have started a track on top of the
+           # answer. It is a deck question, so the deterministic veto owns it —
+           # and _doing(asked_deck=True) now tells her what is on, which is right.
+           "ชื่อเพลง",
            "what song", "which song", "what's playing", "what is playing",
            "what are you playing")
 _QUESTION = _DECK_Q + ("?", "อะไรบ้าง", "ไหม", "มั้ย", "ทำไม", "เมื่อไหร่")
@@ -296,7 +301,8 @@ def _asked_voice(text: str) -> str:
 
 
 def _doing(missed_music: bool = False, blind: bool = False,
-           asked_deck: bool = False, dispatching_music: bool = False) -> str:
+           asked_deck: bool = False, dispatching_music: bool = False,
+           asked: str = "") -> str:
     """What she is actually doing, read from live state — never from what the
     model believes it did.
 
@@ -334,17 +340,23 @@ def _doing(missed_music: bool = False, blind: bool = False,
                                if tools.PENDING_MUSIC else [])
     if queued or dispatching_music:
         # On the concurrent path DJ Tiwa has not run yet — she is speaking WHILE
-        # it searches — so there is nothing in the Turn to name. The guarantee is
-        # the same either way and it is the second half of this text that carries
-        # it: she has not seen a result, so she invents no artist and no title.
+        # it searches — so there is nothing in the Turn to name.
+        #
+        # "putting a song on" alone was NOT enough. Measured in a live A/B: told
+        # only that something was happening, she filled the gap herself —
+        # "เปิด Fat Rat ให้มึง 3 เพลงก่อนนะ — The Calling, Monody, และ Unity",
+        # three titles she had never seen. A vacuum gets furnished. So she is
+        # anchored to the only words that ARE grounded: the ones they typed.
         what = (", ".join(f"{act} {arg}".strip() for act, arg in queued)
-                if queued else "putting a song on")
+                if queued else f"putting on what they just asked for ({asked[:80]})")
         out.append(f"You have just done this: {what}. It IS happening — say so in"
                    " your own way. Never say you do not know the song or cannot"
                    " find it; you do not need to recognise a song to put it on."
                    " Do not sing or quote its lyrics. You have not seen the search"
-                   " result yet, so do NOT name an artist, album or year for it —"
-                   " those are things you would be making up.")
+                   " result yet, so do NOT name a SONG TITLE, artist, album or"
+                   " year beyond the words they themselves used — those are"
+                   " things you would be making up. Naming three tracks you have"
+                   " not heard is the exact failure this line exists to stop.")
     elif missed_music:
         # asked for music, and _force_music came up empty too — the only turn
         # where telling her what is NOT happening is worth the tokens
@@ -430,7 +442,7 @@ def _state(db, author: str, text: str, seen: str = "", inner: str = "",
         "matters to you. A real question beats a safe take every time."
     )
     doing = _doing(missed, blind=blind, asked_deck=_asked_deck(text),
-                   dispatching_music=dispatching_music)
+                   dispatching_music=dispatching_music, asked=text)
     if doing:  # quiet turn = not one wasted token
         rules += " " + doing
     if seen:

@@ -120,10 +120,14 @@ def cannot_name_what_she_has_not_heard():
     tools.new_turn()
     music.NOW["title"] = None
     state = pipeline._state(db, "Krich", "เปิดเพลงอะไรก็ได้", dispatching_music=True)
-    for must in ("It IS happening", "do NOT name an artist, album or year",
+    for must in ("It IS happening", "do NOT name a SONG TITLE",
                  "Do not sing or quote its lyrics"):
         assert must in state, f"missing from a mid-dispatch turn: {must}"
     assert "came up empty" not in state, "told her it failed before it had run"
+    # Measured in the live A/B: told only that "a song" was going on, she invented
+    # three track names. She is anchored to their own words now — the one thing
+    # she can repeat without making it up.
+    assert "เปิดเพลงอะไรก็ได้" in state, "she is not anchored to what they asked for"
 
     quiet = pipeline._state(db, "Krich", "how are you")
     assert "It IS happening" not in quiet, "a standing music line came back"
