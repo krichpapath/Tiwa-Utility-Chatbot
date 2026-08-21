@@ -698,6 +698,7 @@ py -X utf8 tests/latebench.py                                 (S4)
 py -X utf8 tests/searchminibench.py                           (S5)
 py -X utf8 tests/calminibench.py                              (S6)
 py -X utf8 tests/growthbench.py                               (S7)
+py -X utf8 tests/recordbench.py    py -X utf8 -m tiwa.record  (recorder)
 ```
 
 Untouched and still passing: `djbench`, `panelbench`, `test_memory`, `calbench`.
