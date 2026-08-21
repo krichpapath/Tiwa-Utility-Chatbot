@@ -114,4 +114,6 @@ async def main():
               f"tie {tally['tie']})")
 
 
-asyncio.run(main())
+
+if __name__ == "__main__":  # importable: chatbench reuses ask()
+    asyncio.run(main())

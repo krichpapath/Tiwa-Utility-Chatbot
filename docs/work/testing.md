@@ -82,9 +82,9 @@ phrasings), `noisebench.py`, `ttsbench.py`, `dumpbench.py`, `routerbench.py`
 
 **Music** — `musicbench.py` does a real search and decode; needs network.
 
-**[The swarm](../concepts/the-swarm.md)** — thirteen benches. The nine offline ones need
+**[The swarm](../concepts/the-swarm.md)** — fourteen benches. The nine offline ones need
 no key, no network and no model: `llm.chat` is replaced by a sleeper or a canned answer.
-The four live ones are the evidence the design was accepted on:
+The five live ones are the evidence the design was accepted on:
 
 | Bench | Kind | Protects |
 |---|---|---|
@@ -99,6 +99,7 @@ The four live ones are the evidence the design was accepted on:
 | `latbench.py` | measure | Same real turns through both arms, timed. p50 2.7s concurrent vs 5.1s serial. Writes `data/ab.json` |
 | `dispatchbench.py` | measure | Routing accuracy on 111 hand-corrected real turns: 93.7% vs the tool pass's 70.3% |
 | `personabench.py` | measure | Blind pairwise A/B on `data/ab.json`, each pair judged twice with the sides swapped. Not 1–5 scoring — [LLM judges hit ~69% on role identification](https://arxiv.org/pdf/2508.10014) where humans hit 90.8% |
+| `chatbench.py` | measure | The turns that need **no mini at all** — 59% of real traffic, and where memory and personality are the whole product. `latbench` samples half music asks, so this is the deliberate other half |
 | `livechat.py` | measure | One real scripted conversation end to end. The only thing that shows a *sequence* — deck carrying between turns, follow-ups landing, her staying in character while a mini works |
 
 `recordbench.py` closes the set: one logged row of every pass that exists goes in, and
