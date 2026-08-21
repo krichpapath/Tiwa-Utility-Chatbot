@@ -1,6 +1,8 @@
 # SWARM — the Mini Tiwa plan
 
-Status: **not started.** This is the picture to argue with before any code moves.
+Status: **all eight gates built, behind `TIWA_TURN=concurrent`. Nothing live yet
+— the default is still `serial`, and no live numbers exist.** See
+[Where it stands](#where-it-stands).
 
 Companion to `PLAN.md`. Same rules: every gate ships alone, every gate has one
 runnable check, and a gate that can't be judged by running something isn't done.
@@ -180,8 +182,12 @@ this project's history, which is why it's written down.
 - "something like this one" → read the deck, find similar
 - play vs queue vs skip — the deck state decides, not her
 - naming search terms (`_TERMS_SYSTEM` moves here whole)
-- the missed-ask retry (`_missed_music` / `_force_music` move here)
 - knowing what's on without a tool call
+
+**Corrected during S2:** `_missed_music` was listed here and must **not** move.
+It fires when the model *failed to notice* a music ask, so inside DJ it would
+only run on turns that never needed it. It stays in `pipeline`, in code, in front
+of dispatch.
 
 **Main Tiwa's music tools: 4 → 1.** Her `_doing()` music block shrinks to facts.
 
