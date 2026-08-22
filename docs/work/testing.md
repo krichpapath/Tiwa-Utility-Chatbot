@@ -2,7 +2,7 @@
 
 ## What this is
 
-Thirty-four scripts in `tests/`. Not unit tests — each one runs real code and **prints a
+Thirty-six scripts in `tests/`. Not unit tests — each one runs real code and **prints a
 markdown table you read and judge**. No pytest, no fixtures, no CI.
 
 ## Why it's here
@@ -71,7 +71,8 @@ more than routine gates:
 | Bench | What it measured |
 |---|---|
 | `extractbench.py` | Extraction quality per provider — direction errors, phantom entities, JSON leaking into names. `--think` A/Bs model reasoning on the write pass ([ADR-019](../reference/decisions.md#adr-019)) |
-| `factbench.py` | Confabulation: 7 invented facts → 0 once the code guard landed |
+| `factbench.py` | Confabulation: 7 invented facts → 0 once the code guard landed. Defaults to ollama — pass `openrouter` to run it on the API path |
+| `worthbench.py` | Whether a fact is worth a row, not just true. The convert rule (a music ask becomes a durable taste), and the drop log — five kinds of junk in, five reasons out, nothing written. Partly offline |
 | `moodbench.py` | The anger arc across turns, and that naming her mood made it worse |
 | `episodebench.py` | Episode noise vs real events after raising the bar |
 | `leavebench.py` | She can leave a call, and won't confuse it with stopping music |

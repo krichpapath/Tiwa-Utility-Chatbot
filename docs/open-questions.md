@@ -75,7 +75,12 @@ Then two soft ones, for whenever they matter:
   not adding a rule.
 - **Relation direction on the API.** One extraction produced a mangled subject/object with
   a phantom entity. Clean on local, and clean on both since the prompt gained explicit
-  direction rules. If it recurs, the answer is a closed relation vocabulary.
+  direction rules. ~~If it recurs, the answer is a closed relation vocabulary.~~
+  **Not that answer.** A closed vocabulary was drafted for the pollution problem and
+  withdrawn — tested against the real graph it leaks both ways, since `wants` is right for
+  *"Krich wants a PS5"* and wrong for *"wants to listen to this song"*. If direction
+  recurs, the next thing to try is more direction examples, not a smaller vocabulary.
+  See [ADR-027](reference/decisions.md#adr-027).
 
 ## Adding to this page
 

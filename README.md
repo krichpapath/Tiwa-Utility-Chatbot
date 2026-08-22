@@ -34,7 +34,7 @@ No ffmpeg needed. Nothing else to install.
 | what | command | where it shows up |
 |---|---|---|
 | **Discord bot** | `py -X utf8 bot.py` | your Discord server |
-| **Control panel** (settings, log, debug, memory) | `py -X utf8 dashboard.py --open` | http://127.0.0.1:8787 |
+| **Control panel** (chat, settings, log, debug, memory) | `py -X utf8 dashboard.py --open` | http://127.0.0.1:8787 |
 | **Terminal chat** (same brain, same memory) | `py -X utf8 chat.py Krich` | your terminal |
 | **Memory graph** (needs internet) | `py -X utf8 graph_view.py --open` | `data/graph.html` |
 | **Run 24/7** | double-click `run_forever.cmd` | restarts her if she crashes |
@@ -67,18 +67,19 @@ internal link and heading anchor. How to extend it: `docs/reference/docs-mainten
 py -X utf8 dashboard.py --open
 ```
 
-Opens http://127.0.0.1:8787 with five tabs:
+Opens http://127.0.0.1:8787 with six tabs:
 
 | tab | what it's for |
 |---|---|
-| **status** | mode in plain words, health (Discord / OpenRouter / ollama / music / calendar / listening), tokens spent today, replies and average reply time, recent songs |
-| **settings** | every knob with a plain-English explanation and its default. Empty box = default. Writes `.env` — restart her to apply. **reset all to defaults** at the bottom |
-| **memory** | facts grouped per person, searchable, **forget** per row, plus **forget every fact / episode** |
-| **llm** | every model call, labelled by pass: **thinking** (picks tools) · **her reply** (what you see) · **remembering** (what she keeps). Filter by pass, provider or text; click a row for the full prompt and reply |
-| **log** | activity: turns, tool calls with their arguments, music, voice. Filter by kind or text |
+| **Now** | mode in plain words, tokens spent today, her running totals, **one turn, three passes** with each pass's median latency, replies per hour, health (Discord / OpenRouter / ollama / music / calendar / listening), recent songs. Refreshes itself every 4 s |
+| **Chat** | talk to her without Discord — the real pipeline, the real memory, the real bill. Untick **let her remember this** to poke at her without writing anything |
+| **Settings** | every knob with a plain-English explanation and its default. Empty box = default. Writes `.env` — restart her to apply |
+| **Memory** | every fact she holds, searchable. Tick **forget** on any rows and press the button |
+| **Model calls** | every model call, labelled by pass: **thinking** (picks tools) · **her reply** (what you see) · **remembering** (what she keeps). Click a row for the full prompt and reply |
+| **Activity log** | turns, tool calls with their arguments, music, voice |
 
-Every list has a **search box**, and every log has a **clear** button (confirm
-first — deletions are permanent).
+Every table sorts and searches itself. Every destructive button sits behind a
+**yes, really** tick box — deletions are permanent.
 
 **Exports** (download links on each tab): `memory.json`, `memory.csv`,
 `episodes.csv`, `llm.json`, `log.csv`. CSVs open in Excel with Thai intact.
@@ -105,6 +106,26 @@ local memory writes are far more accurate, while the API writes her best lines.
 
 Cost in `mixed` is roughly **$0.50 per 1000 messages**. `TIWA_DAILY_TOKENS`
 (default 2M ≈ $0.30/day) stops runaway spending by falling back to local.
+
+### Two more knobs
+
+`TIWA_MODE` says **where** she runs. These say **how**.
+
+| knob | default | what it changes |
+|---|---|---|
+| `TIWA_TURN` | `serial` | `serial` = the three passes. `concurrent` = [the swarm](docs/concepts/the-swarm.md) — she dispatches to Mini Tiwas and talks while they work. Measured **2.7 s vs 5.1 s** per turn. Built and measured; not the default yet |
+| `TIWA_VOICE` | `dj` | `dj` = the voice channel is a speaker for music only. `full` = she can also decide to join or leave a call on her own |
+
+!!! warning "A Windows environment variable beats `.env`"
+    `.env` is loaded with `setdefault`, so anything already in your **system**
+    environment wins and your edit is silently ignored. If a key or a knob seems
+    to do nothing, check there first:
+
+    ```
+    py -X utf8 -c "import os; print(os.environ.get('OPENROUTER_API_KEY'))"
+    ```
+
+    Non-empty before `.env` is read means the system variable is what she uses.
 
 ---
 
@@ -206,7 +227,7 @@ bot:  📅 calendar change: add dentist tomorrow 15:00 — ✅ to confirm, ❌ t
 ```
 bot.py             Discord entrypoint (thin glue)
 chat.py            terminal chat — same brain, same memory
-dashboard.py       control panel: status, settings, memory, llm debug, log
+dashboard.py       control panel (Gradio): now, chat, settings, memory, llm debug, log
 graph_view.py      interactive graph of what she knows
 gcal_auth.py       one-time Google Calendar login
 run_forever.cmd    24/7 runner, restarts on crash

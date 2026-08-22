@@ -777,3 +777,58 @@ calls were the old system identifying a track before playing it, which DJ does i
 **Not adopted.** `note_provisional`, the one proposed write path, was never built —
 [the guards](../concepts/guards.md) are the reason offline reflection is the only thing
 that changes a belief, and a runtime writer would need its own guard chain first.
+
+## ADR-027 · A fact has to be worth a row, not just true {#adr-027}
+
+**Status.** Built and measured live. `tests/worthbench.py`.
+
+**Context.** The extractor tested one thing: is this fact **true**? Every guard in
+[the guards](../concepts/guards.md) is a truth guard — grounded in what the user said,
+correctly directed, not her own invention. `Tycoon requested ATLAS-The Score` passes all
+of them and is useless a week later. Her graph filled with rows like it until eight of
+Tycoon's twelve facts were song requests, crowding *"mains nobody good, blames the team"*
+toward the `TURN_FACTS = 12` cap. A notebook about people had become a queue history.
+
+**Decision.** Add a **worth** test, and phrase it as *convert*, never as *skip*.
+
+That phrasing is not a preference. `store_extraction()`'s own docstring records what
+happened when episodes were asked *"would this matter in a month?"* — the model answered
+null **100% of the time**, so half her memory never existed. A bar phrased as "skip unless
+important" would have done the same to facts. Phrased as *"an action reveals a taste,
+write the taste"* it has something to produce instead of something to withhold.
+
+| they said | before | now |
+|---|---|---|
+| `play venom - eminem` | `Maa Yan requested venom - eminem` | `Maa Yan likes Eminem` |
+| `ขอเพลงจากเกม Blue Archive` | `Krich requested เพลงจากเกม Blue Archive` | `Krich likes Blue Archive` |
+| `เปิดเพลงอะไรก็ได้` | a row | nothing — it reveals nothing |
+
+**Measured.** 4/4 converted on the real turns that produced the deleted junk. `factbench`
+on the API path: **0 invented facts, 0 real facts missed** — that second number is the
+refusal failure, and it did not happen.
+
+**Also decided: every guard rejection is logged.** Six guards dropped silently, which made
+a working filter and one quietly eating true facts identical from the outside. You cannot
+tune a bar you cannot see. `kind='memory'` rows name the fact and the rule that killed it.
+
+**Found by replaying 25 real turns before trusting any of it.** The first version produced
+`Tycoon likes ATLAS [requested ATLAS-The Score]` — the junk had not gone, it had moved
+into the `note` field, along with the model's reasoning about its own conversion. *"THE
+NOTE IS THE BEST PART"* read as an invitation to fill it. The note rule now says what a
+note is **not**, and a URL or video id joins dates as never-an-entity: `likes the song at
+gVQzCR5h4Y8` is not a thing anyone likes.
+
+**Rejected: a closed relation vocabulary.** Proposed, then tested against the real graph
+and withdrawn — it leaks both ways, since `wants` is correct for *"Krich wants a PS5"* and
+wrong for *"wants to listen to this song"*. And by
+[ADR-025](#adr-025)'s reasoning, *prompts reduce, code decides* is a rule about **guards**,
+where a leak is unbounded; a cluttered graph is bounded, visible, and one click to delete.
+A blocklist stays available and starts **empty** — add a stem when the drop log shows the
+same junk verb three times, the growth policy `_AXES` already states for itself.
+
+**Deferred.** Ranking facts by how often they are actually retrieved, so importance is
+proven by use rather than guessed at write time. It wants a week of drop-log data first.
+
+**Not fixed by this.** `Krich` has no facts at all — his turns are music asks with no
+nameable artist, so there is nothing about *him* to convert. That needs her to ask, which
+is a different change.
