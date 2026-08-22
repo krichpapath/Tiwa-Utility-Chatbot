@@ -16,6 +16,9 @@ import httpx
 from ollama import Client
 
 
+_warned = set()  # shadowed keys already announced
+
+
 def load_env():
     """Minimal .env loader (KEY=VALUE). Here, not in bot.py, so every entrypoint
     (bot, chat, tests, `-m tiwa.llm`) sees the same keys."""
@@ -25,7 +28,22 @@ def load_env():
     for line in f.read_text(encoding="utf-8").splitlines():
         if "=" in line and not line.lstrip().startswith("#"):
             k, _, v = line.partition("=")
-            os.environ.setdefault(k.strip(), v.strip().strip('"').strip("'"))
+            k, v = k.strip(), v.strip().strip('"').strip("'")
+            # setdefault means the SYSTEM environment wins. That is the usual
+            # convention and it stays — but silently, it cost an evening: a
+            # refreshed OPENROUTER_API_KEY in .env did nothing for hours because a
+            # stale one sat in the Windows user environment, and every call 401'd
+            # with the file looking correct. The dashboard's Settings tab writes
+            # this file, so a shadowed key means the control panel is lying to you.
+            # `k not in _warned`: voice.py calls load_env() again on purpose (it
+            # must not depend on import order), so without this every shadowed
+            # key announces itself twice.
+            if k in os.environ and os.environ[k] != v and k not in _warned:
+                _warned.add(k)
+                print(f"[tiwa] {k} in .env is IGNORED — your system environment "
+                      f"already sets it, and that wins. Clear it there, or edit it "
+                      f"there instead of in .env.")
+            os.environ.setdefault(k, v)
 
 
 load_env()

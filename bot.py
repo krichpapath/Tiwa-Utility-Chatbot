@@ -40,6 +40,25 @@ pending_confirms = {}  # confirm-message id -> plain-language calendar request
 voice_channel = {}  # guild id -> text channel to mirror the transcript into
 
 
+async def _apologise(channel, e: Exception):
+    """A turn died. Say so in the channel — plainly, not in her voice.
+
+    Not in her voice on purpose: the model is what just failed, so there is
+    nothing to write her line with, and faking one would be the bluffing failure
+    wearing a different hat. A 401 is worth naming because it is the one anybody
+    can actually fix.
+    """
+    why = f"{type(e).__name__}"
+    if "401" in str(e):
+        why = "401 Unauthorized — OPENROUTER_API_KEY is wrong, expired, or being " \
+              "shadowed by a system environment variable"
+    elif "ConnectError" in why or "ConnectionError" in why:
+        why = "cannot reach the model provider — network, or ollama not running"
+    memory.log(db, "error", f"turn failed: {type(e).__name__}: {str(e)[:200]}")
+    print(f"[bot] turn failed: {type(e).__name__}: {e}")
+    await channel.send(f"⚠️ my brain call failed — {why}")
+
+
 def _later(channel):
     """How a mini that finished after she spoke reaches the chat: a second
     message, never an edit. She sends it herself — the facts stay inside."""
@@ -61,8 +80,12 @@ async def _heard(name: str, text: str):
         if asked is None:
             continue  # heard, logged, not answered. No tokens spent.
         async with locks[ch.id]:
-            reply = await pipeline.respond(db, list(history[ch.id]), name, asked,
-                                           on_late=_later(ch))
+            try:
+                reply = await pipeline.respond(db, list(history[ch.id]), name, asked,
+                                               on_late=_later(ch))
+            except Exception as e:
+                await _apologise(ch, e)
+                continue
             if not reply:
                 continue
             history[ch.id].append({"role": "assistant", "content": reply})
@@ -268,18 +291,34 @@ last_unprompted = datetime.min  # ponytail: >=3h between unprompted messages, no
 
 @tasks.loop(minutes=30)
 async def idle_turn():
+    """Unprompted message on the heartbeat. Guarded, because a provider outage
+    used to kill the LOOP, not just the tick.
+
+    docs/open-questions.md carried this as the one open bug since July:
+    pipeline.idle()'s speak pass is unguarded, and discord.py's tasks.loop logs
+    the exception and then STOPS unless an error handler is registered. One
+    outage made her silent until the process restarted, with nothing on screen
+    saying why. _settle() already catches its own errors; the pass around it
+    did not.
+    """
     global last_unprompted
-    if not 9 <= datetime.now().hour < 23:  # quiet hours
-        return
-    if (datetime.now() - last_unprompted).total_seconds() < 3 * 3600:
-        return
-    thought = await pipeline.idle(db)
-    channel = client.get_channel(int(HOME)) or await client.fetch_channel(int(HOME))
-    if thought:
-        last_unprompted = datetime.now()
-        history[channel.id].append({"role": "assistant", "content": thought})
-        await channel.send(thought)
-    await _flush_calendar_queue(channel)  # idle turns may queue calendar changes too
+    try:
+        if not 9 <= datetime.now().hour < 23:  # quiet hours
+            return
+        if (datetime.now() - last_unprompted).total_seconds() < 3 * 3600:
+            return
+        thought = await pipeline.idle(db)
+        channel = client.get_channel(int(HOME)) or await client.fetch_channel(int(HOME))
+        if thought:
+            last_unprompted = datetime.now()
+            history[channel.id].append({"role": "assistant", "content": thought})
+            await channel.send(thought)
+        await _flush_calendar_queue(channel)  # idle turns may queue calendar changes too
+    except Exception as e:
+        # swallowed on purpose: the next tick retries in 30 minutes. Nobody is
+        # waiting on an unprompted message, so a loud channel post would be noise.
+        memory.log(db, "error", f"heartbeat failed: {type(e).__name__}: {str(e)[:200]}")
+        print(f"[bot] heartbeat failed, loop continues: {type(e).__name__}: {e}")
 
 
 @client.event
@@ -345,9 +384,19 @@ async def on_message(message: discord.Message):
     author = message.author.display_name
     async with locks[message.channel.id]:
         async with message.channel.typing():
-            reply = await pipeline.respond(db, list(history[message.channel.id]),
-                                           author, text, images,
-                                           on_late=_later(message.channel))
+            try:
+                reply = await pipeline.respond(db, list(history[message.channel.id]),
+                                               author, text, images,
+                                               on_late=_later(message.channel))
+            except Exception as e:
+                # She goes MUTE otherwise. discord.py logs the traceback to the
+                # console and the channel shows nothing at all — someone typed at
+                # her and she just did not answer. That happened live on an expired
+                # key: every turn 401'd, every turn silent, and nothing on screen
+                # said why. Tools already take this stance ("search failed: …" is
+                # returned as text, never raised); the turn itself did not.
+                await _apologise(message.channel, e)
+                return
         # Queued actions must run whatever she says. An empty reply used to
         # `return` here and silently swallow the song she had already queued —
         # you asked for Bad Apple and nothing happened.

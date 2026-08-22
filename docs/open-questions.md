@@ -57,16 +57,27 @@ than deleted — [F6](reference/findings.md#f6).
 
 ## Still open
 
-One real bug, found while building [reflection](reference/decisions.md#adr-024) and
-deliberately **not** fixed there because it is older and unrelated:
+~~One real bug~~ **— fixed 2026-08-23.** It was found while building
+[reflection](reference/decisions.md#adr-024) and deliberately not fixed there
+because it was older and unrelated:
 
 - **A provider outage kills the heartbeat, permanently.** `pipeline.idle()`'s speak pass
   is unguarded, so when Ollama is down `_tool_chat` raises straight out of the tick.
   discord.py's `tasks.loop` logs the exception and **stops the loop** unless a
   `@loop.error` handler is registered, and none is — so she goes silent until the process
   restarts, with nothing on screen to say why. `_settle()` catches its own errors
-  (`tests/test_memory.py` asserts it); the older pass around it does not. The fix is a
-  `try` in `idle_turn()` or a `@idle_turn.error` handler, plus a log row.
+  (`tests/test_memory.py` asserts it); the older pass around it does not.
+
+    **Closed.** `idle_turn()` guards its own body and logs an `error` row; the next
+    tick retries in 30 minutes. Nobody is waiting on an unprompted message, so it
+    stays quiet in the channel rather than announcing itself.
+
+    The same silence existed on the two paths somebody *is* waiting on, and that
+    turned up the hard way: an expired key made every Discord turn raise 401 with a
+    traceback in the console and **nothing at all in the channel**. `bot._apologise()`
+    now posts a plain line naming the cause — not in her voice, because the model is
+    what failed and faking her line would be bluffing in a different hat.
+    `tests/outagebench.py` drives all three call sites.
 
 Then two soft ones, for whenever they matter:
 

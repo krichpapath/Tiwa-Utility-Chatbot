@@ -2,7 +2,7 @@
 
 ## What this is
 
-Thirty-six scripts in `tests/`. Not unit tests — each one runs real code and **prints a
+Thirty-seven scripts in `tests/`. Not unit tests — each one runs real code and **prints a
 markdown table you read and judge**. No pytest, no fixtures, no CI.
 
 ## Why it's here
@@ -76,6 +76,7 @@ more than routine gates:
 | `moodbench.py` | The anger arc across turns, and that naming her mood made it worse |
 | `episodebench.py` | Episode noise vs real events after raising the bar |
 | `leavebench.py` | She can leave a call, and won't confuse it with stopping music |
+| `outagebench.py` | A dead provider costs her a turn, never her voice — all three turn call sites, plus the heartbeat surviving three outages. Offline |
 
 **Voice track (parked with the feature)** — `voicebench.py`, `wakebench.py` (32 wake
 phrasings), `noisebench.py`, `ttsbench.py`, `dumpbench.py`, `routerbench.py`
