@@ -163,7 +163,20 @@ def _openrouter_chat(model, messages, tools, fmt, options, think):
         json=body,
         timeout=120,
     )
-    r.raise_for_status()
+    if r.is_error:
+        # raise_for_status() reports "401 Unauthorized" and discards the body,
+        # where the provider says WHICH 401 this is. "User not found." (revoked or
+        # wrong key) reads nothing like "Insufficient credits" or a rate limit, and
+        # the difference is the whole diagnosis. Measured cost of not having it:
+        # an evening spent on a key that was fine.
+        why = ""
+        try:
+            why = (r.json().get("error") or {}).get("message", "")
+        except Exception:
+            why = r.text[:200]
+        raise httpx.HTTPStatusError(
+            f"{r.status_code} from OpenRouter: {why or r.reason_phrase}",
+            request=r.request, response=r)
     j = r.json()
     spend((j.get("usage") or {}).get("total_tokens", 0))
     msg = j["choices"][0]["message"]

@@ -50,8 +50,11 @@ async def _apologise(channel, e: Exception):
     """
     why = f"{type(e).__name__}"
     if "401" in str(e):
-        why = "401 Unauthorized — OPENROUTER_API_KEY is wrong, expired, or being " \
-              "shadowed by a system environment variable"
+        # llm._openrouter_chat passes the provider's own words through — "User not
+        # found." (revoked key) reads nothing like "Insufficient credits", and
+        # that difference is the entire diagnosis. Repeat it verbatim.
+        why = f"{str(e).split(' for url')[0][:90]} — OPENROUTER_API_KEY is wrong, " \
+              "expired, or shadowed by a system environment variable"
     elif "ConnectError" in why or "ConnectionError" in why:
         why = "cannot reach the model provider — network, or ollama not running"
     memory.log(db, "error", f"turn failed: {type(e).__name__}: {str(e)[:200]}")
