@@ -16,7 +16,8 @@ import httpx
 from ollama import Client
 
 
-_warned = set()  # shadowed keys already announced
+_warned = set()   # shadowed keys already announced
+_from_file = set()  # keys .env actually got to set
 
 
 def load_env():
@@ -43,6 +44,8 @@ def load_env():
                 print(f"[tiwa] {k} in .env is IGNORED — your system environment "
                       f"already sets it, and that wins. Clear it there, or edit it "
                       f"there instead of in .env.")
+            if k not in os.environ:
+                _from_file.add(k)
             os.environ.setdefault(k, v)
 
 
@@ -73,6 +76,28 @@ if MODE not in _MODES:
           f"Pick one of: {', '.join(_MODES)}")
     MODE = "local"
 PROVIDER, PERSONA_PROVIDER = _MODES[MODE]
+
+
+def key_banner() -> str:
+    """Which OpenRouter key is actually in use, and where it came from.
+
+    Printed at import because the alternative is what happened on 2026-08-23: a
+    good key sat in .env while a stale one shadowed it from the Windows
+    environment, the bot came up looking healthy, and every single turn 401'd.
+    Four characters on screen at boot would have ended it in seconds.
+
+    Only the last four are shown — enough to tell two keys apart, not enough to
+    be a secret sitting in a console someone screenshots.
+    """
+    k = os.environ.get("OPENROUTER_API_KEY")
+    if not k:
+        return "[tiwa] OPENROUTER_API_KEY is not set — the API path will fail"
+    src = ".env" if "OPENROUTER_API_KEY" in _from_file else "your system environment"
+    return f"[tiwa] OpenRouter key ...{k[-4:]} (from {src})"
+
+
+if "openrouter" in (PROVIDER, PERSONA_PROVIDER):
+    print(key_banner())
 
 TOOL_MODEL = os.environ.get("TIWA_TOOL_MODEL", "deepseek/deepseek-v4-flash")
 EXTRACT_MODEL = os.environ.get("TIWA_EXTRACT_MODEL", "deepseek/deepseek-v4-flash")
