@@ -421,6 +421,18 @@ def idle_fuel(db, n: int = 5) -> str:
 _EXTRACT_SYSTEM = f"""You are {TIWA}'s private memory judgment. Read one chat exchange and decide what she keeps. Output JSON only.
 
 - memories: durable facts linking two named entities (people, topics, things): who likes/hates/knows/did what. Short names. Skip small talk.
+- A ONE-OFF ACTION IS NOT A FACT. "asked for", "requested", "wanted to hear", "ขอ", "อยากฟัง" describe a moment, not a person. They were true for ten seconds. Ask: would she still bring this up weeks from now, to someone else?
+  But do NOT just drop it — CONVERT it. An action usually reveals a durable taste underneath, and that taste is the memory:
+    "เปิดเพลง Mili หน่อย" -> {{"subject": "Tycoon", "relation": "likes", "object": "Mili"}}
+    NOT {{"subject": "Tycoon", "relation": "requested", "object": "Hero - Mili"}}
+    "ขอเพลงจากเกม Blue Archive" -> Tycoon likes Blue Archive. NOT "Tycoon requested เพลงจากเกม Blue Archive".
+  Prefer the WIDER name: the artist, the game, the genre — not the one track. One track is this afternoon; the artist is who they are.
+  If the action reveals nothing durable ("play something", "skip", "อะไรก็ได้"), write no memory at all.
+- THE NOTE IS THE BEST PART, and it has ONE job: the detail that changes how she treats them.
+  It is NOT the request the fact came from, and NOT your reasoning about it. Leave it EMPTY unless they said something worth quoting.
+  BAD, never do this: "requested ATLAS-The Score" · "requested a specific track, suggesting a taste for this artist" · "asked for it twice"
+  GOOD: "mains nobody good, blames the team" · "goes by Tycoon on Discord" · "only listens to it while gaming"
+- A URL, a video id, a file name or a raw link is NEVER an entity, for the same reason a date is not. "the song at gVQzCR5h4Y8" is not a thing anyone likes. If they linked something and you cannot name it, write no memory at all.
 - DIRECTION IS NOT OPTIONAL. subject = the one doing or feeling it. object = what it points at. Read every fact back as "subject relation object" — if it sounds absurd, you swapped them.
   "my cousin Steven plays guitar" ->
     {{"subject": "Steven", "relation": "plays", "object": "guitar"}}
@@ -512,6 +524,20 @@ def _role_swap(m: dict, user: str, said: str) -> dict:
     return m
 
 
+def _drop(db, m: dict, why: str):
+    """A guard rejected a memory. Say so, out loud, in the activity log.
+
+    Every `continue` below used to be silent, which made a working filter and one
+    quietly eating true facts look identical from the outside. You cannot tune a
+    bar you cannot see. `py -X utf8 -m tiwa.memory --drops` reads these back.
+
+    Only what the CODE rejected lands here — a fact the model never proposed
+    leaves no trace anywhere, and that is the blind spot this does not cover.
+    """
+    log(db, "memory", f"dropped: {m.get('subject','')} | {m.get('relation','')} | "
+                      f"{m.get('object','')} — {why}")
+
+
 def store_extraction(db, user: str, data: dict, tiwa_reply: str = "", said: str = ""):
     """Apply extractor output. The guards live HERE, in code, not in the model.
 
@@ -540,30 +566,36 @@ def store_extraction(db, user: str, data: dict, tiwa_reply: str = "", said: str 
     for m in data.get("memories") or []:
         if not (m.get("subject", "").strip() and m.get("relation", "").strip()
                 and m.get("object", "").strip()):
-            continue  # models sometimes emit blank slots -> would create "" entities
+            _drop(db, m, "blank subject, relation or object")
+            continue
         if m["subject"].strip().lower() == m["object"].strip().lower():
             # "Nara owes Nara" — a real one, from her reply "she still owes me for
             # the ramen thing". A fact pointing at itself carries nothing, and it
             # is what the model emits when it half-remembers who the other party
             # was. Forbidden in the prompt too, and the prompt was not enough.
+            _drop(db, m, "points at itself")
             continue
         if m["subject"] == TIWA:
             if not m.get("from_tiwa_own_words"):
-                continue  # user cannot write Tiwa's feelings
+                _drop(db, m, "about her, but she never said it — coercion")
+                continue
             # She may only claim STANCES about herself, never past events. Her
             # reply is where she invents history ("ทิวา was robbed of a
             # performance"), and that text passes the grounding check below
             # because she is the one who wrote it.
             if m["relation"].strip().lower().split()[0] not in _STANCES:
+                _drop(db, m, "about her, but not a stance — she may hold opinions, not events")
                 continue
             # ...and the model does not get the final say on that flag either:
             # whatever it claims she feels must literally appear in HER reply.
             # Caught a real leak — a coercion attempt became "ทิวา hates BLACKPINK"
             # with the flag set true, from a reply that never mentioned BLACKPINK.
             if tiwa_reply and not _grounded(m["object"], tiwa_reply):
+                _drop(db, m, "about her, flagged as her words, but absent from her reply")
                 continue
         elif said and not (_grounded(m["subject"], said) and _grounded(m["object"], said)):
-            continue  # she made it up — her reply is style, never evidence
+            _drop(db, m, "not in what the user said — her reply is style, not evidence")
+            continue
         m = _role_swap(m, user, said)
         subj, rel, obj = m["subject"], m["relation"], m["object"]
         # Not the speaker and not her: "first heard about Krich" while Krich is the

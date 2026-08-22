@@ -99,6 +99,30 @@ opens knowing you, with no tool call.
     [deleting `now_playing`](../reference/decisions.md#adr-012). `recall` still earns its
     place — for **third parties**, someone mentioned who isn't the one talking.
 
+**Worth, not just truth** — the extractor used to test only whether a fact was
+*true*. `Tycoon requested ATLAS-The Score` is true, grounded, correctly directed
+and useless a week later, and her graph filled with rows like it until they
+crowded the good facts past the `TURN_FACTS` cap.
+
+The rule now is **convert, don't refuse**: a one-off action becomes the durable
+taste underneath it, and prefers the wider name — the artist, not the track.
+
+| they said | stored |
+|---|---|
+| `play venom - eminem` | `Maa Yan likes Eminem` |
+| `ขอเพลงจากเกม Blue Archive` | `Krich likes Blue Archive` |
+| `เปิดเพลงอะไรก็ได้` | nothing — it reveals nothing |
+
+Convert rather than skip on purpose. Episodes were once asked *"would this matter
+in a month?"* and the model answered null **100% of the time** — a judgment call
+it always declines. Giving it something to write instead of something to withhold
+is what stops the same collapse here. `tests/worthbench.py` measures both halves.
+
+**Every rejection is logged** — `kind='memory'` rows naming the fact and the guard
+that killed it. Six guards drop silently otherwise, which makes a working filter
+and one quietly eating true facts look identical from outside. You cannot tune a
+bar you cannot see.
+
 **Third parties, without a tool call either** — `mentioned()` scans the message for known
 entity names and injects what she knows about each. It exists because `recall` was **55 of
 135 logged tool calls**, the single most common reason the tool pass ran a second round,
