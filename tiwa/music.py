@@ -136,14 +136,30 @@ def find(query: str) -> dict:
 
     hit = best = None
     for cand in cands[:4]:  # flat metadata lies; the resolved duration does not
-        with yt_dlp.YoutubeDL(_YDL) as ydl:
-            hit = _hit(ydl.extract_info(cand["url"], download=False))
+        try:
+            with yt_dlp.YoutubeDL(_YDL) as ydl:
+                hit = _hit(ydl.extract_info(cand["url"], download=False))
+        except Exception as e:
+            # A DEAD candidate must not lose the live ones behind it. This loop was
+            # written to survive bad METADATA — livestreams, three-hour mixes — and
+            # an unavailable video is a different failure that walked straight out
+            # of find(). Live log 2026-08-23: "[youtube] 5Z8N9TTvKeQ: This video is
+            # not available" ended the whole request while three good results sat
+            # untried. Deleted, private, region-locked and age-gated all land here.
+            # Same rule as the voice router: one bad packet must not deafen her.
+            print(f"[music] skipping {cand.get('id') or cand.get('url')}: "
+                  f"{type(e).__name__}: {str(e).splitlines()[-1][:90]}")
+            continue
         if 0 < hit["duration"] <= MAX_TRACK_S:
             break  # a real song, not a livestream and not a three-hour mix
         if hit["duration"] and best is None:
             best = hit  # long, but it ends
     else:
         hit = best or hit
+    if hit is None:
+        # every candidate was dead. Same shape as no results at all, so bot._find
+        # reports it in her voice instead of raising through the turn.
+        raise LookupError(f"every result for {query!r} was unavailable")
     if hit["id"]:
         _RECENT.append(hit["id"])
         del _RECENT[:-_RECENT_KEEP]

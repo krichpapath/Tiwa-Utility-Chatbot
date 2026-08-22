@@ -92,4 +92,71 @@ async def main():
     assert bad == 0, f"{bad} cases wrong"
 
 
+def dead_candidate():
+    """One unavailable video must not lose the live results behind it. Offline.
+
+    Live log 2026-08-23: "[youtube] 5Z8N9TTvKeQ: This video is not available"
+    walked straight out of find() and the whole music request died, while three
+    good candidates sat untried. extract_info() was the only unguarded call in
+    the loop — it was written to survive bad metadata, not a dead video.
+    """
+    import types
+
+    calls = []
+
+    class FakeYDL:
+        def __init__(self, opts):
+            self.flat = opts.get("extract_flat")
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def extract_info(self, target, download=False):
+            if self.flat:  # the search page: five results, all plausible
+                return {"entries": [
+                    {"id": f"vid{i}", "url": f"http://y/vid{i}", "duration": 200,
+                     "title": f"song {i}"} for i in range(5)]}
+            calls.append(target)
+            if target.endswith(("vid0", "vid1")):        # dead: deleted, private
+                raise RuntimeError("ERROR: [youtube] vid: This video is not available")
+            # _hit() requires "url" — the resolved stream url, not the page
+            return {"id": "vid2", "title": "the live one", "duration": 200,
+                    "url": "http://stream/vid2"}
+
+    fake = types.SimpleNamespace(YoutubeDL=FakeYDL, utils=types.SimpleNamespace())
+    real = sys.modules.get("yt_dlp")
+    sys.modules["yt_dlp"] = fake
+    try:
+        hit = music.find("something with two dead results")
+        assert hit["id"] == "vid2", hit
+        assert len(calls) == 3, f"stopped early: tried {calls}"
+        print(f"dead-candidate ok — 2 unavailable, skipped, landed on {hit['title']!r}")
+
+        # ...and when EVERY candidate is dead it must raise LookupError, which
+        # bot._find already turns into "couldn't find that" in her voice — not
+        # crash the turn and not return None for `hit["id"]` to choke on.
+        class AllDead(FakeYDL):
+            def extract_info(self, target, download=False):
+                if self.flat:
+                    return FakeYDL.extract_info(self, target, download)
+                raise RuntimeError("ERROR: [youtube] gone: This video is not available")
+
+        fake.YoutubeDL = AllDead
+        try:
+            music.find("everything is dead")
+            raise AssertionError("all-dead search returned instead of raising")
+        except LookupError as e:
+            assert "unavailable" in str(e), e
+        print("all-dead ok    — raises LookupError, which bot._find already reports")
+    finally:
+        if real is not None:
+            sys.modules["yt_dlp"] = real
+        else:
+            del sys.modules["yt_dlp"]
+
+
+dead_candidate()
 asyncio.run(main())
