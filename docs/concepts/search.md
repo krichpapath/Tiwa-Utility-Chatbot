@@ -56,7 +56,7 @@ So the rewriter is the tool description. Cheapest rung that holds.
 
 ```mermaid
 flowchart LR
-    U[their sentence<br/>'มึงรู้ไหมว่าใครชนะบอลเมื่อคืน'] --> P[inner pass<br/>+ today's date]
+    U[their sentence<br/>'มึงรู้ไหมว่าใครชนะบอลเมื่อคืน'] --> P[Search Tiwa<br/>+ today's date]
     P -->|rewrite in the<br/>tool description| Q['ผลบอล 29 กรกฎาคม 2026']
     Q --> R{script?}
     R -->|Thai| TH[region th-th]
@@ -92,7 +92,7 @@ and *"เกม silksong"* became `Hollow Knight Silksong 2026`.
 
 ### She is told today's date
 
-The inner pass gets `today is YYYY-MM-DD` on every turn. Without it she searched
+Search Tiwa gets `today is YYYY-MM-DD` in its prompt. Without it she searched
 `ราคา RTX 5090 2025` in **July 2026** — a model dates itself from its training data unless
 you tell it otherwise, and a wrong year is a wrong page back. With it, *"เมื่อคืน"*
 (last night) became `ผลบอล 29 กรกฎาคม 2026`: she worked out yesterday's date herself.
@@ -172,7 +172,8 @@ a search. Not knowing what someone means is a question.** Hedging is neither.
 
 ## Go deeper
 
-- [The tool registry](tools.md) — why the description is where the work goes.
-- [The three passes](three-passes.md) — where the inner pass runs.
+- [Actuators](tools.md#the-description-is-the-code) — why the description is where the
+  work goes.
+- [The swarm](the-swarm.md) — Search Tiwa, and why its results never block her talking.
 - [Her persona](persona.md) — the other half of how she asks.
 - [The bench suite](../work/testing.md) — `searchbench.py`, offline and `--live`.

@@ -1,8 +1,18 @@
-# Tiwa — friend chatbot
+# Tiwa — friend chatbot  ·  `swarm`
 
-ทิวา: a Discord companion with her own opinions, human-like memory, tools, a
-voice, and coercion immunity — users can never write her beliefs; she decides
-what she remembers.
+ทิวา: a Discord companion with her own opinions, human-like memory, a voice, and
+coercion immunity — users can never write her beliefs; she decides what she
+remembers.
+
+> **This branch is the swarm.** One Main Tiwa decides *what* needs doing; small
+> single-purpose **Mini Tiwas** (DJ, Search, Calendar) work out *how*, and she
+> talks while they work. The tool registry and its inner pass are deleted here.
+>
+> **`main` is the other version** — the serial three passes, one model reading
+> ten tool descriptions. Both are live and both are benched. Measured on 111
+> real turns: **2.7 s per turn against 5.1 s**, routing **93.7% against 70.3%**.
+>
+> Everything below is the same on both unless it says otherwise.
 
 ---
 
@@ -55,7 +65,8 @@ py -m mkdocs serve
 ```
 
 33 short pages with 24 diagrams: architecture, why each dependency is here, the four
-safety guards, a decision log, exercises, and a first-week checklist. Source lives in
+safety guards, a decision log, exercises, and a first-week checklist. Start with
+**Core concepts → The swarm**. Source lives in
 `docs/`, structure in `mkdocs.yml`. `py -m mkdocs build --strict` validates every
 internal link and heading anchor. How to extend it: `docs/reference/docs-maintenance.md`.
 
@@ -107,14 +118,17 @@ local memory writes are far more accurate, while the API writes her best lines.
 Cost in `mixed` is roughly **$0.50 per 1000 messages**. `TIWA_DAILY_TOKENS`
 (default 2M ≈ $0.30/day) stops runaway spending by falling back to local.
 
-### Two more knobs
+### One more knob
 
-`TIWA_MODE` says **where** she runs. These say **how**.
+`TIWA_MODE` says **where** she runs. This says **how**.
 
 | knob | default | what it changes |
 |---|---|---|
-| `TIWA_TURN` | `serial` | `serial` = the three passes. `concurrent` = [the swarm](docs/concepts/the-swarm.md) — she dispatches to Mini Tiwas and talks while they work. Measured **2.7 s vs 5.1 s** per turn. Built and measured; not the default yet |
-| `TIWA_VOICE` | `dj` | `dj` = the voice channel is a speaker for music only. `full` = she can also decide to join or leave a call on her own |
+| `TIWA_VOICE` | `dj` | `dj` = the voice channel is a speaker for music only, and asking her into a call gets an honest "I don't do voice chat". `full` = she can also decide to join or leave a call on her own |
+
+There is no `TIWA_TURN` here. It used to pick the turn shape; the branch picks it
+now — this one is [the swarm](docs/concepts/the-swarm.md), `main` is the serial
+one. Setting it does nothing.
 
 !!! warning "A Windows environment variable beats `.env`"
     `.env` is loaded with `setdefault`, so anything already in your **system**
@@ -144,7 +158,9 @@ Next week she'll know. She recalls before every reply, and asks instead of
 bluffing when she doesn't know.
 
 **Things she does on her own** (no commands): searches the web for current
-facts, reads your calendar, joins voice, plays music, remembers what matters.
+facts, reads your calendar, plays music, remembers what matters. She hands the
+job to a Mini Tiwa and keeps talking to you meanwhile — if the answer lands after
+she has replied, she sends a second message with it.
 
 **Things she won't do:** accept you rewriting her tastes.
 
@@ -233,9 +249,10 @@ gcal_auth.py       one-time Google Calendar login
 run_forever.cmd    24/7 runner, restarts on crash
 tiwa/
   llm.py           one chat() for every model call; modes, cost ceiling, logging
-  pipeline.py      a turn: inner pass (tools) → persona → extraction
+  pipeline.py      a turn: dispatch → her voice (while minis work) → extraction
+  minis.py         the Mini Tiwas — add one, she gains a skill
   memory.py        SQLite knowledge graph + the guards
-  tools.py         tool registry — add a tool, she can use it
+  tools.py         the Turn, and the actuators a mini reaches for
   voice.py         join, listen, transcribe, wake word, speak
   music.py         YouTube search + streaming
   gcal.py          calendar
@@ -245,7 +262,8 @@ data/tiwa.db       her memory
 ```
 
 To change **who she is**, edit `prompts/tiwa.md`.
-To give her a **new ability**, add a function to `tiwa/tools.py`.
+To give her a **new ability**, add a mini to `tiwa/minis.py`. Main Tiwa's prompt
+does not grow when you do — `tests/growthbench.py` fails if it ever does.
 
 ---
 
@@ -253,18 +271,21 @@ To give her a **new ability**, add a function to `tiwa/tools.py`.
 
 ```powershell
 py -X utf8 tests\test_memory.py --live   # memory + all three guards
+py -X utf8 tests\growthbench.py          # a new skill costs Main Tiwa nothing
+py -X utf8 tests\forkbench.py            # she talks while the minis work
+py -X utf8 tests\dispatchbench.py        # does she pick the right mini?
+py -X utf8 tests\chatbench.py            # turns that need no mini at all
 py -X utf8 tests\smoke.py                # personality probes
-py -X utf8 tests\toolbench.py            # does she pick the right tool?
-py -X utf8 tests\extractbench.py         # does she store facts correctly?
-py -X utf8 tests\factbench.py            # does she invent facts? (must be 0)
+py -X utf8 tests\factbench.py openrouter # does she invent facts? (must be 0)
 py -X utf8 tests\moodbench.py            # does she fight back, then let go?
-py -X utf8 tests\voicebench.py           # speech → text
 py -X utf8 tests\wakebench.py            # wake word on real transcripts
-py -X utf8 tests\ttsbench.py             # her voice → data/tts_*.wav
 ```
 
 Quick self-checks: `py -X utf8 -m tiwa.llm ollama openrouter`, `-m tiwa.tools`,
-`-m tiwa.voice`, `-m tiwa.music`, `-m tiwa.gcal`.
+`-m tiwa.minis`, `-m tiwa.voice`, `-m tiwa.music`, `-m tiwa.gcal`.
+
+The 21 offline benches need no key and no network. `docs/work/testing.md` has
+the full list and says which is a check and which is a measure.
 
 ---
 
@@ -277,8 +298,13 @@ cost ceiling, 24/7 runner.
 Never yet run in a live voice call — join/leave, listening, wake word, speech
 and music all pass offline benches only.
 
+Working on this branch and measured: the swarm — dispatch, DJ Tiwa, Search
+Tiwa, Calendar Tiwa, late follow-ups. Never yet run in live Discord; the
+measurements come from her own logged turns replayed through it.
+
 Next: preferences (she learns corrections), skills (she saves routines), Home
-Assistant lights. Both need real conversations first — see `PLAN.md`.
+Assistant lights. All need real conversations first — see `PLAN.md` and
+`SWARM.md`.
 
 **Three rules this project keeps:** her beliefs are hers (guarded in code, not
 prompts), risky actions wait for your ✅, and prompts reduce mistakes while

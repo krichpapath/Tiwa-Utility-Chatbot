@@ -733,9 +733,10 @@ The stage everyone assumes is fragile was fine; the stage nobody documented was 
 
 ## ADR-026 · Mini Tiwas, and dispatch in front of her voice {#adr-026}
 
-**Status.** Built and measured live, behind `TIWA_TURN=concurrent`. **Not the default.**
-Full plan, gates and numbers in `SWARM.md` at the repo root; this entry is the decision,
-not the record.
+**Status.** **Superseded in scope by [ADR-028](#adr-028)**, which removed the knob and made
+this the only turn shape on the `swarm` branch. The decision below stands; only "behind a
+flag, not the default" is out of date. Full plan, gates and numbers in `SWARM.md` at the
+repo root; this entry is the decision, not the record.
 
 **Context.** [The tool registry](../concepts/tools.md) had already recorded its own
 ceiling — *"every tool you add competes with `play_music` for attention"* — and a working
@@ -832,3 +833,73 @@ proven by use rather than guessed at write time. It wants a week of drop-log dat
 **Not fixed by this.** `Krich` has no facts at all — his turns are music asks with no
 nameable artist, so there is nothing about *him* to convert. That needs her to ask, which
 is a different change.
+
+
+## ADR-028 · Two branches, not one codebase with a knob {#adr-028}
+
+**Status.** Done on `swarm`. `main` is untouched and stays the serial version.
+
+**Context.** [ADR-026](#adr-026) shipped the swarm behind `TIWA_TURN`, defaulting to
+`serial` so it could prove itself first. Four months later the log said what actually
+happened: **1 `mini` row in 131 real turns**, and that one a dispatch timeout from a test
+session. The swarm was built, benched, measured, documented — and never once ran in a
+real conversation. A default that nobody changes is a feature that does not exist.
+
+Meanwhile both shapes had to keep working, which is a real tax: every prompt fix landed
+twice, `_state()` carried an `inner` parameter that one path always passed empty, and
+`growthbench` had to assert things about a file the other path did not use.
+
+**Options.**
+
+1. **Flip the default to `concurrent`.** Cheapest. Keeps both paths, keeps the tax, and
+   leaves the serial code as an untested fallback nobody would notice rotting.
+2. **Delete serial from `main`.** One version, no way back, and the control arm for every
+   future persona A/B goes with it.
+3. **One version per branch.** `main` keeps the tool registry; `swarm` deletes it. Both
+   stay runnable, and comparing them becomes `git checkout`.
+
+**Decision.** Option 3. The two shapes were always two *versions*, not two settings — the
+flag was scaffolding for a migration that has finished.
+
+**Consequences.**
+
+`pipeline.respond()` **is** the concurrent turn now; `turn.py` folded into it, because a
+delegate with one implementation is an indirection and nothing more. Gone with the knob:
+`TOOLS`, `@tool` and every description written for a model to read, `_tool_chat`,
+`_inner_brief`, `_arg_name`, `_force_music`, `_TERMS_SYSTEM`, and the `recall` and
+`calendar_read` tools — replaced by a sqlite scan and `gcal.upcoming()`, neither of which
+ever needed a model to decide it. Net **−671 lines**.
+
+`tiwa/tools.py` keeps the two things still load-bearing: the `Turn`, which `bot.py`,
+`chat.py` and `dashboard.py` drain unchanged, and eight **actuators** a mini reaches for
+once it has already decided. They no longer carry prose for a caller that no longer
+exists.
+
+**Two things had to move rather than die.** `idle()` ran on the tool loop so she could
+search something she cared about — it never once did, so it is a plain call now, with
+one `minis.run()` as the upgrade path. And `join_voice`'s *return string* was how she
+knew `TIWA_VOICE=dj` means she cannot join; nothing reads a return any more, so
+`_asked_voice()` returns `"dj-only"` and `_doing()` says it. Inert was never the
+requirement — inert **and honest** was.
+
+**The A/B moved with it.** `latbench` and `personabench` used to flip the knob inside one
+process. They take a `--tag` and two files now: run `latbench` on each branch, hand both
+to `personabench`. The comparison got more honest, not less — it is measuring the thing
+that actually ships.
+
+**Known gap, accepted.** The loose Thai prefixes in `_MUSIC_VERB` (`"ขอ "`, `"เปิด "`) sat
+behind `_force_music`'s NONE veto on the serial path. DJ Tiwa's `none` action is that
+veto now, and it lands *after* `_doing()` has already told her a song is coming — so
+`"ขอ ยืมตังหน่อย"` (lend me money) can still have her say she put one on. Narrow, but it
+is the confabulation shape this codebase minds most, so it is written at `_missed_music`
+with the fix that closes it: await the DJ decision alongside dispatch, ~0.6s on music
+turns only.
+
+**One behaviour differs from `main`, deliberately.** A bare agreement after her own
+clarifying question — `"ช่ายๆๆ"` — used to reach `calendar_write`. The dispatch prompt
+drops bare agreements, because that is what cut router over-firing from 43.8% to 12.5%.
+`calbench --live` expects 5/7 here against `main`'s 7/7 and says why.
+
+**Measured after.** 21 offline benches green, 5 module self-checks, and 8 live
+conversation turns: no mini fired on a turn that needed none, coercion bounced,
+escalation answered, Thai stayed Thai.

@@ -1,6 +1,6 @@
 # Environment variables
 
-Everything she reads from `.env` at startup. **Thirty-one variables.** All of these are
+Everything she reads from `.env` at startup. **Thirty variables.** All of these are
 also on the [control panel](../surfaces/panel.md) **Settings** tab with the same explanations.
 
 !!! note "Two rules for all of them"
@@ -22,12 +22,17 @@ Never rendered by the panel, never committed, gitignored.
 |---|---|---|
 | `TIWA_MODE` | `local` | `local` = everything on your GPU, Ollama must run, free. `mixed` = tools and memory local, her replies from the API. `api` = nothing local, GPU free, costs money. [Full comparison](../concepts/modes.md) |
 | `TIWA_PERSONA_API_MODEL` | `deepseek/deepseek-v4-flash` | The API model that writes her actual replies. **This is the one worth shopping for** — it decides how she sounds |
-| `TIWA_TOOL_MODEL` | `deepseek/deepseek-v4-flash` | Picks which tools to call, *only* when tools run on the API — i.e. `api` mode. Unused in `local` and `mixed` |
+| `TIWA_TOOL_MODEL` | `deepseek/deepseek-v4-flash` | The cheap fast model: it runs [dispatch](../concepts/the-swarm.md) and every Mini Tiwa's own decision. Applies *only* when that work runs on the API — i.e. `api` mode. Unused in `local` and `mixed` |
 | `TIWA_EXTRACT_MODEL` | `deepseek/deepseek-v4-flash` | Decides what she remembers, when that runs on the API (`api` mode only) |
 | `TIWA_PERSONA_MODEL` | auto | Force one specific model for her replies on whichever path is active. Leave empty unless testing |
 | `TIWA_DAILY_TOKENS` | `2000000` | Runaway insurance, **not a budget**. Past this she falls back to local for the rest of the day and says so. 2M ≈ $0.30 and is far more than a day of chatting |
-| `TIWA_TURN` | `serial` | Which shape a turn has. `serial` = [the three passes](../concepts/three-passes.md). `concurrent` = [the swarm](../concepts/the-swarm.md) — dispatch plus Mini Tiwas, measured 2.7s p50 against serial's 5.1s. Not the default yet |
-| `TIWA_VOICE` | `dj` | `dj` = the voice channel is a speaker for music and nothing else; join/leave tools answer honestly instead of acting. `full` = she can also decide to join or leave mid-conversation. Also gates `TIWA_LISTEN` |
+| `TIWA_VOICE` | `dj` | `dj` = the voice channel is a speaker for music and nothing else; asking her into a call gets an honest "I don't do voice chat" instead of a silent no-op. `full` = she can also decide to join or leave mid-conversation. Also gates `TIWA_LISTEN` |
+
+!!! warning "`TIWA_TURN` does not exist on this branch"
+    It used to pick the turn shape — `serial` for [the three passes](../concepts/three-passes.md),
+    `concurrent` for [the swarm](../concepts/the-swarm.md). The branch decides now:
+    this one **is** the swarm, and `main` is the serial one. Setting `TIWA_TURN`
+    here does nothing at all.
 
 ## Discord
 

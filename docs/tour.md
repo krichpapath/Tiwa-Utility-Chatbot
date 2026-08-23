@@ -43,10 +43,10 @@ is fire-and-forget for the same reason.
 Pass 2 has **no tools on purpose**. Acting and speaking are separate so a slow search
 never delays a reply. Details: [the three passes](concepts/three-passes.md).
 
-There is a **second shape** for a turn, off by default: `TIWA_TURN=concurrent` replaces
-passes 1 and 2 with one dispatch call and a set of [Mini Tiwas](concepts/the-swarm.md).
-Same pass 3, same guards, same persona prompt. Come back to it once the three passes make
-sense — it is the same idea taken one step further, and it only reads well in that order.
+On this branch pass 1 is a **dispatch call** naming [Mini Tiwas](concepts/the-swarm.md),
+and she starts talking while they work. The other shape — one model reading ten tool
+descriptions — is the `main` branch. Same pass 3, same guards, same persona prompt on
+both.
 
 ## Where the code lives
 
@@ -160,10 +160,15 @@ page in this guide and the one that matters most.
 
 Ten tools. One function each, one string argument each.
 
-`recall` · `web_search` · `calendar_read` · `calendar_write` · `join_voice` ·
-`leave_voice` · `play_music` · `stop_music` · `queue_music` · `skip_music`
+Three [Mini Tiwas](concepts/the-swarm.md) — `dj` · `search` · `calendar` — over eight
+actuators: `web_search` · `calendar_write` · `join_voice` · `leave_voice` ·
+`play_music` · `stop_music` · `queue_music` · `skip_music`.
 
-Adding one is a decorated function — [the tool registry](concepts/tools.md).
+`recall` and `calendar_read` used to be here too. Both are plain code now — a sqlite
+scan and `gcal.upcoming()` — because neither ever needed a model to decide it.
+
+Adding a skill means adding a mini — [the swarm](concepts/the-swarm.md). Main Tiwa's
+prompt does not grow when you do.
 
 ## Now you know the shape
 

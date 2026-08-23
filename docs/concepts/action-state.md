@@ -204,4 +204,4 @@ holding: **read live state, never what the model believes it did.**
 - [Music and the DJ](../surfaces/music.md) — what sets this state.
 - [Search and curiosity](search.md) — the other half of "don't claim what isn't true".
 - [Her persona](persona.md) — where the output lands.
-- [The tool registry](tools.md) — why fewer tools is better.
+- [Actuators](tools.md) — why fewer things to choose between is better.

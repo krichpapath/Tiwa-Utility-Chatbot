@@ -75,8 +75,9 @@ column is now suspect.
 | `llm.py` `_MODES`, models, or the ceiling | [Modes](../concepts/modes.md), [Model providers](../toolchain/providers.md), [Env vars](env.md) |
 | `memory.py` schema or caps | [Memory](../concepts/memory.md), [Env vars](env.md) |
 | **`memory.store_extraction()`** | **[The guards](../concepts/guards.md) — and run `tests/test_memory.py`** |
-| `tools.py` — adding or removing a tool | [The tool registry](../concepts/tools.md), the tool list in [the tour](../tour.md), [Workflows](../work/workflows.md) |
-| Any tool *description* | [The tool registry](../concepts/tools.md) — descriptions are behaviour |
+| `minis.py` — adding or removing a mini | [The swarm](../concepts/the-swarm.md), the list in [the tour](../tour.md), [Workflows](../work/workflows.md) |
+| `tools.py` — adding or removing an actuator | [Actuators](../concepts/tools.md), and name its caller in `tests/growthbench.py` or the bench fails |
+| Any mini *description* | [The swarm](../concepts/the-swarm.md) — descriptions are behaviour |
 | `bot.py` flush order | [The Discord bot](../surfaces/discord.md) |
 | `music.py` | [Music and the DJ](../surfaces/music.md) |
 | `voice.py` gates, wake word, patches | [Voice in](../surfaces/voice-in.md), [Discord transport](../toolchain/discord-transport.md) |

@@ -138,5 +138,5 @@ costs nothing.
 ## Go deeper
 
 - [Memory](memory.md) — what the graph looks like once writes land.
-- [The tool registry](tools.md) — why every tool sets a flag instead of acting.
+- [Actuators](tools.md#tools-set-flags-they-dont-act) — why each one sets a flag instead of acting.
 - [Decision log](../reference/decisions.md) — ADR-004 and ADR-005 record both leaks.

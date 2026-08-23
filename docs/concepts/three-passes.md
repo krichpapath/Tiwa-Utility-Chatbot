@@ -1,17 +1,18 @@
 # The three passes
 
-!!! info "This is the default path"
-    `TIWA_TURN=serial`, and that is the default. There is a second path —
-    [the swarm](the-swarm.md) — which replaces passes 1 and 2 with a dispatch call
-    and a set of Mini Tiwas. Pass 3 and everything below it is shared.
+!!! info "This branch is the swarm"
+    There is one turn shape here and no `TIWA_TURN` knob. Pass 1 is a **dispatch
+    call** that names [Mini Tiwas](the-swarm.md); the tool registry it replaced —
+    one model reading ten tool descriptions — lives on the `main` branch. Passes 2
+    and 3 are identical on both.
 
 ## What this is
 
-On the default path, every time Tiwa answers, three separate model calls happen.
-One decides what to do, one writes her reply, one decides what to remember. They
-use different prompts, different temperatures, and can run on different providers.
+Every time Tiwa answers, three separate model calls happen. One decides **what
+needs doing**, one writes **her reply**, one decides **what to remember**. They use
+different prompts, different temperatures, and can run on different providers.
 
-All three live in `tiwa/pipeline.py` — about 360 lines.
+All three live in `tiwa/pipeline.py`.
 
 Two more calls exist but only fire on the turns that need them, and neither is a
 "pass" — they are single questions with one job each:
@@ -19,9 +20,11 @@ Two more calls exist but only fire on the turns that need them, and neither is a
 | extra call | when | where |
 |---|---|---|
 | **seeing** | the message has an image attached | [`eyes.look()`](../surfaces/eyes.md) |
-| **search terms** | someone asked for music and pass 1 called no tool | `_force_music()` |
+| **a mini** | dispatch named one, or the music classifier did | [`minis.run()`](the-swarm.md) |
 
-So a plain text turn is 3 calls, a turn with a picture is 4.
+So a plain conversation turn is **2 calls** — dispatch says "nothing", she talks.
+About three messages in five are exactly that. A music turn is 3, a turn with a
+picture adds one more.
 
 Two more run when **nobody is talking**, on the 30-minute heartbeat: `idle()` decides
 whether to say something unprompted, and [`_settle()`](memory.md#reflection) turns what
@@ -32,13 +35,13 @@ reply.
 
 One model call would have to do three jobs with conflicting requirements at once:
 
-- Tool calling wants **low temperature** and a short, mechanical prompt.
+- Routing wants **temperature 0** and a strict JSON schema.
 - Her voice wants **high temperature** and a long personality prompt.
-- Memory writing wants **temperature 0** and a strict JSON schema.
+- Memory writing wants **temperature 0** and a different strict schema.
 
-Squeezing those together produced a model that either sounded flat or picked tools
-badly. Splitting them also buys something better: **her reply never waits on slow work.**
-Search takes seconds, memory writes take a second — both happen outside the path
+Squeezing those together produced a model that either sounded flat or routed badly.
+Splitting them also buys something better: **her reply never waits on slow work.**
+A search takes seconds and a memory write takes a second — both happen off the path
 between your message and her words.
 
 ## Diagram
@@ -47,66 +50,72 @@ between your message and her words.
 sequenceDiagram
     autonumber
     participant caller as bot.py / chat.py
-    participant inner as Pass 1 — inner
-    participant tools as tools.TOOLS
+    participant disp as Pass 1 — dispatch
+    participant mini as Mini Tiwas
     participant persona as Pass 2 — persona
     participant ex as Pass 3 — extraction
     opt image attached
         caller->>caller: eyes.look() — one vision call, returns text
     end
-    caller->>inner: author, text, last 8 lines, what she can see
-    loop up to 3 rounds
-        inner->>tools: tool call
-        tools-->>inner: result string
-    end
-    inner-->>caller: plain-text brief, max 5 lines
-    caller->>persona: persona + rules + brief + history
+    caller->>caller: memory.mentioned() + _missed_music() — sqlite and code, ~3ms
+    caller->>disp: author, text, last 8 lines
+    disp-->>caller: [(mini, task)] or nothing at all
+    caller-)mini: dispatched, running
+    caller->>persona: persona + rules + what she knows + what she is doing
     persona-->>caller: her reply
+    mini--)caller: facts, maybe after she has spoken
+    caller-)persona: one more line, in her voice
     caller-)ex: user text + her reply + context
     ex-)ex: JSON → guards → SQLite
 ```
 
-<figcaption>Passes 1 and 2 are sequential and you wait for them. Pass 3 is fired and
-forgotten — note the dashed arrow.</figcaption>
+<figcaption>You wait for passes 1 and 2. The minis, the follow-up line and pass 3
+all run behind her — note the dashed arrows.</figcaption>
 
 ## How it works here
 
-**Pass 1 — inner** (`_inner_brief`, `_tool_chat`). System prompt says *"You are ทิวา's
-inner thoughts, run before she replies. You are NOT the reply."* It loops up to 3 tool
-rounds, then must produce a brief addressed to her as "you":
+**Pass 1 — dispatch** (`minis.dispatch`). Temperature 0, schema-constrained, and it
+sees only the mini **names and one-line descriptions** — never their internals. Its
+whole output is a list of `(mini, task)` and, when it genuinely cannot tell what
+someone wants, the one question it would have to ask. *"Most messages need no mini"*
+is stated in the prompt, because the failure mode is over-firing.
 
-```text
-- you remember Tycoon (กาโตว์): Krich's friend, asked for Rick Astley before
-- no memory of Steven — ask
-```
+It runs **in front of** her reply, not beside it. That is deliberate and it cost a
+measured bluff to learn: asked who won the football, she answered *"Man City, 2-1,
+Haaland scored both"* at 1.9s and the real result arrived after. She cannot decline
+to answer something she does not know is being looked up.
 
-Temperature `0.3`. Lower was tried — `0.1` measured *worse* and bimodal. Comment at
-`tiwa/pipeline.py:56` records it so nobody retries.
+Two things reach the minis **without** a model call at all:
 
-**Pass 2 — persona** (`respond`). Gets three system messages: the full
-`prompts/tiwa.md`, then a per-turn `[inner-state]` block, then chat history. The
-inner-state block is where code injects things the model reliably forgets — language,
-who she's talking to, [what she already knows about them](memory.md),
-[what she's currently doing](action-state.md), and what she can see. Temperature `0.7`.
+- `memory.mentioned()` — facts about anyone named in the message. This was the
+  `recall` tool, 55 of 135 calls, now a sqlite scan in ~3ms.
+- `_missed_music()` — a phrase classifier that starts DJ Tiwa at t=0 and
+  [overrules the router in both directions](the-swarm.md).
+
+**Pass 2 — persona** (`say`). Gets three system messages: the full `prompts/tiwa.md`,
+then a per-turn `[inner-state]` block, then chat history. The inner-state block is
+where code injects things the model reliably forgets — language, who she's talking to,
+[what she already knows about them](memory.md), [what she's currently doing](action-state.md),
+and what she can see. Temperature `0.7`.
 
 **Pass 3 — extraction** (`memory.extract`). Schema-constrained JSON, temperature `0`.
 Runs via `asyncio.create_task(asyncio.to_thread(...))` in `bot.py`, so a slow write
 can't stall the next message. Everything it produces goes through
-[the guards](guards.md).
+[the guards](guards.md), and now also through a [worth test](memory.md).
 
-**The brief is context, not a script.** Pass 2 is told `[inner-state — background, do
-not recite]`. When she starts reading her own brief out loud, that instruction is what
-needs strengthening.
+**The state block is context, not a script.** Pass 2 is told `[inner-state — background,
+do not recite]`. When she starts reading it out loud, that instruction is what needs
+strengthening.
 
 ## Gotchas
 
-- **Pass 1 deliberately does not judge her mood.** Asking it to made things worse: it
-  missed two real attacks and invented hostility in neutral chat. The prompt now says
-  so explicitly. Evidence: `tests/moodbench.py`.
-- **A brief that claims an action did not perform it.** Pass 1 writing "putting it on"
-  plays nothing — only a tool call does. This caused a real bug where she said
-  "เปิดละ" three turns running with nothing queued. See [action state](action-state.md).
-- **`hist[-9:-1]`** is the window pass 1 sees. Chosen, not measured — widen it and
+- **Dispatch deliberately does not judge her mood.** Asking a pre-pass to made things
+  worse: it missed two real attacks and invented hostility in neutral chat. She reads
+  the chat herself. Evidence: `tests/moodbench.py`.
+- **Naming a mini is not doing the work.** Dispatch answering `dj` plays nothing —
+  only `minis.run` reaching `tools.play_music` does. This is the same shape as the old
+  "a brief that claims an action did not perform it". See [action state](action-state.md).
+- **`hist[-9:-1]`** is the window dispatch sees. Chosen, not measured — widen it and
   pronoun resolution improves while cost rises.
 - **Pass 3 can drop a whole turn.** If the model returns invalid JSON, the write is
   skipped silently and the next turn tries again. That's intentional; a malformed
@@ -116,9 +125,9 @@ needs strengthening.
 
 ## Go deeper
 
+- [The swarm](the-swarm.md) — what pass 1 dispatches to, and why.
 - [Modes](modes.md) — which provider each pass uses.
 - [The guards](guards.md) — what pass 3 is allowed to write.
 - [Her persona](persona.md) — what pass 2 reads.
-- [Ollama tool support](https://ollama.com/blog/tool-support) and
-  [OpenAI function calling](https://platform.openai.com/docs/guides/function-calling) —
-  the two shapes `llm.py` normalises between.
+- [Structured outputs](https://openrouter.ai/docs/features/structured-outputs) — the
+  strict JSON schema mode passes 1 and 3 both rely on.

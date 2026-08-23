@@ -70,7 +70,8 @@ it built an Ollama client directly — which is [F3](../reference/findings.md#f3
 From `PLAN.md`, on this machine:
 
 - **Tools belong local.** Same accuracy (8/8 both), but 1.1 s vs 7.4 s — the API was
-  6.6× slower from Thailand. `tests/toolbench.py`.
+  6.6× slower from Thailand. Measured on the tool pass, which is now dispatch plus
+  the minis — the same cheap model, the same argument.
 - **Her voice is better on the API.** The local 8B drifted into Thai on English
   messages, repeated tail tics, and slipped out of her หนู/มึง register. The API model
   did none of that. `tests/smoke.py`.
@@ -97,12 +98,13 @@ and fall back rather than exiting.
 | Knob | Default | What changes |
 |---|---|---|
 | `TIWA_MODE` | `local` | which provider runs each pass |
-| `TIWA_TURN` | `serial` | `serial` = [three passes](three-passes.md); `concurrent` = [the swarm](the-swarm.md) |
 | `TIWA_VOICE` | `dj` | `dj` = the voice channel is a speaker for music only; `full` = she can join and leave on her own |
 
-`TIWA_TURN` is picked up inside `pipeline.respond()`, so `bot.py`, `chat.py`, the
-dashboard and every bench call the same function either way and none of them changed
-when the swarm landed.
+There is no `TIWA_TURN` on this branch — it used to pick the turn shape, and the
+branch picks it now. This one is [the swarm](the-swarm.md); `main` is
+[the serial three passes](three-passes.md). `bot.py`, `chat.py`, the dashboard and
+every bench call the same `pipeline.respond()` on both, which is why none of them
+changed when the serial half was deleted.
 
 ## Gotchas
 

@@ -11,7 +11,7 @@ You don't need to know this project. You do need a few things that this guide wi
 | **`async`/`await`** and the event loop | Every turn is async; blocking the loop makes her freeze mid-conversation | [asyncio docs](https://docs.python.org/3/library/asyncio.html) · [Real Python guide](https://realpython.com/async-io-python/) |
 | **`asyncio.to_thread`** | How blocking work (network, model calls) stays off the loop | [to_thread](https://docs.python.org/3/library/asyncio-task.html#asyncio.to_thread) |
 | **SQL basics** — `SELECT`, `JOIN`, `INSERT OR REPLACE` | Her memory is hand-written SQL. No ORM | [SQLite tutorial](https://www.sqlitetutorial.net/) |
-| **How LLM tool calling works** | The inner pass is a tool loop | [OpenAI function calling](https://platform.openai.com/docs/guides/function-calling) · [Ollama tool support](https://ollama.com/blog/tool-support) |
+| **Schema-constrained JSON output** | Dispatch, every mini and the memory write all rely on it | [Structured outputs](https://openrouter.ai/docs/features/structured-outputs) |
 | **Discord bot basics** — tokens, intents, gateways | `bot.py` assumes it | [discord.py quickstart](https://discordpy.readthedocs.io/en/stable/quickstart.html) |
 
 You do **not** need: machine learning background, model training experience, prompt

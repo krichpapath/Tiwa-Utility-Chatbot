@@ -1,24 +1,26 @@
 # The swarm — Mini Tiwas
 
-!!! note "Off by default"
-    Everything on this page runs only under `TIWA_TURN=concurrent`. The default is
-    `serial`, which is [the three passes](three-passes.md). Both paths are live
-    code and both are benched; the swarm has not been made the default yet.
+!!! note "This branch is the swarm"
+    Everything on this page is how a turn works here. There is no `TIWA_TURN` knob
+    and no fallback: the tool registry and its inner pass were deleted, and
+    `pipeline.respond()` *is* the concurrent turn. The serial three-pass shape is
+    the `main` branch — two versions, one per branch, both live and both benched.
 
 ## What this is
 
-A second way to run a turn. Main Tiwa decides **what** to do; small single-purpose
-agents called **Mini Tiwas** work out **how**.
+How a turn runs. Main Tiwa decides **what** to do; small single-purpose agents
+called **Mini Tiwas** work out **how**.
 
 She says *"put on their favourite song."* DJ Tiwa figures out who "they" are, what
 they like, searches for it and plays it. Main Tiwa never learns any of that.
 
 There are three minis today — `dj`, `search`, `calendar` — and they live in
-`tiwa/minis.py`, the same shape [the tool registry](tools.md) has.
+`tiwa/minis.py`. `tiwa/tools.py` is what is left underneath them:
+[the actuators](tools.md) they reach for once they have decided.
 
 ## Why it's here
 
-[The tool registry](tools.md) already records the ceiling this exists to lift:
+The tool registry recorded the ceiling this exists to lift:
 
 > More tools = worse tool selection. `now_playing` was deleted for this reason.
 > Every tool you add competes with `play_music` for attention.
@@ -159,8 +161,8 @@ own small bluff.
 
 ## Go deeper
 
-- [The three passes](three-passes.md) — the default path, and the control arm.
-- [The tool registry](tools.md) — the shape `minis.py` copies, and the ceiling.
+- [The three passes](three-passes.md) — where dispatch sits, and what runs after.
+- [Actuators](tools.md) — what a mini reaches for once it has decided.
 - [The bench suite](../work/testing.md) — eight benches cover this page.
 - `SWARM.md` in the repo root — the plan, the gates, and the live measurements.
 - [Anthropic on multi-agent research systems](https://www.anthropic.com/engineering/multi-agent-research-system)

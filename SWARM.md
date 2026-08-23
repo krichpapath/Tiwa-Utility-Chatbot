@@ -1,9 +1,15 @@
 # SWARM — the Mini Tiwa plan
 
-Status: **all eight gates built and measured live. All three abandon conditions
-pass.** Still behind `TIWA_TURN=concurrent` — the default is `serial`, and
-flipping it is a decision, not a formality. See
-[Live results](#live-results--2026-08-22).
+Status: **shipped.** All eight gates built, measured live, all three abandon
+conditions passing — and as of 2026-08-24 the knob is gone: this branch **is**
+the swarm, `main` is the serial version. See
+[Live results](#live-results--2026-08-22) and
+[ADR-028](docs/reference/decisions.md#adr-028).
+
+Why the knob went: `TIWA_TURN` defaulted to `serial`, and four months later the
+log said **1 `mini` row in 131 real turns** — and that one a timeout from a test
+session. It was built, benched, documented and never once run. A default nobody
+changes is a feature that does not exist, so the branch decides instead.
 
 Companion to `PLAN.md`. Same rules: every gate ships alone, every gate has one
 runnable check, and a gate that can't be judged by running something isn't done.
@@ -766,8 +772,14 @@ What still never blocks her: the **work**. Only the routing decision does.
 
 ## Where it stands
 
-All eight gates are built and every offline bench is green. `TIWA_TURN` still
-defaults to `serial` — the swarm proves itself before it becomes the default.
+All eight gates are built and every offline bench is green.
+
+**Update 2026-08-24:** it proved itself and then sat unused, so `TIWA_TURN` was
+deleted along with the tool registry, `turn.py`, `_tool_chat`, `_inner_brief`,
+`_force_music` and the `recall`/`calendar_read` tools — net −671 lines.
+`pipeline.respond()` is the concurrent turn now, and the serial one lives on
+`main`. The A/B moved with it: `latbench --tag <name>` per branch, then
+`personabench` over the two files.
 
 ```
 py -X utf8 -m tiwa.tools     py -X utf8 tests/turnbench.py    (S0)

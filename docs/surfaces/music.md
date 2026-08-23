@@ -157,7 +157,8 @@ Defence 3 has been wrong twice, in opposite directions:
   `cls(url)`, dropping it, so the branch could never fire ([F1](../reference/findings.md)).
 - Once revived it re-ran the *search*, which was fine under `ytsearch1` and became a bug
   the moment picking got smarter: a mid-song re-resolve could land on a **different song**.
-  Caught by `musicbench.py`, which asserts the re-resolve returns the original id.
+  Caught by `py -X utf8 -m tiwa.music`, which asserts the re-resolve returns the
+  original id.
 
 So `source_for()` now carries `hit["id"]` down to `_decode()`, and the retry asks for that
 exact video. A recovery path that can change the song is worse than no recovery path.
@@ -177,7 +178,7 @@ amount of result filtering should override.
   on song titles, so she'd queue a track and say she'd never heard of it. Fixed in the
   tool's return text and [action state](../concepts/action-state.md).
 - **She doesn't have to name the song either** — "pick something for gaming" works. That
-  needed the tool description spelled out; see [the tool registry](../concepts/tools.md#the-description-is-the-code).
+  needed the description spelled out; see [why the description is the code](../concepts/tools.md#the-description-is-the-code).
 - **She may refuse.** *"Not in the mood for Queen right now"* with nothing queued is a
   feature, not a bug. That's also why the forced retry below can't be a hard rule.
 - **A missed tool call is forced, not re-prompted.** She used to agree and queue nothing on

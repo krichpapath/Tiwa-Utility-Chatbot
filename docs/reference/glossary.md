@@ -23,7 +23,7 @@ different Turn; that is why the flush lives in the same task as the reply.
 **Mini Tiwa**
 : A single-purpose agent — `dj`, `search`, `calendar` — that works out *how* to do
 something Main Tiwa asked for. Returns facts, never prose, and only the fields it
-declared. Only under `TIWA_TURN=concurrent`. See [the swarm](../concepts/the-swarm.md).
+declared. This branch runs on them. See [the swarm](../concepts/the-swarm.md).
 
 **Dispatch**
 : The one low-temperature call that decides which minis a message needs. Answers with a
