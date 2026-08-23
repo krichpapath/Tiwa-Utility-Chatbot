@@ -92,6 +92,45 @@ async def main():
     assert bad == 0, f"{bad} cases wrong"
 
 
+def plays_for_real():
+    """find() returning a url proves nothing. OPEN it and decode frames.
+
+    This is the gap that let a real outage ship. `--search` only ever checked
+    that find() came back with a title, and on 2026-08-23 it did — every search
+    succeeded and every track then died with "stream broke at 0s", because
+    YouTube had stopped serving the default `web` client's stream urls to
+    anything that is not a browser. They resolve, then 403 on open.
+
+    A check that stops at the url is a check for half the feature.
+    """
+    import av
+
+    print(f"\nplayer client: {music.YT_CLIENT}")
+    for q in ("Sunflower Post Malone Spider-Man", "เพลงไทยเพราะๆ", "TheFatRat Unity"):
+        hit = music.find(q)
+        container = av.open(hit["url"], options=music.Stream._HTTP, timeout=20)
+        audio = next(s for s in container.streams if s.type == "audio")
+        frames = 0
+        for _ in container.decode(audio):
+            frames += 1
+            if frames > 10:
+                break
+        assert frames > 10, f"{hit['title']!r} opened but decoded nothing"
+        print(f"  plays  {hit['title'][:48]:48} {audio.codec_context.name} "
+              f"{frames} frames")
+    print("play ok        — resolved AND decoded, which --search never checked")
+
+
+def client_is_pinned():
+    """Offline. Deleting the extractor_args is a one-line change that breaks every
+    song, and the failure shows up as "stream broke at 0s" rather than anything
+    pointing back here."""
+    client = music._YDL.get("extractor_args", {}).get("youtube", {}).get("player_client")
+    assert client, "no player_client pinned — YouTube's default web urls 403 on open"
+    assert music._FLAT.get("extractor_args"), "the search config lost the client"
+    print(f"client ok      — pinned to {client[0]!r} (TIWA_YT_CLIENT to change)")
+
+
 def dead_candidate():
     """One unavailable video must not lose the live results behind it. Offline.
 
@@ -158,5 +197,8 @@ def dead_candidate():
             del sys.modules["yt_dlp"]
 
 
+client_is_pinned()
 dead_candidate()
+if "--play" in sys.argv:
+    plays_for_real()
 asyncio.run(main())

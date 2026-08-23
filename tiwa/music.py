@@ -50,6 +50,23 @@ def deck() -> str:
         lines.append("queued: " + " | ".join(t["title"] for t in QUEUE[:5]))
     return "\n".join(lines)
 
+# YouTube stopped serving the default `web` client's stream urls to anything that
+# is not a browser. They RESOLVE fine and then 403 the moment PyAV opens them, so
+# the failure surfaces as "stream broke at 0s" long after the search looked like a
+# success. Measured 2026-08-23 across three videos and eight clients: web,
+# web_safari, web_music, web_embedded, mweb, ios, tv, tv_embedded, android_vr and
+# android_music all fail; `android` resolves and plays all three.
+#
+# It costs bandwidth. The android client exposes no audio-only format at all — five
+# formats, four of them storyboards — so `bestaudio` falls back to itag 18, a muxed
+# 385 kbps mp4 whose picture we decode and throw away. Working beats tidy, and
+# bestaudio still picks a real audio stream the day they expose one again.
+#
+# ponytail: env knob, because YouTube breaks a client every few months and the fix
+# should not need a code edit. When it next 403s, `yt-dlp -F <url>` and try the
+# clients above; whichever plays goes in TIWA_YT_CLIENT.
+YT_CLIENT = os.environ.get("TIWA_YT_CLIENT", "android")
+
 _YDL = {
     "format": "bestaudio/best",
     "quiet": True,
@@ -57,6 +74,7 @@ _YDL = {
     "noplaylist": True,
     "skip_download": True,
     "default_search": "ytsearch1",
+    "extractor_args": {"youtube": {"player_client": [YT_CLIENT]}},
 }
 # flat = titles and durations only, no format resolution. Cheap enough to ask for
 # five and then throw four away.

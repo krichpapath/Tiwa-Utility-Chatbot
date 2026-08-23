@@ -1,6 +1,6 @@
 # Environment variables
 
-Everything she reads from `.env` at startup. **Twenty-two variables.** All of these are
+Everything she reads from `.env` at startup. **Twenty-nine variables.** All of these are
 also on the [control panel](../surfaces/panel.md) **Settings** tab with the same explanations.
 
 !!! note "Two rules for all of them"
@@ -40,6 +40,7 @@ Never rendered by the panel, never committed, gitignored.
 | Variable | Default | What it means |
 |---|---|---|
 | `TIWA_MUSIC_VOLUME` | `1.0` | `1.0` is however loud YouTube handed it over. Set `0.4`–`0.6` so you can still hear her talk over a song |
+| `TIWA_YT_CLIENT` | `android` | Which YouTube client yt-dlp pretends to be. The default `web` urls **resolve fine and then 403 when playback opens them** — the failure reads as "stream broke at 0s". Measured 2026-08-23: of ten clients only `android` both resolves and plays. Change it here when YouTube next breaks one |
 | `TIWA_MAX_TRACK_MIN` | `12` | Longest result she'll accept as a song. YouTube's top hit for a mood is a 2–3 hour mix, which outlives the conversation and starves the queue — anything longer is skipped for the next result. Raise it if you want long mixes back |
 
 ## Memory
