@@ -1,4 +1,29 @@
-"""Two-pass turn: inner reasoning (tool registry) -> persona reply. Phase 3."""
+"""One Tiwa turn: dispatch to the Mini Tiwas, then her voice — while they work.
+
+She starts talking before the minis finish. There is no tool pass on this branch
+and no `TIWA_TURN` knob: this IS the turn. The serial three-pass shape it
+replaced still lives on `main`, and that is the whole difference between the two
+versions.
+
+What changed, measured on her own log (111 turns) before the swap:
+
+    whole turn   p50 6431ms     inner pass runs 1.7x per turn
+    inner pass   p50 2597ms     tools competing for one model's attention
+    persona      p50 1958ms
+    tools RUN in   3ms          the work was never what was slow
+
+The six seconds was her deciding what to look up before she was allowed to open
+her mouth. So the tool pass is gone entirely, and each of its jobs went
+somewhere cheaper:
+
+    recall  (55 of 135 calls) -> memory.mentioned(), sqlite, 3ms
+    music   (71 of 135 calls) -> DJ Tiwa, dispatched, flushed after she speaks
+    search  ( 8 of 135 calls) -> Search Tiwa, late
+    calendar( 1 of 135 calls) -> Calendar Tiwa
+
+Nothing an LLM dispatches is on the path between her ears and her mouth.
+Measured after: p50 2695ms against serial's 5059ms, routing 93.7% against 70.3%.
+"""
 import asyncio
 import datetime
 import os
@@ -6,7 +31,7 @@ import re
 import time
 from pathlib import Path
 
-from . import eyes, llm, memory, tools
+from . import eyes, llm, memory, minis, tools
 from .memory import MODEL, TIWA
 
 PERSONA = (Path(__file__).parents[1] / "prompts" / "tiwa.md").read_text(encoding="utf-8")
@@ -14,130 +39,43 @@ PERSONA = (Path(__file__).parents[1] / "prompts" / "tiwa.md").read_text(encoding
 # where her voice runs is decided by TIWA_MODE (see llm._MODES). On the API path
 # expect hosted filters to soften her escalation and coercion refusals — that is
 # a measured tradeoff (tests/smoke.py), not a free swap.
-# One knob, same shape as TIWA_MODE in llm.py: "serial" is the three-pass path
-# below, "concurrent" is turn.py. Default serial — the swarm proves itself before
-# it becomes the default, and every caller (bot, chat, dashboard, benches) keeps
-# calling respond() either way.
-TURN_MODE = os.environ.get("TIWA_TURN", "serial")
-if TURN_MODE not in ("serial", "concurrent"):
-    print(f"[tiwa] TIWA_TURN={TURN_MODE!r} unknown — using 'serial'.")
-    TURN_MODE = "serial"
-
 PERSONA_PROVIDER = llm.PERSONA_PROVIDER
 PERSONA_MODEL = os.environ.get("TIWA_PERSONA_MODEL") or (
     llm.PERSONA_API_MODEL if PERSONA_PROVIDER == "openrouter" else MODEL
 )
 
-_INNER_SYSTEM = f"""You are {TIWA}'s inner thoughts, run before she replies. You are NOT the reply.
-The brief is about the LAST message; earlier lines resolve who "he/she/it" means AND show you how this conversation has been going (calm, or someone laying into her).
-Tools: recall memory for each person/topic that matters.
-If the message ASKS FOR AN ACTION — play or stop music, check the calendar, come into
-voice — call that tool. Requests in Thai count exactly the same as English ones.
-Wanting music without naming a song is still asking for music: invent the search
-terms and call play_music. Writing "putting something on" in this brief plays
-NOTHING — only the tool call does. Never say a song is playing unless you called
-play_music or queue_music in this turn.
-PUTTING something on the calendar is calendar_write. calendar_read only answers "what do
-I have on" — it changes nothing. A message that names an event and a time is a WRITE.
-If she just proposed a date or time and they agree — "ใช่", "ช่าย", "ครับ", "yes", "ok",
-even one word — that agreement IS the go-ahead: call calendar_write NOW, with the whole
-event in one sentence, taking the date and time from what she proposed. Writing "noted"
-or "added it" in this brief puts NOTHING on the calendar; only calendar_write does, and
-Krich still has to confirm it with a reaction, so calling it is never the risky choice.
-web_search when the message turns on a fact you do not have: news, a score, a price,
-a game or show or person they brought up that you do not recognise. Not recognising
-something is a reason to SEARCH, not a reason to hedge. Search keywords, never their
-whole sentence, and never the same keywords twice in one turn.
-An image counts as bringing something up: if you can see a game, show, product or
-place in it that you do not recognise, search for it before she replies.
-Then output a short plain-text brief (max 5 lines) addressed to her as "you":
-- what you actually know or feel about them (memory or tool results only — NEVER invent),
-  e.g. "you remember Steven: Krich's cousin, plays guitar"
-- what you have no memory of (so you ask instead of bluffing), e.g. "no memory of Steven — ask"
-- the one thing you are genuinely unsure of or want to know more about, when there is
-  one: which of two things they meant, why they care, what they think of it. Write it as
-  "ask them: ..." on its own line. Only when it is real — a question about something you
-  could have just searched, or that you do not actually care about, is worse than none.
-- NEVER report a memory gap for a song, artist or track title. She does not need to
-  recognise music to play it; the search finds it. Say "putting it on" instead.
-Nothing else. No greetings, no reply draft, no lines about the speaker's own knowledge.
-Never comment on the mood of the conversation — she reads the chat herself and feels
-it better than you do (measured: this pass missed two real attacks and invented a
-third; tests/moodbench.py)."""
+# Minis whose result is an ACTION bot.py has to flush — the deck, the ✅ gate.
+# These finish before she speaks, because the flush runs the moment respond()
+# returns. Everything else produces SPEECH and goes late.
+ACTS = {"dj", "calendar"}
+# Was 6.0, against a mini-exec p95 of 4,337ms — which left no room for the
+# keyword call in front of the search. Measured live: one factual question in
+# three said "I'll tell you the second I know" and then never did, because the
+# lookup finished on the wrong side of the deadline. A promise she does not keep
+# is its own small bluff. 10s matches ACT_TIMEOUT.
+LATE_TIMEOUT = 10.0
+# Deadline on the work she DOES wait for. Measured live: dispatch p50 ~0.9s,
+# a mini ~1.5s. 10s is four times that, and it exists because a plain gather()
+# let one real turn run 507 seconds on a stalled search.
+ACT_TIMEOUT = 10.0
+# Dispatch is on the path to her mouth ON PURPOSE (see respond). Bounded so a
+# stalled router costs her a beat, not her voice. Measured p50 ~0.9s.
+DISPATCH_TIMEOUT = 4.0
+
+# author -> the speech work still running for them. Genuinely cross-turn, like
+# music.NOW — not a per-turn flag, so it does not belong on the Turn.
+# ponytail: unbounded dict keyed by author. Cap it if she ever has many users.
+_pending = {}
+
+# Facts an ACTION mini produces that she should still say. Not `queued` — bot.py
+# already posts the ✅ prompt for that, and saying it twice is worse than once.
+VOICE_FIELDS = ("ask", "clash", "events")
 
 
 def _clean(text: str) -> str:
     text = re.sub(r"<think>.*?</think>", "", text, flags=re.S)
     text = re.sub(r"<tool_call>.*?(</tool_call>|$)", "", text, flags=re.S)  # 8B leaks these as text
     return re.sub(r"^(Tiwa|ทิวา)\s*:\s*", "", text.strip()).strip()
-
-
-def _arg_name(args) -> str:
-    # ponytail: 8B mangles tool args — nests them ({'object': {'name': X}}) or renames
-    # the key. Dig until we hit a string; empty string on anything hopeless.
-    while isinstance(args, dict):
-        args = args.get("name") or next(iter(args.values()), "")
-    return str(args or "")
-
-
-# Qwen3 warns against greedy decoding (repetition loops) — low temp, not 0
-# measured on tests/pickbench.py: 0.1 is bimodal (1/6 then 6/6 across two runs),
-# 0.3 holds 4-5 of 6. Lower is NOT steadier here.
-_INNER_OPTS = {"temperature": 0.3, "top_p": 0.8, "top_k": 20, "num_ctx": 4096}
-
-
-async def _tool_chat(db, msgs: list) -> str:
-    """Shared tool loop: chat with the registry until the model outputs text."""
-    model = llm.TOOL_MODEL if llm.PROVIDER == "openrouter" else MODEL
-    # SEEN_URLS used to be cleared here; tools.new_turn() owns that boundary now,
-    # so a repeat search inside one turn still returns new pages.
-    for _ in range(3):  # ponytail: max 3 tool rounds, plenty for one message
-        resp = await asyncio.to_thread(
-            llm.chat,
-            model=model,
-            messages=msgs,
-            tools=[t["schema"] for t in tools.TOOLS.values()],
-            options=_INNER_OPTS,
-        )
-        msgs.append(resp["raw"])
-        if not resp["tool_calls"]:
-            return _clean(resp["content"])
-        for tc in resp["tool_calls"]:
-            t = tools.TOOLS.get(tc["name"])
-            arg = _arg_name(tc["args"])
-            t0 = time.perf_counter()
-            out = (
-                # to_thread: web/calendar tools block on network
-                await asyncio.to_thread(t["fn"], db, arg)
-                if t
-                else "unknown tool"  # models sometimes invent tool names
-            )
-            # blank arg = the model mangled it; that is the metric G2 benches.
-            # The panel splits this on "(" and ") -> " to show the tool, the query
-            # she chose and what came back as three separate things.
-            memory.log(db, "tool", f"{tc['name']}({arg!r}) -> {out[:240]}",
-                       (time.perf_counter() - t0) * 1000)
-            msgs.append(llm.tool_result_msg(tc, out))
-    # tool rounds exhausted — force a brief from what was gathered so far
-    resp = await asyncio.to_thread(llm.chat, model=model, messages=msgs, options=_INNER_OPTS)
-    return _clean(resp["content"])
-
-
-async def _inner_brief(db, author: str, text: str, recent: str = "", seen: str = "") -> str:
-    prefix = f"earlier lines (context only):\n{recent}\n\n" if recent else ""
-    # what she can see goes to the TOOL pass too, not just to her voice: a game or
-    # a product in a screenshot is something to look up, same as one they typed.
-    sight = f"\n[they attached an image. you can see it:\n{seen}]" if seen else ""
-    # she was searching "ราคา RTX 5090 2025" in July 2026 (tests/searchbench.py --live).
-    # A model dates itself from its training data unless you tell it otherwise, and a
-    # wrong year in a search query is a wrong page back.
-    now = datetime.datetime.now()
-    msgs = [
-        {"role": "system", "content": _INNER_SYSTEM},
-        {"role": "user",
-         "content": f"today is {now:%Y-%m-%d}\n{prefix}{author}: {text}{sight}"},
-    ]
-    return await _tool_chat(db, msgs)
 
 
 # ponytail: precision over recall. A false positive plays a song nobody asked
@@ -170,9 +108,9 @@ _MUSIC_VERB = ("play ", "queue ", "put on ", "เปิดเพลง", "เล
                "ขอ ", "เปิด ", "เล่น ", "ต่อ ")
 
 # ...but an imperative is not always a request. "ตอนนี้เปิดเพลงอะไรอยู่" (what
-# song is on right now?) matched _MUSIC_ASK, so _force_music searched that
-# literal sentence and played a random Thai song over the top of her answer.
-# That is worse than the silence this whole retry exists to fix.
+# song is on right now?) matched _MUSIC_ASK, and a random Thai song went on over
+# the top of her answer. That is worse than the silence this classifier exists
+# to fix.
 # Phrases, not the bare word อะไร: "เปิดอะไรก็ได้" (put on anything) is a real ask.
 # Split out, because these two do different jobs. _DECK_Q means "they are asking
 # ABOUT the deck" — which vetoes the retry AND, when nothing is on, is the one
@@ -195,24 +133,24 @@ _QUESTION = _DECK_Q + ("?", "อะไรบ้าง", "ไหม", "มั้�
 # before the verb check, which needs the trailing space in "queue ".
 _URL = re.compile(r"https?://\S+")
 
-_TERMS_SYSTEM = (
-    "Turn this request into YouTube search terms for music. Output ONLY the terms, "
-    "2-6 words, no quotes, no explanation. "
-    "If they NAMED a song, output that name plus at most the artist or game it is "
-    "from, and nothing else — a descriptive word they did not say ('chase', 'hype', "
-    "'sad') finds a different song. Measured: 'Red Line' from Warframe became "
-    "'Red Line Warframe chase' and played the wrong track. "
-    "Only when they named no song at all — just a mood, a genre, a game or an "
-    "activity — invent terms that fit it. "
-    "If the message is NOT asking for music at all, output exactly NONE. "
-    "'ขอ ยืมตังหน่อย' (lend me money) is NONE. 'เปิด ประตู' (open the door) is NONE."
-)
-
 
 def _missed_music(text: str) -> bool:
-    """They asked for music and the tool pass called nothing — about 1 ask in 4-6.
+    """They asked for music, deterministically, for free, in 0ms.
 
-    PENDING_MUSIC == "" means stop_music fired; that IS a music tool, leave it.
+    Named for the job it used to do — catching the ~1 ask in 4-6 the tool pass
+    forgot. There is no tool pass now, so it does the whole job: it is what
+    starts DJ Tiwa at t=0, and what `route()` uses to overrule a router that
+    missed a music ask.
+
+    PENDING_MUSIC == "" means stop_music already fired; leave it.
+
+    ponytail: the loose Thai prefixes in _MUSIC_VERB ("ขอ ", "เปิด ") used to sit
+    behind a model veto — _force_music asked "is this really music?" and NONE
+    meant drop it. DJ Tiwa's `none` action is that veto now, but it lands AFTER
+    _doing() has already told her a song is coming, so a false positive like
+    "ขอ ยืมตังหน่อย" can still have her say she put one on. Upgrade path: await
+    the DJ decision alongside dispatch (+~0.6s on music turns) and pass the real
+    terms to _doing().
 
     Deliberately does NOT care whether something is already playing. It used to
     skip a busy deck, to stop "เพลงนี้ชื่ออะไร" starting a track over her answer —
@@ -238,39 +176,16 @@ def _terms(content: str) -> str:
     return lines[0].strip("\"' .`")[:80] if lines else ""
 
 
-async def _force_music(db, text: str) -> None:
-    """Ask for search terms as plain text rather than retrying the tool call: a
-    model that just declined to call a tool declines again often enough, but it
-    always answers a question. One extra call, only on turns that missed.
-    """
-    resp = await asyncio.to_thread(
-        llm.chat,
-        model=llm.TOOL_MODEL if llm.PROVIDER == "openrouter" else MODEL,
-        messages=[{"role": "system", "content": _TERMS_SYSTEM},
-                  {"role": "user", "content": text}],
-        options={"temperature": 0.3, "num_ctx": 1024},
-    )
-    terms = _terms(resp["content"])
-    # The veto. _MUSIC_VERB now matches bare Thai verbs ("ขอ ", "เปิด ") to catch
-    # "ขอ ATLAS-The Score", and those also start "ขอ ยืมตังหน่อย". Playing a random
-    # song over an unrelated message is worse than the silence this retry exists
-    # to fix, so the model that reads the sentence gets the last word.
-    if not terms or terms.strip(" .").upper() == "NONE":
-        memory.log(db, "tool", f"play_music -> not a music ask after all: {text[:60]!r}")
-        return
-    tools.play_music(db, terms)
-    memory.log(db, "tool", f"play_music({terms!r}) -> forced, the tool pass skipped it")
-
 
 def _asked_deck(text: str) -> bool:
     """They asked what is on. The one moment an empty deck is worth telling her."""
     return any(q in text.lower() for q in _DECK_Q)
 
 
-# Straight out of the join_voice / leave_voice tool descriptions. On the
-# concurrent path there is no tool pass, and no mini owns voice — 0 calls in 135
-# logged, so an LLM round trip for it would be absurd. But losing it SILENTLY is
-# the failure this codebase minds most, so it becomes a classifier instead.
+# These two lists were the join_voice / leave_voice tool descriptions, kept when
+# the registry went. No mini owns voice — 0 calls in 135 logged — so an LLM round
+# trip for it would be absurd. But losing it SILENTLY is the failure this
+# codebase minds most, so it is a classifier instead.
 # ponytail: phrase match, precision over recall, same stance as _MUSIC_ASK. A
 # miss means you type `join`; a false positive drags her into a live call.
 _JOIN = ("come join the vc", "join the vc", "join vc", "get in here", "hop in",
@@ -282,15 +197,26 @@ _LEAVE = ("leave the vc", "leave vc", "get out", "ออกไป", "ออก�
 
 
 def _asked_voice(text: str) -> str:
-    """"join", "leave" or "". Vetoed by voice.wants_now() for a FUTURE time —
-    'join us later tonight' is a plan, not an ask, and that veto is measured."""
-    if tools.VOICE_DJ_ONLY:
-        return ""  # TIWA_VOICE=dj — the channel is a speaker, not a conversation
+    """"join", "leave", "dj-only", or "".
+
+    "dj-only" means they asked and she cannot: TIWA_VOICE=dj (the default) makes
+    the channel a speaker for music. It is RETURNED rather than swallowed because
+    losing it silently is how she says "ok, coming in" and then does not. That
+    honesty used to come from the join_voice tool's return string landing in her
+    brief; there is no brief now, so `_doing()` says it instead.
+
+    A real join/leave is vetoed by voice.wants_now() for a FUTURE time — 'join us
+    later tonight' is a plan, not an ask, and that veto is measured. Under
+    dj-only the veto does not matter, since the honest answer is the same either
+    way — and skipping it keeps `voice` unimported on a turn that cannot use it.
+    """
     low = text.lower()
     want = ("leave" if any(p in low for p in _LEAVE)
             else "join" if any(p in low for p in _JOIN) else "")
     if not want:
         return ""  # the common case never imports voice — see below
+    if tools.VOICE_DJ_ONLY:
+        return "dj-only"
     # `voice` pulls in discord, whisper and onnxruntime, ~0.24s the first time.
     # Importing it per turn to run a pure-text veto put that on EVERY turn for
     # chat.py, the dashboard and the benches (forkbench caught it: 0.54s for two
@@ -300,9 +226,9 @@ def _asked_voice(text: str) -> str:
     return want if voice.wants_now(text) else ""
 
 
-def _doing(missed_music: bool = False, blind: bool = False,
+def _doing(blind: bool = False,
            asked_deck: bool = False, dispatching_music: bool = False,
-           asked: str = "", looking_up: str = "") -> str:
+           asked: str = "", looking_up: str = "", voice_asked: bool = False) -> str:
     """What she is actually doing, read from live state — never from what the
     model believes it did.
 
@@ -314,8 +240,9 @@ def _doing(missed_music: bool = False, blind: bool = False,
     Doing nothing says NOTHING. Returns "" on a quiet turn: a standing "no music
     is playing" is context she pays for on every ordinary message and uses on
     almost none. The only negatives kept are the anti-confabulation guards, and
-    both are narrow — `missed_music` fires when she was asked for a song and has
-    none, `blind` when an image arrived and the vision call came back empty.
+    each is narrow — `asked_deck` when the deck is empty and they asked,
+    `looking_up` while a search is still out, `blind` when an image arrived and
+    the vision call came back empty.
     """
     from . import music  # lazy: keeps av out of import for non-Discord callers
 
@@ -339,8 +266,8 @@ def _doing(missed_music: bool = False, blind: bool = False,
     queued = list(tools.DJ) + ([("play", tools.PENDING_MUSIC)]
                                if tools.PENDING_MUSIC else [])
     if queued or dispatching_music:
-        # On the concurrent path DJ Tiwa has not run yet — she is speaking WHILE
-        # it searches — so there is nothing in the Turn to name.
+        # DJ Tiwa usually has not run yet — she is speaking WHILE it searches —
+        # so there is nothing in the Turn to name.
         #
         # "putting a song on" alone was NOT enough. Measured in a live A/B: told
         # only that something was happening, she filled the gap herself —
@@ -362,12 +289,6 @@ def _doing(missed_music: bool = False, blind: bool = False,
                    " year beyond the words they themselves used — those are"
                    " things you would be making up. Naming three tracks you have"
                    " not heard is the exact failure this line exists to stop.")
-    elif missed_music:
-        # asked for music, and _force_music came up empty too — the only turn
-        # where telling her what is NOT happening is worth the tokens
-        out.append("They asked for music but the search came up empty and nothing"
-                   " is queued — do NOT say you are putting a song on. Say it did"
-                   " not work.")
     if looking_up:
         # She is about to speak while a lookup runs. Without this she fills the
         # gap: traced live, "who won the premier league last night" got "Man City.
@@ -386,9 +307,115 @@ def _doing(missed_music: bool = False, blind: bool = False,
         out.append("They sent an image and your eyes did not work this time — you"
                    " genuinely cannot see it. Do NOT guess what is in it or act like"
                    " you looked. Say you cannot see it.")
+    if voice_asked:
+        # TIWA_VOICE=dj and they asked her into (or out of) the call. Inert is
+        # fine; inert AND SILENT is not — that is how she answers "ok, coming in"
+        # and then does not move. The join_voice tool used to hand her this
+        # sentence; nothing reads tool returns any more, so it is said here.
+        out.append("They want you to come into or leave the voice channel, and"
+                   " that is not yours to decide right now — the channel is only"
+                   " a speaker for music, you do not do voice chat. Say so in your"
+                   " own words. Do NOT claim you joined, are joining, or left.")
     if tools.PENDING_LEAVE:
         out.append("You are leaving the voice channel as you say this.")
     return " ".join(out)
+
+
+def _cancel_pending(author: str):
+    """They spoke again. A search for the message before this one is stale.
+
+    Only SPEECH is cancelled. A song they asked for still plays — that is the
+    rule from SWARM.md S4, and it is why ACTS never lands in here.
+    """
+    task = _pending.pop(author, None)
+    if task and not task.done():
+        task.cancel()
+
+
+async def _voice(db, author: str, facts: list, on_late, spoken=None,
+                 lang: str = "English") -> str:
+    """Say one more line, after the reply. Rule 1: the facts never reach the
+    channel — she does.
+
+    `spoken` is set the moment respond() has her words in hand. Without it a mini
+    that finishes FASTER than the persona call sends its follow-up first, and she
+    answers a question she has not asked yet. latebench only missed this because
+    its fake search was slower than its fake persona.
+    """
+    if spoken is not None:
+        await spoken.wait()
+    if not facts or on_late is None:
+        memory.log(db, "mini", f"late -> {facts or 'nothing'} (nowhere to send it)")
+        return ""
+    line = await say(
+        db,
+        [{"role": "user", "content": f"{author}: (earlier message)"}],
+        # _state() decides her language in CODE, never by the model. This block is
+        # written here instead, so without the rule it inherited nothing: measured
+        # live, an English question came back "ห้าพันดอลลาร์แล้วครับพี่".
+        f"Reply in {lang} only. You just this second found out what you went to "
+        f"look up. Say it to {author} in ONE short line, in your own voice, as a "
+        "follow-up to what you already said. Do not greet them and do not explain "
+        "that you looked it up.\n" + "\n".join(facts),
+    )
+    if line:
+        await on_late(line)
+    memory.log(db, "mini", f"late -> {line[:120]}")
+    return line
+
+
+async def _late(db, author: str, jobs: list, on_late, spoken=None,
+                lang: str = "English") -> None:
+    """A mini finished after she spoke. She says it herself, one line, or not at all."""
+    try:
+        results = await asyncio.wait_for(
+            asyncio.gather(*(asyncio.to_thread(minis.run, db, n, t) for n, t in jobs)),
+            timeout=LATE_TIMEOUT,
+        )
+    except asyncio.TimeoutError:
+        # never a silent drop — a silent drop is how she starts believing she
+        # knows something nobody ever told her
+        memory.log(db, "mini", f"late({[n for n, _ in jobs]}) -> timed out")
+        return
+    except asyncio.CancelledError:
+        memory.log(db, "mini", f"late({[n for n, _ in jobs]}) -> cancelled, they moved on")
+        raise
+    await _voice(db, author, [f"{n}: {r}" for (n, _), r in zip(jobs, results) if r],
+                 on_late, spoken, lang)
+
+
+def route(db, jobs: list, text: str, asked_music: bool,
+          dj_already_running: bool = False) -> list:
+    """The router's answer, with the deterministic rules applied over the top.
+
+    This is the hybrid: the classifier does not merely back the model up, it
+    also overrules it. Both directions were measured on 111 real turns
+    (`dispatchbench`), and both fire on real traffic.
+
+    Exported so the bench grades the SYSTEM rather than the model alone —
+    grading the raw dispatch call would measure something production never runs.
+    """
+    out = list(jobs)
+
+    # VETO. Dispatch answered `dj` to "มึงเล่นเพลงไรอยู่เนี่ย" (what song is even
+    # playing), which would start a track over her answer — the exact failure
+    # djbench exists for. _DECK_Q is the narrow list of phrases that are
+    # unambiguously questions ABOUT the deck and never requests, so it cannot
+    # swallow a polite ask or a youtube link the way the full _QUESTION list would.
+    if _asked_deck(text):
+        if any(n == "dj" for n, _ in out):
+            memory.log(db, "mini", f"dj vetoed — {text[:50]!r} asks what is on")
+        out = [j for j in out if j[0] != "dj"]
+        return out
+
+    # NET. The model failed to notice a music ask — measured at 1 in 4-6 before,
+    # and dispatch still misses some. In respond() DJ is already running by now,
+    # started at t=0; the bench has no such head start and asks for the job back.
+    if asked_music:
+        out = [j for j in out if j[0] != "dj"]
+        if not dj_already_running:
+            out.append(("dj", text))
+    return out
 
 
 async def respond(db, hist: list, author: str, text: str, images=(),
@@ -397,45 +424,135 @@ async def respond(db, hist: list, author: str, text: str, images=(),
 
     `images` = attachment urls on the current message. Empty on every ordinary
     turn, and an empty list costs exactly nothing — no vision call is made.
-    """
-    if TURN_MODE == "concurrent":
-        from . import turn  # late: turn.py imports this module
 
-        return await turn.respond(db, hist, author, text, images, on_late)
-    # `on_late` is ignored on the serial path: nothing there finishes after she
-    # speaks, which is the whole difference between the two.
+    `on_late` is an async callable taking one string — bot.py passes the
+    channel's send. Without it a late result is logged and dropped, which is what
+    chat.py, the dashboard and the benches want: nothing there can receive a
+    second message.
+    """
     turn0 = time.perf_counter()
-    tools.new_turn()  # everything the tools flag this turn is scoped to this task
+    tools.new_turn()  # everything flagged this turn is scoped to this task
+    _cancel_pending(author)  # a search for their previous message is stale now
     recent = "\n".join(
         m["content"] if m["role"] == "user" else f"{TIWA}: {m['content']}"
         # lines before the current message: resolve "he/she", and show whether a
         # fight is still on screen. This window IS the lifetime of her mood.
         for m in hist[-9:-1]
     )
-    # before the brief, so the tool pass can look up whatever she saw
+    # Sight stays ON the critical path on purpose: she is reacting to a picture
+    # that is already on screen, and "I can't see it" a second later is worse
+    # than waiting. It is also the rarest turn there is.
     seen = await asyncio.to_thread(eyes.look, db, images, text) if images else ""
-    inner = await _inner_brief(db, author, text, recent, seen)
-    missed = _missed_music(text)
-    if missed:
-        await _force_music(db, text)
 
-    state = _state(db, author, text, seen, inner, missed,
-                   blind=bool(images) and not seen)
+    # code, ~3ms. This is what the recall tool used to cost a model call for.
+    third = memory.mentioned(db, text, skip=author)
+    asked_music = _missed_music(text)
+
+    # Voice has no mini — 0 calls in 135 logged turns — so the classifier reaches
+    # the actuators directly. Returns "" under TIWA_VOICE=dj (the default), where
+    # _flush_music brings her in by itself. Wired anyway, so TIWA_VOICE=full is
+    # one env var and not a rewrite.
+    want = _asked_voice(text)
+    if want == "join":
+        tools.join_voice(db)
+    elif want == "leave":
+        tools.leave_voice(db)
+
+    # DJ starts NOW, not after dispatch. The classifier already said this is a
+    # music ask, deterministically and for free — making the song wait for a
+    # model to agree is the exact round trip this whole design removes.
+    early = [asyncio.create_task(asyncio.to_thread(minis.run, db, "dj", text))
+             ] if asked_music else []
+
+    # Dispatch runs BEFORE she speaks, and this is a deliberate reversal.
+    #
+    # It used to run beside her, which is why she bluffed: asked "who won the
+    # premier league last night" she answered "Man City. 2-1. Haaland scored
+    # both" at 1.9s, and the real result — "Arsenal 2-1 Chelsea" — arrived after.
+    # She cannot decline to answer something she does not know is being looked up.
+    #
+    # It costs almost nothing, which is why it is affordable. Measured: persona
+    # ~1.9s, dispatch ~0.9s, a mini ~1.5s. The turn was ALREADY bounded by
+    # dispatch+mini (2.4s), not by her words, so moving dispatch in front buys
+    # correctness out of slack that was already being spent.
+    # dispatch also returns "ask" — the one thing it would have to ask before
+    # acting. Nothing reads it: she is better at asking than the router is, and
+    # she has the whole conversation to ask from. It stays in the schema because
+    # writing the question is what stops the router guessing instead.
+    jobs = []
+    try:
+        out = await asyncio.wait_for(
+            minis.dispatch(db, author, text, recent), DISPATCH_TIMEOUT)
+        jobs = route(db, out["dispatch"], text, asked_music,
+                     dj_already_running=bool(early))
+    except asyncio.TimeoutError:
+        # she talks anyway rather than waiting on a stalled router
+        memory.log(db, "mini", f"dispatch hit {DISPATCH_TIMEOUT}s — replied without it")
+
+    # what she is allowed to know she is doing, before she has the answer
+    looking_up = ", ".join(t for n, t in jobs if n not in ACTS)
+    # _state() decides her language in CODE, never by the model. The follow-up
+    # writes its own state block, so without this it answered an English
+    # question in Thai — measured live, twice out of two.
+    lang = "Thai" if any("฀" <= c <= "๿" for c in text) else "English"
+    state = _state(
+        db, author, text, seen,
+        blind=bool(images) and not seen,
+        extra=third,
+        dispatching_music=asked_music or any(n == "dj" for n, _ in jobs),
+        looking_up=looking_up,
+        voice_asked=want == "dj-only",
+    )
+
+    spoken = asyncio.Event()  # nothing follows up before she has said the first thing
+
+    # SPEECH is spun off and lands after she talks. ACTIONS are awaited, because
+    # bot.py's flush runs the moment respond() returns.
+    says = [j for j in jobs if j[0] not in ACTS]
+    if says:
+        _pending[author] = asyncio.create_task(
+            _late(db, author, says, on_late, spoken, lang))
+    acts = [asyncio.to_thread(minis.run, db, n, t) for n, t in jobs if n in ACTS]
+
     reply = await say(db, hist, state)
+    # Her words are ready. Everything still owed gets a DEADLINE, because a plain
+    # gather() has none: latbench measured one live turn at 507 SECONDS with no
+    # model call over 60s — a stalled search in a worker thread, held through
+    # asyncio.run's executor shutdown. She had had the reply in hand since 1.9s.
+    # Losing a song is recoverable; making her mute for eight minutes is not.
+    results = []
+    if early or acts:
+        try:
+            results = await asyncio.wait_for(
+                asyncio.gather(*early, *acts), ACT_TIMEOUT)
+        except asyncio.TimeoutError:
+            memory.log(db, "mini", f"acts hit {ACT_TIMEOUT}s — replied without them")
+    spoken.set()
     memory.log(db, "turn", f"{author}: {text[:100]} -> {reply[:120]}",
                (time.perf_counter() - turn0) * 1000)
+
+    # An ACTION mini finished before she spoke, so its facts could not reach the
+    # state block — that was built at t=3ms. Calendar's "which Tuesday did you
+    # mean" has to reach them anyway, so it goes out the same way a late search
+    # does: as a second line, in her voice.
+    said = [f"{v}" for r in results if isinstance(r, dict)
+            for k, v in r.items() if k in VOICE_FIELDS and v]
+    if said:
+        _pending[author] = asyncio.create_task(
+            _voice(db, author, said, on_late, lang=lang))
     return reply
 
 
-def _state(db, author: str, text: str, seen: str = "", inner: str = "",
-           missed: bool = False, blind: bool = False, extra: str = "",
-           dispatching_music: bool = False, looking_up: str = "") -> str:
+def _state(db, author: str, text: str, seen: str = "",
+           blind: bool = False, extra: str = "",
+           dispatching_music: bool = False, looking_up: str = "",
+           voice_asked: bool = False) -> str:
     """Everything the persona pass is told this turn, besides the persona itself.
 
-    Extracted so turn.py's concurrent path builds the SAME block from the same
-    code — the whole point of the A/B is that only the timing differs. `inner` is
-    the tool pass's brief on the serial path and "" on the concurrent one, where
-    the same ground arrives as `auto` + `extra` without a model call.
+    There is no inner brief on this branch. What the tool pass used to fetch
+    arrives instead as `auto` (facts about the speaker) and `extra` (facts about
+    third parties they named), both straight out of sqlite and neither costing a
+    model call.
     """
     auto = memory.turn_context(db, author)
 
@@ -458,9 +575,9 @@ def _state(db, author: str, text: str, seen: str = "", inner: str = "",
         "they care about it, whether it is any good — ask, and ask like the answer "
         "matters to you. A real question beats a safe take every time."
     )
-    doing = _doing(missed, blind=blind, asked_deck=_asked_deck(text),
+    doing = _doing(blind=blind, asked_deck=_asked_deck(text),
                    dispatching_music=dispatching_music, asked=text,
-                   looking_up=looking_up)
+                   looking_up=looking_up, voice_asked=voice_asked)
     if doing:  # quiet turn = not one wasted token
         rules += " " + doing
     if seen:
@@ -480,13 +597,14 @@ def _state(db, author: str, text: str, seen: str = "", inner: str = "",
         "ashamed. You are not the one who did something wrong. Stay sharp while it "
         "is still going, and let it go once they do."
     )
-    # `extra` is the concurrent path's replacement for what the tool pass used to
-    # fetch: facts about third parties named in the message, read from sqlite.
-    return "\n".join(x for x in (rules, auto, extra, inner) if x)
+    # `extra` is what the tool pass used to fetch with a `recall` call: facts
+    # about third parties named in the message, read straight from sqlite.
+    return "\n".join(x for x in (rules, auto, extra) if x)
 
 
 async def say(db, hist: list, state: str) -> str:
-    """The persona call itself. Shared so both paths speak with identical settings."""
+    """The persona call itself. Shared by the turn and by the late follow-up, so
+    a second message sounds like the first."""
     resp = await asyncio.to_thread(
         llm.chat,
         model=PERSONA_MODEL,
@@ -507,8 +625,8 @@ async def say(db, hist: list, state: str) -> str:
 
 _IDLE_SYSTEM = f"""You are {TIWA}'s idle thoughts. No one is talking to her right now.
 Most idles she has nothing worth saying: output exactly NOTHING.
-Only if recent memory (or a web_search about something she genuinely cares about)
-gives a real reason, output one short thought she'd share unprompted.
+Only if what she already knows gives a real reason, output one short thought she'd
+share unprompted.
 Never greet, never "just checking in", never summarize the episodes back."""
 
 
@@ -578,7 +696,18 @@ async def idle(db) -> str:
         # when no episode exists, which on the real database is always
         {"role": "user", "content": f"time: {now:%A %H:%M}\nwhat you know:\n{eps}"},
     ]
-    thought = await _tool_chat(db, msgs)
+    # Plain call, no tools. The heartbeat used to run the tool loop so she could
+    # web_search something she cared about; it never once did — the fuel is her
+    # own memory and the honest answer is almost always NOTHING. Upgrade path if
+    # she should look things up while idle: one `minis.run(db, "search", topic)`
+    # here, not a registry.
+    resp = await asyncio.to_thread(
+        llm.chat,
+        model=llm.TOOL_MODEL if llm.PROVIDER == "openrouter" else MODEL,
+        messages=msgs,
+        options={"temperature": 0.3, "top_p": 0.8, "top_k": 20, "num_ctx": 4096},
+    )
+    thought = _clean(resp["content"] or "")
     if not thought or "NOTHING" in thought[:30].upper():
         return ""
     resp = await asyncio.to_thread(

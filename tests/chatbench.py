@@ -23,7 +23,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parents[1]))
-from tiwa import memory, minis, music, pipeline, tools, turn  # noqa: E402
+from tiwa import memory, minis, music, pipeline, tools  # noqa: E402
 from tests.personabench import ask  # noqa: E402  (its main is guarded)
 
 # Real turns from her log, plus the two the log has no example of because nobody
@@ -40,12 +40,8 @@ CASES = [
 ]
 
 
-async def one(db, hist, who, text, mode):
-    was, pipeline.TURN_MODE = pipeline.TURN_MODE, mode
-    try:
-        return await pipeline.respond(db, hist, who, text)
-    finally:
-        pipeline.TURN_MODE = was
+async def one(db, hist, who, text):
+    return await pipeline.respond(db, hist, who, text)
 
 
 async def main():
@@ -62,15 +58,13 @@ async def main():
         # what the concurrent path decides and what it hands her, before judging
         tools.new_turn()
         raw = await minis.dispatch(db, who, text)
-        jobs = turn.route(db, raw["dispatch"], text, pipeline._missed_music(text))
+        jobs = pipeline.route(db, raw["dispatch"], text, pipeline._missed_music(text))
         mem = memory.turn_context(db, who) + memory.mentioned(db, text, skip=who)
 
         fired = ",".join(sorted({n for n, _ in jobs})) or "—"
         print(f"{text[:34]:34} | {fired:4} | {len(mem):5}c | {why}")
 
-        s = await one(db, list(hist), who, text, "serial")
-        c = await one(db, list(hist), who, text, "concurrent")
-        rows.append({"text": text, "serial": s, "concurrent": c,
+        rows.append({"text": text, "reply": await one(db, list(hist), who, text),
                      "fired": fired, "mem": len(mem)})
 
     spurious = [r for r in rows if r["fired"] != "—"]
@@ -80,33 +74,19 @@ async def main():
     print(f"turns where no memory reached her: {len(no_mem)}/{len(rows)}"
           + (f" {[r['text'][:22] for r in no_mem]}" if no_mem else ""))
 
-    print(f"\n{'message':30} | verdict     | why")
-    print(f"{'-'*30}-+-------------+{'-'*32}")
-    tally = {"serial": 0, "concurrent": 0, "tie": 0}
-    for r in rows:
-        p1, w1 = await ask(r["text"], r["serial"], r["concurrent"])
-        p2, _ = await ask(r["text"], r["concurrent"], r["serial"])
-        first = {"A": "serial", "B": "concurrent"}.get(p1)
-        second = {"A": "concurrent", "B": "serial"}.get(p2)
-        verdict = first if first and first == second else "tie"
-        tally[verdict] += 1
-        print(f"{r['text'][:30]:30} | {verdict:11} | "
-              f"{(w1 if verdict != 'tie' else 'judge split on order')[:32]}")
-
-    n = len(rows)
-    print(f"\nserial {tally['serial']} · concurrent {tally['concurrent']} · "
-          f"tie {tally['tie']}  (of {n} conversation turns)")
-
+    # No pairwise tally here any more: there is one turn shape per branch, so
+    # comparing arms is personabench's job across two latbench runs. What this
+    # bench owns is the part a tally cannot see — whether she still sounds like
+    # herself on the turns where personality IS the product. Read them.
     print("\n--- read these yourself; a tally cannot see 'she sounds flat' ---")
-    for r in rows[:4]:
+    for r in rows:
         print(f"\n  {r['text']}")
-        print(f"    serial     : {r['serial'][:150]}")
-        print(f"    concurrent : {r['concurrent'][:150]}")
+        print(f"    {r['reply'][:200]}")
 
+    blank = [r["text"] for r in rows if not r["reply"].strip()]
+    assert not blank, f"she said nothing at all on: {blank}"
     assert not spurious, f"a mini fired on a pure conversation turn: {spurious}"
-    assert tally["serial"] - tally["concurrent"] <= n * 0.3, (
-        "she reads worse on the turns where personality is the whole product")
-    print("\nchat ok — no mini fired, memory reached her, no persona regression")
+    print("\nchat ok — no mini fired, memory reached her, she answered every turn")
 
 
 if __name__ == "__main__":

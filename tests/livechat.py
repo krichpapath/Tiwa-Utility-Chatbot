@@ -1,4 +1,4 @@
-"""One real conversation on TIWA_TURN=concurrent. Live, end to end.
+"""One real conversation through the swarm. Live, end to end.
 
 The other benches each check one property in isolation. This is the thing none of
 them can do: a SEQUENCE, on one event loop, with the deck carrying between turns,
@@ -21,7 +21,7 @@ import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parents[1]))
-from tiwa import memory, minis, music, pipeline, tools, turn  # noqa: E402
+from tiwa import memory, minis, music, pipeline, tools  # noqa: E402
 
 # (who, what they said, seconds they pause afterwards)
 #
@@ -51,19 +51,18 @@ async def main():
     copy = Path(memory.DATA_DIR) / "livechat.db"
     shutil.copy(live, copy)
     db = memory.connect(str(copy))
-    pipeline.TURN_MODE = "concurrent"
     music.NOW["title"] = None
     music.QUEUE.clear()
 
     hist = []
     total = []
-    print(f"TIWA_TURN=concurrent | {len(SCRIPT)} turns | minis: "
+    print(f"swarm | {len(SCRIPT)} turns | minis: "
           f"{', '.join(sorted(minis.MINIS))}\n")
 
     for who, text, pause in SCRIPT:
         hist.append({"role": "user", "content": f"{who}: {text}"})
         t0 = time.perf_counter()
-        reply = await turn.respond(db, list(hist), who, text, on_late=on_late)
+        reply = await pipeline.respond(db, list(hist), who, text, on_late=on_late)
         ms = (time.perf_counter() - t0) * 1000
         total.append(ms)
         hist.append({"role": "assistant", "content": reply})

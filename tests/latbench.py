@@ -1,23 +1,31 @@
-"""The A/B, live: same turns through serial and concurrent, timed.
+"""How long a turn takes, live, on real turns from her own log.
 
 Her log said the six seconds was never the work —
 
     whole turn 6431ms p50 | inner pass 2597ms x1.7 | persona 1958ms | tools 3ms
 
-— so S3 took the tool pass off the path and let her talk while dispatch runs.
-This is whether that actually happened against a real model.
+— so the tool pass came off the path and she talks while dispatch runs. This is
+whether that actually happened against a real model.
 
 **Time to HER REPLY**, not time to everything settled. `respond()` returns her
 words; late work keeps running behind it, and that is the point.
+
+ONE ARM. This used to flip `TIWA_TURN` and time both shapes in one run; there is
+one shape on this branch now, so the comparison is between BRANCHES. Run it on
+each, tag the arms, and personabench judges the two files:
+
+    git checkout main  && py -X utf8 tests\\latbench.py --tag main
+    git checkout swarm && py -X utf8 tests\\latbench.py --tag swarm
+    py -X utf8 tests\\personabench.py data\\ab_main.json data\\ab_swarm.json
 
 Runs against a COPY of data/tiwa.db so real memory is in play (turn_context and
 mentioned() both read it) without writing fixtures into the live activity log —
 djbench learned that one the hard way.
 
-    py -X utf8 tests\\latbench.py            12 turns x 2 arms
+    py -X utf8 tests\\latbench.py            12 turns
     py -X utf8 tests\\latbench.py --n 6
 
-Writes data/ab.json for personabench. Costs real tokens.
+Writes data/ab_<tag>.json for personabench. Costs real tokens.
 """
 import argparse
 import asyncio
@@ -65,14 +73,10 @@ def sample(db, n: int) -> list:
     return picked
 
 
-async def one(db, t, mode):
-    was, pipeline.TURN_MODE = pipeline.TURN_MODE, mode
-    try:
-        t0 = time.perf_counter()
-        reply = await pipeline.respond(db, list(t["hist"]), t["author"], t["text"])
-        return reply, (time.perf_counter() - t0) * 1000
-    finally:
-        pipeline.TURN_MODE = was
+async def one(db, t):
+    t0 = time.perf_counter()
+    reply = await pipeline.respond(db, list(t["hist"]), t["author"], t["text"])
+    return reply, (time.perf_counter() - t0) * 1000
 
 
 def pct(v, p):
@@ -83,6 +87,7 @@ def pct(v, p):
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--n", type=int, default=12)
+    ap.add_argument("--tag", default="swarm", help="arm name; the output is data/ab_TAG.json")
     args = ap.parse_args()
 
     live = Path(memory.DB_PATH)
@@ -91,35 +96,32 @@ if __name__ == "__main__":
     db = memory.connect(str(copy))
 
     turns = sample(memory.connect(str(live)), args.n)
-    print(f"{len(turns)} real turns x 2 arms\n")
-    print(f"{'#':>2} | {'message':38} | {'serial':>8} | {'concurrent':>10}")
-    print(f"{'-'*2}-+-{'-'*38}-+-{'-'*8}-+-{'-'*10}")
+    print(f"{len(turns)} real turns, arm '{args.tag}'\n")
+    print(f"{'#':>2} | {'message':38} | {'ms':>8}")
+    print(f"{'-'*2}-+-{'-'*38}-+-{'-'*8}")
 
-    rows, ser, con = [], [], []
+    rows, ms = [], []
     for i, t in enumerate(turns, 1):
-        s_reply, s_ms = asyncio.run(one(db, t, "serial"))
-        c_reply, c_ms = asyncio.run(one(db, t, "concurrent"))
-        ser.append(s_ms)
-        con.append(c_ms)
+        reply, took = asyncio.run(one(db, t))
+        ms.append(took)
         rows.append({"author": t["author"], "text": t["text"],
-                     "serial": s_reply, "concurrent": c_reply,
-                     "ms_serial": round(s_ms), "ms_concurrent": round(c_ms)})
-        print(f"{i:2} | {t['text'][:38]:38} | {s_ms:7.0f}ms | {c_ms:9.0f}ms")
+                     "reply": reply, "ms": round(took)})
+        print(f"{i:2} | {t['text'][:38]:38} | {took:7.0f}ms")
 
     print(f"\n{'':10} | {'p50':>9} | {'p95':>9} | {'mean':>9}")
     print(f"{'-'*10}-+-{'-'*9}-+-{'-'*9}-+-{'-'*9}")
-    for name, v in (("serial", ser), ("concurrent", con)):
-        print(f"{name:10} | {pct(v, .5):8.0f}ms | {pct(v, .95):8.0f}ms | "
-              f"{statistics.mean(v):8.0f}ms")
+    print(f"{args.tag:10} | {pct(ms, .5):8.0f}ms | {pct(ms, .95):8.0f}ms | "
+          f"{statistics.mean(ms):8.0f}ms")
 
-    AB.write_text(json.dumps(rows, ensure_ascii=False, indent=1), encoding="utf-8")
+    out = AB.with_name(f"ab_{args.tag}.json")
+    out.write_text(json.dumps(rows, ensure_ascii=False, indent=1), encoding="utf-8")
     db.close()  # Windows will not unlink a file sqlite still has open
     copy.unlink(missing_ok=True)
 
-    p50 = pct(con, .5)
-    cut = (1 - p50 / pct(ser, .5)) * 100
-    print(f"\nconcurrent p50 is {cut:.0f}% under serial. Target is {TARGET_MS}ms.")
-    print(f"pairs -> {AB} (personabench reads this)")
+    p50 = pct(ms, .5)
+    print(f"\nreplies -> {out}")
+    print(f"For the persona A/B, run this on BOTH branches (--tag main, --tag swarm)"
+          f" and then: py -X utf8 tests\\personabench.py data\\ab_main.json {out}")
     if p50 >= TARGET_MS:
         print(f"\nABANDON CONDITION: p50 {p50:.0f}ms misses the {TARGET_MS}ms target")
     else:

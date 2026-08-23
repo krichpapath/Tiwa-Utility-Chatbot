@@ -37,8 +37,14 @@ HER = [{"role": "system", "content": pipeline.PERSONA},
 
 def every_pass_goes_in_one_comes_out():
     log(HER, "bored out of my skull")                                      # keep
-    log([{"role": "system", "content": pipeline._INNER_SYSTEM},
-         {"role": "user", "content": "Krich: hey"}], "- you remember Krich")  # tool pass
+    # The tool pass is gone from this branch, but its rows are not: the live
+    # database holds hundreds of them from before the swap, and every one is a
+    # brief written TO her, not BY her. Frozen as a literal so the filter is
+    # still tested against what is actually on disk.
+    log([{"role": "system",
+          "content": "You are Tiwa's inner thoughts, run before she replies. "
+                     "You are NOT the reply."},
+         {"role": "user", "content": "Krich: hey"}], "- you remember Krich")
     log([{"role": "system", "content": minis._SYSTEM.format(minis="- dj: x")},
          {"role": "user", "content": "Krich: play something"}], '{"dispatch":[]}')
     log([{"role": "system", "content": minis._DJ_SYSTEM},

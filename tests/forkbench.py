@@ -20,7 +20,7 @@ import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parents[1]))
-from tiwa import llm, memory, minis, music, pipeline, tools, turn  # noqa: E402
+from tiwa import llm, memory, minis, music, pipeline, tools  # noqa: E402
 
 DELAY = 0.3  # each fake model call, so overlap is measurable
 db = memory.connect(":memory:")
@@ -58,7 +58,7 @@ def run_turn(text, author="Krich"):
     as the reply.
     """
     async def go():
-        reply = await turn.respond(db, HIST, author, text)
+        reply = await pipeline.respond(db, HIST, author, text)
         return reply, tools.PENDING_MUSIC, list(tools.DJ)
 
     return asyncio.run(go())
@@ -139,38 +139,28 @@ def cannot_name_what_she_has_not_heard():
     print("guard ok    — mid-dispatch she knows a song is coming and names none of it")
 
 
-def same_state_both_paths():
-    """Only timing may differ. If the block differs, the A/B measures two things."""
-    tools.new_turn()
-    a = pipeline._state(db, "Krich", "Steven is coming over", extra="X")
-    tools.new_turn()
-    b = pipeline._state(db, "Krich", "Steven is coming over", inner="X")
-    assert a == b, "the two paths build different state blocks"
-    print("shared ok   — serial and concurrent build the identical inner-state block")
+def there_is_only_one_path():
+    """No knob, no fork, no tool pass. This branch IS the swarm.
 
-
-def the_switch():
-    """TIWA_TURN routes respond() without any caller knowing. Default stays serial."""
-    assert pipeline.TURN_MODE == "serial", "the swarm must not be the default yet"
-    was, pipeline.TURN_MODE = pipeline.TURN_MODE, "concurrent"
-    try:
-        calls.clear()
-        # bot.py, chat.py and dashboard.py all call pipeline.respond() and none of
-        # them changed — this is the line that makes that true
-        asyncio.run(pipeline.respond(db, HIST, "Krich", "hey"))
-        assert len(calls) == 2 and not any("inner thoughts" in c for c in calls), calls
-    finally:
-        pipeline.TURN_MODE = was
+    There used to be a `TIWA_TURN` switch here with the serial three-pass shape
+    on the other side of it, and this check asserted both were reachable. The
+    serial shape lives on `main` now, so what has to hold instead is that
+    nothing here can fall back to it: an ordinary turn is exactly two model
+    calls — dispatch, then her — and neither is a brief written to her.
+    """
+    assert not hasattr(pipeline, "TURN_MODE"), "the fork knob came back"
     calls.clear()
+    # bot.py, chat.py and dashboard.py all still call pipeline.respond() and none
+    # of them changed when the serial half was deleted — this is that line
     asyncio.run(pipeline.respond(db, HIST, "Krich", "hey"))
-    assert any("inner thoughts" in c for c in calls), "serial lost its tool pass"
-    print("switch ok   — one env knob, both paths reachable, callers untouched")
+    assert len(calls) == 2, f"an ordinary turn is not two calls: {calls}"
+    assert not any("inner thoughts" in c for c in calls), calls
+    print("path ok     — one turn, two calls, no tool pass to fall back to")
 
 
 mentioned()
 forked()
-the_switch()
+there_is_only_one_path()
 net_under_the_router()
 cannot_name_what_she_has_not_heard()
-same_state_both_paths()
 print("\nfork ok — tool pass gone, nothing it fetched is missing, guard still holds")

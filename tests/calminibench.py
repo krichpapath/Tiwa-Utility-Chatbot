@@ -14,7 +14,7 @@ import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parents[1]))
-from tiwa import gcal, llm, memory, minis, tools, turn  # noqa: E402
+from tiwa import gcal, llm, memory, minis, pipeline, tools  # noqa: E402
 
 db = memory.connect(":memory:")
 answer = {}
@@ -126,7 +126,7 @@ def she_speaks_first():
                   clash="", mention=False)
 
     async def go():
-        was, turn.pipeline.say = turn.pipeline.say, slow_say
+        was, pipeline.say = pipeline.say, slow_say
         try:
             import tiwa.minis as m
             route = {"dispatch": [{"mini": "calendar", "task": "lunch tuesday"}],
@@ -138,14 +138,14 @@ def she_speaks_first():
 
             m.dispatch = fake_dispatch
             try:
-                await turn.respond(db, [{"role": "user", "content": "Krich: hi"}],
+                await pipeline.respond(db, [{"role": "user", "content": "Krich: hi"}],
                                    "Krich", "lunch tuesday", on_late=on_late)
                 await asyncio.sleep(0.4)
             finally:
                 m.dispatch = real_dispatch
         finally:
-            turn.pipeline.say = was
-            turn._cancel_pending("Krich")
+            pipeline.say = was
+            pipeline._cancel_pending("Krich")
 
     asyncio.run(go())
     assert order == ["reply", "follow-up"], f"she answered before she spoke: {order}"

@@ -17,7 +17,7 @@ import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parents[1]))
-from tiwa import llm, memory, minis, music, tools, turn  # noqa: E402
+from tiwa import llm, memory, minis, music, pipeline, tools  # noqa: E402
 
 DISPATCH, PERSONA, MINI, SLOW = 0.26, 0.20, 0.15, 0.43
 db = memory.connect(":memory:")
@@ -58,7 +58,7 @@ async def turn_of(text, author="Krich", handler=True):
     """Returns (reply, seconds, PENDING_MUSIC) — flags read inside the task, the
     way bot._flush_music does."""
     t0 = time.perf_counter()
-    reply = await turn.respond(db, HIST, author, text,
+    reply = await pipeline.respond(db, HIST, author, text,
                                on_late=on_late if handler else None)
     return reply, time.perf_counter() - t0, tools.PENDING_MUSIC
 
@@ -75,7 +75,7 @@ def scenario(fn):
             try:
                 await fn()
             finally:
-                turn._cancel_pending("Krich")  # no task outlives its scenario
+                pipeline._cancel_pending("Krich")  # no task outlives its scenario
         asyncio.run(wrapper())
     return go
 
@@ -125,7 +125,7 @@ async def search_never_blocks_her():
 @scenario
 async def timeout_is_not_silence():
     """Past the deadline she says nothing rather than something invented."""
-    was, turn.LATE_TIMEOUT = turn.LATE_TIMEOUT, 0.05
+    was, pipeline.LATE_TIMEOUT = pipeline.LATE_TIMEOUT, 0.05
     route.update(dispatch=[{"mini": "search", "task": "slow one"}], ask=None)
     late.clear()
     try:
@@ -133,7 +133,7 @@ async def timeout_is_not_silence():
         await settle()
         assert not late, f"a timed-out search still spoke: {late}"
     finally:
-        turn.LATE_TIMEOUT = was
+        pipeline.LATE_TIMEOUT = was
     rows = [t for _, k, t, _ in memory.read_log(db, 20) if k == "mini"]
     assert any("timed out" in r for r in rows), f"timeout was not logged: {rows[:3]}"
     print("timeout ok  — nothing said, and the log says why")

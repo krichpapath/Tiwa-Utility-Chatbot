@@ -1,7 +1,7 @@
 """Calendar: does she actually WRITE, or just say she did?
 
 `py -X utf8 tests\\calbench.py`         offline — the ✅ gate holds, nothing can reach Google
-`py -X utf8 tests\\calbench.py --live`  measure — 7 real asks through the tool pass
+`py -X utf8 tests\\calbench.py --live`  measure — 7 real asks through dispatch and Calendar Tiwa
 
 The live half exists because of a real failure. Tycoon asked her to put a lunch
 appointment in the calendar, she asked a clarifying question, he said "ช่ายๆๆ"
@@ -19,14 +19,13 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parents[1]))
-from tiwa import memory, pipeline, tools  # noqa: E402
+from tiwa import memory, minis, pipeline, tools  # noqa: E402
 
 db = memory.connect(":memory:")
 
-# --- offline: the gate. A tool may only ever queue a sentence ----------------
+# --- offline: the gate. The actuator may only ever queue a sentence ----------
 tools.PENDING_CALENDAR.clear()
-out = tools.TOOLS["calendar_write"]["fn"](db, "add dentist tomorrow 15:00")
-assert "confirm" in out, out
+tools.calendar_write(db, "add dentist tomorrow 15:00")
 assert tools.PENDING_CALENDAR == ["add dentist tomorrow 15:00"]
 # ...and it reaches nothing else: no Google client, no event, until bot.py sees a ✅
 import tiwa.gcal as gcal  # noqa: E402
@@ -60,32 +59,36 @@ CASES = [
      "ลงปฏิทินให้หน่อย นัดหมอฟัน อาทิตย์ 9 ส.ค. 13.00", ""),
 ]
 
-called = []
-_real = {n: t["fn"] for n, t in tools.TOOLS.items()}
-for _name in tools.TOOLS:
-    def _spy(db, arg, _n=_name):
-        called.append((_n, arg))
-        return _real[_n](db, arg)
-
-    tools.TOOLS[_name]["fn"] = _spy
-
 
 async def main():
-    print("\n| case | speaker | tools called | wrote? |")
+    """Drive the REAL path: dispatch decides, route overrules, the mini writes.
+
+    This used to drive `pipeline._inner_brief` — one model reading ten tool
+    descriptions. The registry is gone, so the equivalent question is now asked of
+    the two passes that replaced it. Nothing is stubbed: if she does not write,
+    that is the answer.
+    """
+    print("\n| case | speaker | dispatched | wrote? |")
     print("|---|---|---|---|")
     wrote = 0
     for label, author, text, recent in CASES:
-        called.clear()
-        tools.PENDING_CALENDAR.clear()
-        await pipeline._inner_brief(db, author, text, recent)
-        names = ", ".join(f"{n}({a[:26]})" for n, a in called) or "*none*"
+        tools.new_turn()
+        out = await minis.dispatch(db, author, text, recent)
+        jobs = pipeline.route(db, out["dispatch"], text,
+                              pipeline._missed_music(text))
+        for name, task in jobs:
+            await asyncio.to_thread(minis.run, db, name, task)
+        names = ", ".join(f"{n}({t[:26]})" for n, t in jobs) or "*none*"
         ok = bool(tools.PENDING_CALENDAR)
         wrote += ok
         print(f"| {label} | {author} | {names} | {'**yes**' if ok else 'NO'} |")
-    print(f"\ncalendar_write fired on {wrote}/{len(CASES)}")
-    # 3/7 and 4/7 before the prompt rule, 7/7 twice after. Anything under 6 is a
-    # regression in _INNER_SYSTEM, not noise.
-    assert wrote >= 6, f"she is claiming calendar writes she did not make: {wrote}/{len(CASES)}"
+    print(f"\nthe calendar was written on {wrote}/{len(CASES)}")
+    # 3/7 and 4/7 before the prompt rule, 7/7 twice after, measured through the
+    # tool pass. The dispatch prompt deliberately drops bare agreements ("ใช่",
+    # "ช่ายๆๆ") to stop the over-firing measured in dispatchbench, so the first
+    # two cases are EXPECTED to be a no on this branch — that is the one
+    # behaviour that differs from `main`, and it is why the bar is 5 not 6.
+    assert wrote >= 5, f"she is claiming calendar writes she did not make: {wrote}/{len(CASES)}"
 
 
 asyncio.run(main())

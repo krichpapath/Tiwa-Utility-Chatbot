@@ -27,7 +27,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parents[1]))
-from tiwa import memory, minis, pipeline, turn  # noqa: E402
+from tiwa import memory, minis, pipeline  # noqa: E402
 
 TOOL_TO_MINI = {"play_music": "dj", "queue_music": "dj", "skip_music": "dj",
                 "stop_music": "dj", "web_search": "search",
@@ -92,7 +92,7 @@ async def run(cases) -> list:
         raw = await minis.dispatch(db, c["author"], c["text"], c["recent"])
         # grade the SYSTEM, not the model alone: production always applies the
         # deterministic veto and net over the router's answer
-        jobs = turn.route(db, raw["dispatch"], c["text"],
+        jobs = pipeline.route(db, raw["dispatch"], c["text"],
                           pipeline._missed_music(c["text"]))
         out.append(sorted({name for name, _ in jobs}))
         print(f"\r  dispatching {i}/{len(cases)}...", end="", flush=True)

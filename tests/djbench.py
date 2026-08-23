@@ -158,10 +158,13 @@ async def main():
     # nothing happening = say nothing. A standing "no music is playing" would be
     # paid for on every ordinary message and used on almost none.
     assert pipeline._doing() == "", pipeline._doing()
-    # except when she was asked and the search came up empty — the one negative
-    assert "came up empty" in pipeline._doing(missed_music=True)
-    tools.PENDING_MUSIC = "lofi"  # forced retry worked -> back to silence on the negative
-    assert "came up empty" not in pipeline._doing(missed_music=True)
+    # ...and while a song is on its way she is told so, WITHOUT being told what it
+    # is. She has not seen the search result at this point in the turn, so every
+    # title she could name here would be invented — measured, three at once.
+    told = pipeline._doing(dispatching_music=True)
+    assert "It IS happening" in told and "do NOT name a SONG TITLE" in told, told
+    tools.PENDING_MUSIC = "lofi"  # DJ already acted -> she may name what SHE searched
+    assert "play lofi" in pipeline._doing(dispatching_music=True)
     tools.PENDING_MUSIC = None
 
     # the forced retry: fires whenever they asked and nothing was queued. The

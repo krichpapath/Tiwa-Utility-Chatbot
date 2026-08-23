@@ -1,7 +1,7 @@
 """Search quality: does she call it, what keywords does she pick, what comes back.
 
 Offline by default — the mechanics (dedupe, region, formatting) run against a fake
-DDGS. `--live` also asks the real model what it would search for and hits the real
+DDGS. `--live` also asks dispatch and Search Tiwa what they would do, and hits the real
 index, which is the part you have to read and judge yourself.
 
     py -X utf8 tests\\searchbench.py
@@ -72,31 +72,30 @@ ASKS = [
 
 
 async def live():
-    """What keywords does she actually pick, and what comes back for them."""
-    from tiwa import pipeline
+    """Two questions, one per pass: does DISPATCH send it to Search Tiwa at all,
+    and are the keywords Search Tiwa picks keywords rather than their sentence.
 
-    print("\n| they said | she searched | top domains |")
-    print("|---|---|---|")
+    This used to drive `pipeline._inner_brief` and spy on the web_search tool.
+    The registry is gone; the same two decisions now belong to `minis.dispatch`
+    and `minis.search`, and the mini reports the query it chose as a fact, so
+    there is nothing left to spy on.
+    """
+    from tiwa import minis
+
+    print("\n| they said | dispatched? | she searched | top domains |")
+    print("|---|---|---|---|")
     for ask in ASKS:
-        tools.SEEN_URLS.clear()
+        tools.new_turn()
         db = memory.connect(":memory:")
-        queries = []
-        real = tools.TOOLS["web_search"]["fn"]
-
-        def spy(db, arg, _real=real, _q=queries):
-            _q.append(arg)
-            return _real(db, arg)
-
-        tools.TOOLS["web_search"]["fn"] = spy
-        try:
-            await pipeline._inner_brief(db, "Krich", ask)
-        finally:
-            tools.TOOLS["web_search"]["fn"] = real
+        out = await minis.dispatch(db, "Krich", ask)
+        jobs = [(n, t) for n, t in out["dispatch"] if n == "search"]
+        found = [await asyncio.to_thread(minis.run, db, "search", t) for _, t in jobs]
+        queries = [f["query"] for f in found if f.get("query")]
         doms = sorted({u.split("/")[2] for u in tools.SEEN_URLS})[:3]
-        print(f"| {ask} | {' / '.join(queries) or '— did not search'} | "
-              f"{', '.join(doms) or '—'} |")
-    print("\nJudge two things: did she search at all, and is the query keywords "
-          "rather than the sentence they typed.")
+        print(f"| {ask} | {'yes' if jobs else '**NO**'} | "
+              f"{' / '.join(queries) or '—'} | {', '.join(doms) or '—'} |")
+    print("\nJudge two things: did dispatch route it to search at all, and is the "
+          "query keywords rather than the sentence they typed.")
 
 
 offline()
