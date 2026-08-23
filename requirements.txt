@@ -10,9 +10,12 @@ onnx-asr
 onnxruntime
 soundfile
 edge-tts
-yt-dlp
+yt-dlp>=2026.8.19  # YouTube anti-bot changes break older builds; keep current
 av
 # imported directly by tiwa/music.py and tiwa/voice.py — they used to arrive only as
 # transitive deps of onnx-asr / discord.py, so a slimmer resolve broke music and voice
 numpy
 davey
+# the control panel (dashboard.py). pandas arrives with it — the tables and the
+# activity plot are pandas frames, so it is a real dependency, not a transitive one
+gradio

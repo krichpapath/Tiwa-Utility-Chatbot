@@ -67,6 +67,16 @@ def deck() -> str:
 # clients above; whichever plays goes in TIWA_YT_CLIENT.
 YT_CLIENT = os.environ.get("TIWA_YT_CLIENT", "android")
 
+# "Sign in to confirm you're not a bot" is YouTube rate-limiting the whole IP, not
+# a problem with one video. Cookies are the only thing that reliably answers it —
+# it is literally what the error asks for. OFF by default, because the yt-dlp wiki
+# warns that a logged-in account used for bot traffic can get flagged: use a
+# throwaway Google account, never your real one.
+#   TIWA_YT_COOKIES=C:\path\cookies.txt      exported cookies file
+#   TIWA_YT_COOKIE_BROWSER=firefox           read them from an installed browser
+YT_COOKIES = os.environ.get("TIWA_YT_COOKIES", "")
+YT_COOKIE_BROWSER = os.environ.get("TIWA_YT_COOKIE_BROWSER", "")
+
 _YDL = {
     "format": "bestaudio/best",
     "quiet": True,
@@ -76,6 +86,23 @@ _YDL = {
     "default_search": "ytsearch1",
     "extractor_args": {"youtube": {"player_client": [YT_CLIENT]}},
 }
+if YT_COOKIES:
+    _YDL["cookiefile"] = YT_COOKIES
+elif YT_COOKIE_BROWSER:
+    _YDL["cookiesfrombrowser"] = (YT_COOKIE_BROWSER,)
+
+
+# The difference between "this one video is gone" and "YouTube is refusing ME".
+# The first is worth skipping past; the second means every remaining candidate
+# will fail the same way, and asking four times in a row is what deepens the
+# throttle. Measured 2026-08-24: a burst of test resolutions took this IP from
+# intermittent to total in about an hour.
+_BLOCKED = ("sign in to confirm", "not a bot", "429", "too many requests",
+            "confirm you’re not a bot", "confirm you're not a bot")
+
+
+def _rate_limited(err: Exception) -> bool:
+    return any(s in str(err).lower() for s in _BLOCKED)
 # flat = titles and durations only, no format resolution. Cheap enough to ask for
 # five and then throw four away.
 _FLAT = {**_YDL, "extract_flat": True}
@@ -158,6 +185,16 @@ def find(query: str) -> dict:
             with yt_dlp.YoutubeDL(_YDL) as ydl:
                 hit = _hit(ydl.extract_info(cand["url"], download=False))
         except Exception as e:
+            if _rate_limited(e):
+                # Not this video's fault and not fixable by trying the next one —
+                # every remaining candidate will fail identically, and asking is
+                # what makes the throttle worse. Stop, and say something a person
+                # can act on instead of relaying yt-dlp's four-line error.
+                raise LookupError(
+                    "YouTube is rate-limiting this machine (\"sign in to confirm "
+                    "you're not a bot\"). Set TIWA_YT_COOKIES or "
+                    "TIWA_YT_COOKIE_BROWSER, or wait it out."
+                ) from e
             # A DEAD candidate must not lose the live ones behind it. This loop was
             # written to survive bad METADATA — livestreams, three-hour mixes — and
             # an unavailable video is a different failure that walked straight out

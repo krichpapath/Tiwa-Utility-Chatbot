@@ -5,6 +5,7 @@ that actually finds the song?
     py -X utf8 tests\\musicbench.py --search  # also hit YouTube for real
 """
 import asyncio
+import os
 import sys
 from pathlib import Path
 
@@ -131,6 +132,87 @@ def client_is_pinned():
     print(f"client ok      — pinned to {client[0]!r} (TIWA_YT_CLIENT to change)")
 
 
+def rate_limit_stops_early():
+    """"Sign in to confirm you're not a bot" is the IP, not the video.
+
+    Skipping to the next candidate cannot help — every one fails identically —
+    and asking four times in a row is what deepens the throttle. Measured
+    2026-08-24: a burst of test resolutions took this machine from intermittent
+    to total in about an hour. So it must stop on the FIRST one and say something
+    actionable rather than relaying yt-dlp's four-line error into the channel.
+    """
+    import types
+
+    tries = []
+
+    class Blocked:
+        def __init__(self, opts):
+            self.flat = opts.get("extract_flat")
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def extract_info(self, target, download=False):
+            if self.flat:
+                return {"entries": [
+                    {"id": f"vid{i}", "url": f"http://y/vid{i}", "duration": 200,
+                     "title": f"song {i}"} for i in range(5)]}
+            tries.append(target)
+            raise RuntimeError(
+                "ERROR: [youtube] vid: Sign in to confirm you’re not a bot. "
+                "Use --cookies-from-browser or --cookies for the authentication.")
+
+    for msg, want in [
+        ("Sign in to confirm you’re not a bot", True),   # the curly apostrophe
+        ("Sign in to confirm you're not a bot", True),         # and the straight one
+        ("HTTP Error 429: Too Many Requests", True),
+        ("This video is not available", False),
+        ("Private video", False),
+    ]:
+        assert music._rate_limited(RuntimeError(msg)) is want, msg
+
+    real = sys.modules.get("yt_dlp")
+    sys.modules["yt_dlp"] = types.SimpleNamespace(YoutubeDL=Blocked)
+    try:
+        try:
+            music.find("anything at all")
+            raise AssertionError("a rate-limited search returned instead of raising")
+        except LookupError as e:
+            assert "rate-limiting" in str(e), e
+            assert "COOKIE" in str(e).upper(), "the message does not say how to fix it"
+    finally:
+        if real is not None:
+            sys.modules["yt_dlp"] = real
+        else:
+            del sys.modules["yt_dlp"]
+    assert len(tries) == 1, f"kept asking while blocked: {len(tries)} requests"
+    print("ratelimit ok   — stops on the first refusal, not the fourth, and says why")
+
+
+def cookies_wire_up():
+    """Off by default; both knobs reach yt-dlp when set. Offline."""
+    import importlib
+
+    assert "cookiefile" not in music._YDL and "cookiesfrombrowser" not in music._YDL,         "cookies are on by default — they should be opt-in"
+    was = dict(os.environ)
+    try:
+        os.environ["TIWA_YT_COOKIE_BROWSER"] = "firefox"
+        m = importlib.reload(music)
+        assert m._YDL.get("cookiesfrombrowser") == ("firefox",), m._YDL.get("cookiesfrombrowser")
+        os.environ.pop("TIWA_YT_COOKIE_BROWSER")
+        os.environ["TIWA_YT_COOKIES"] = "cookies.txt"
+        m = importlib.reload(music)
+        assert m._YDL.get("cookiefile") == "cookies.txt"
+    finally:
+        os.environ.clear()
+        os.environ.update(was)
+        importlib.reload(music)
+    print("cookies ok     — opt-in, and both knobs reach yt-dlp when set")
+
+
 def dead_candidate():
     """One unavailable video must not lose the live results behind it. Offline.
 
@@ -198,6 +280,8 @@ def dead_candidate():
 
 
 client_is_pinned()
+cookies_wire_up()
+rate_limit_stops_early()
 dead_candidate()
 if "--play" in sys.argv:
     plays_for_real()
