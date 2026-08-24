@@ -754,7 +754,7 @@ declared facts. The tool pass leaves that path entirely — `recall` becomes a s
 | | serial | concurrent |
 |---|---|---|
 | turn latency p50 | 5,059 ms | **2,695 ms** |
-| routing accuracy, 111 hand-corrected turns | 70.3% | **93.7%** |
+| routing accuracy, 111 hand-corrected turns | 70.3% | **94.6%** |
 | false positives on turns needing nothing | 6.2% | 12.5% |
 | persona, blind pairwise A/B | 4 wins | 3 wins, 5 ties |
 | what Main Tiwa reads to handle music | 1,643 chars | **312 chars** |
@@ -887,13 +887,23 @@ process. They take a `--tag` and two files now: run `latbench` on each branch, h
 to `personabench`. The comparison got more honest, not less — it is measuring the thing
 that actually ships.
 
-**Known gap, accepted.** The loose Thai prefixes in `_MUSIC_VERB` (`"ขอ "`, `"เปิด "`) sat
-behind `_force_music`'s NONE veto on the serial path. DJ Tiwa's `none` action is that
-veto now, and it lands *after* `_doing()` has already told her a song is coming — so
-`"ขอ ยืมตังหน่อย"` (lend me money) can still have her say she put one on. Narrow, but it
-is the confabulation shape this codebase minds most, so it is written at `_missed_music`
-with the fix that closes it: await the DJ decision alongside dispatch, ~0.6s on music
-turns only.
+**The gap it shipped with, and how it closed.** The loose Thai prefixes in
+`_MUSIC_VERB` (`"ขอ "`, `"เปิด "`) sat behind `_force_music`'s NONE veto on the serial
+path; DJ Tiwa's `none` became that veto but landed *after* `_doing()` had already told
+her a song was coming. It was written down as accepted — and then it fired in the first
+real Discord session, on `"ขอ ยืมตังหน่อย"` (lend me money), exactly as predicted.
+
+**Closed 2026-08-24.** `respond()` now awaits DJ's verdict before building the state
+block. It is nearly free: DJ starts at t=0 alongside dispatch and both are the same model
+(measured that session, dispatch 1.3–1.9s against DJ 1.3–1.9s), so it costs the gap
+between two things already running, on music turns only. Quiet turns start no DJ and wait
+for nothing.
+
+The bigger win was not the veto. `queued` is filled in by the time she is briefed, so she
+is told *"you have just done this: play Spiderman"* instead of *"putting on what they just
+asked for"* — grounded in the words **they** used, which is the only thing she may repeat
+before the search returns. `forkbench.dj_has_the_last_word_before_she_speaks` fails on the
+old ordering.
 
 **One behaviour differs from `main`, deliberately.** A bare agreement after her own
 clarifying question — `"ช่ายๆๆ"` — used to reach `calendar_write`. The dispatch prompt

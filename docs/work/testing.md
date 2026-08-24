@@ -99,7 +99,7 @@ are the evidence the design was accepted on:
 | `calminibench.py` | check | Ambiguous date asks and queues nothing; a clash is flagged but still queued; the reply always lands before the follow-up |
 | `growthbench.py` | check | **The thesis.** Register a fourth mini, assert Main Tiwa's prompt did not grow. Also that no tool registry can grow back, and that every actuator has a named caller — two were silently orphaned once |
 | `latbench.py` | measure | Real turns from her own log, timed. p50 2.7s here against `main`'s 5.1s. One arm per run — `--tag` names it, and it writes `data/ab_<tag>.json` |
-| `dispatchbench.py` | measure | Routing accuracy on 111 hand-corrected real turns: 93.7% vs the tool pass's 70.3% |
+| `dispatchbench.py` | measure | Routing accuracy on 111 hand-corrected real turns: 94.6% vs the tool pass's 70.3%. The set is **frozen** at those 111 — this branch logs no tool rows, so newer turns mine as "needed nothing" and would rot the labels |
 | `personabench.py` | measure | Blind pairwise A/B over **two** `latbench` files — run it on each branch, then hand both here. Each pair judged twice with the sides swapped. Not 1–5 scoring — [LLM judges hit ~69% on role identification](https://arxiv.org/pdf/2508.10014) where humans hit 90.8% |
 | `chatbench.py` | measure | The turns that need **no mini at all** — 59% of real traffic, and where memory and personality are the whole product. Asserts no mini fires on any of them, then prints her replies for you to read |
 | `livechat.py` | measure | One real scripted conversation end to end. The only thing that shows a *sequence* — deck carrying between turns, follow-ups landing, her staying in character while a mini works |

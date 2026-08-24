@@ -104,7 +104,12 @@ Give the mini the GOAL in one short phrase, not the user's sentence and not a pl
 
 One entry per distinct job. Two jobs in one message means two entries.
 
-If you cannot tell what they want, dispatch nothing and write the one thing you would have to ask in "ask". A guess that acts is worse than a question."""
+If you cannot tell what they want, dispatch nothing and write the one thing you would have to ask in "ask". A guess that ACTS is worse than a question.
+
+BUT A LOOKUP IS NOT AN ACT. `search` changes nothing, costs nothing you can't undo, and she can always say "turns out it was X" a second later. So NEVER answer a question about the world with "ask" — send it to search and let the result settle it. Measured live: "ใครชนะบอลเมื่อคืน" (who won the football last night) got "which match do you mean?" and dispatched nothing, so she told them she knows nothing about football. Searching ผลบอลเมื่อคืน would have answered it.
+- A vague question is still a searchable one. Search the obvious reading.
+- Not knowing which team, which film, which patch, which year is a reason to SEARCH, not to ask.
+- Save "ask" for the things that ACT and cannot be taken back: a calendar write on an ambiguous date, a song when you genuinely cannot tell whether they wanted music at all."""
 
 
 def _schema() -> dict:

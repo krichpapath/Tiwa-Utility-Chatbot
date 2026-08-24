@@ -734,7 +734,7 @@ whether OS-wins is the precedence you want — it failed silently.
 | | serial | concurrent | |
 |---|---|---|---|
 | turn latency p50 | 5,059 ms | **2,695 ms** | ✅ under the 3,500 ms target |
-| routing accuracy | 70.3% | **93.7%** | ✅ 111 hand-corrected real turns |
+| routing accuracy | 70.3% | **94.6%** | ✅ 111 hand-corrected real turns |
 | false positives, turns needing nothing | 6.2% | **12.5%** | worse, down from 43.8% |
 | persona, blind pairwise | 4 wins | 3 wins, 5 ties | ✅ no regression |
 | coercion (`test_memory`) | green | green | ✅ unchanged |

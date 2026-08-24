@@ -29,6 +29,8 @@ memory.remember(db, "Steven", "plays", "guitar")
 memory.remember(db, "Gateaux", "plays", "Marvel Rivals")
 
 calls = []
+states = []          # every state block the persona pass was handed
+DJ_SAYS = {"action": "play", "terms": "bad apple"}   # what DJ Tiwa answers
 
 
 def fake_chat(**kw):
@@ -40,8 +42,9 @@ def fake_chat(**kw):
         return {"content": json.dumps({"dispatch": [], "ask": None}),
                 "tool_calls": [], "raw": {}}
     if "You are the DJ" in system:
-        return {"content": json.dumps({"action": "play", "terms": "bad apple"}),
-                "tool_calls": [], "raw": {}}
+        return {"content": json.dumps(DJ_SAYS), "tool_calls": [], "raw": {}}
+    if len(kw["messages"]) > 1:  # the persona pass — keep what she was told
+        states.append(str(kw["messages"][1].get("content", "")))
     return {"content": "ok whatever", "tool_calls": [], "raw": {}}
 
 
@@ -139,6 +142,40 @@ def cannot_name_what_she_has_not_heard():
     print("guard ok    — mid-dispatch she knows a song is coming and names none of it")
 
 
+def dj_has_the_last_word_before_she_speaks():
+    """The classifier is over-eager on purpose; DJ is the veto. It has to land
+    BEFORE the state block, or she is told a song is coming when none is.
+
+    This is a real Discord turn, 2026-08-24: "ขอ ยืมตังหน่อย" (lend me money)
+    starts with "ขอ ", which is in _MUSIC_VERB, so DJ ran. DJ correctly answered
+    `none` — and she was told "you are putting on what they just asked for"
+    anyway, because the verdict arrived after she had already been briefed.
+    """
+    global DJ_SAYS
+    music.NOW["title"] = None
+
+    # 1. DJ says none -> she is told about no music at all
+    was, DJ_SAYS = DJ_SAYS, {"action": "none", "terms": ""}
+    try:
+        states.clear()
+        _, pending, dj = run_turn("ขอ ยืมตังหน่อย")
+        assert pending is None and dj == [], f"a veto still reached the deck: {pending} {dj}"
+        assert states, "the persona pass never ran"
+        assert "It IS happening" not in states[-1], \
+            f"she was told a song is coming after DJ vetoed it:\n{states[-1]}"
+    finally:
+        DJ_SAYS = was
+
+    # 2. DJ says play -> she is told WHAT, in the words the search actually got
+    states.clear()
+    _, pending, _ = run_turn("เปิดเพลงอะไรก็ได้")
+    assert pending == "bad apple", pending
+    assert "play bad apple" in states[-1], \
+        f"the state block is still vague about what is playing:\n{states[-1]}"
+    assert "do NOT name a SONG TITLE" in states[-1], "the guard came off with it"
+    print("veto ok     — DJ's `none` lands before the briefing, and `play` names the terms")
+
+
 def there_is_only_one_path():
     """No knob, no fork, no tool pass. This branch IS the swarm.
 
@@ -160,6 +197,7 @@ def there_is_only_one_path():
 
 mentioned()
 forked()
+dj_has_the_last_word_before_she_speaks()
 there_is_only_one_path()
 net_under_the_router()
 cannot_name_what_she_has_not_heard()

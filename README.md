@@ -10,7 +10,7 @@ remembers.
 >
 > **`main` is the other version** — the serial three passes, one model reading
 > ten tool descriptions. Both are live and both are benched. Measured on 111
-> real turns: **2.7 s per turn against 5.1 s**, routing **93.7% against 70.3%**.
+> real turns: **2.7 s per turn against 5.1 s**, routing **94.6% against 70.3%**.
 >
 > Everything below is the same on both unless it says otherwise.
 

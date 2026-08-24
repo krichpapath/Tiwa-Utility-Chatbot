@@ -22,7 +22,7 @@ somewhere cheaper:
     calendar( 1 of 135 calls) -> Calendar Tiwa
 
 Nothing an LLM dispatches is on the path between her ears and her mouth.
-Measured after: p50 2695ms against serial's 5059ms, routing 93.7% against 70.3%.
+Measured after: p50 2695ms against serial's 5059ms, routing 94.6% against 70.3%.
 """
 import asyncio
 import datetime
@@ -144,13 +144,12 @@ def _missed_music(text: str) -> bool:
 
     PENDING_MUSIC == "" means stop_music already fired; leave it.
 
-    ponytail: the loose Thai prefixes in _MUSIC_VERB ("ขอ ", "เปิด ") used to sit
-    behind a model veto — _force_music asked "is this really music?" and NONE
-    meant drop it. DJ Tiwa's `none` action is that veto now, but it lands AFTER
-    _doing() has already told her a song is coming, so a false positive like
-    "ขอ ยืมตังหน่อย" can still have her say she put one on. Upgrade path: await
-    the DJ decision alongside dispatch (+~0.6s on music turns) and pass the real
-    terms to _doing().
+    The loose Thai prefixes in _MUSIC_VERB ("ขอ ", "เปิด ") are over-eager on
+    purpose: they used to sit behind _force_music's NONE veto. DJ Tiwa's `none`
+    action is that veto now, and respond() waits for it before building the state
+    block — so a false positive like "ขอ ยืมตังหน่อย" (lend me money) starts DJ,
+    DJ says none, and she is never told a song is coming. Closed 2026-08-24 after
+    it fired in a real Discord turn.
 
     Deliberately does NOT care whether something is already playing. It used to
     skip a busy deck, to stop "เพลงนี้ชื่ออะไร" starting a track over her answer —
@@ -252,7 +251,11 @@ def _doing(blind: bool = False,
         if music.QUEUE:
             line += " Queued next: " + ", ".join(t["title"] for t in music.QUEUE[:3]) + "."
         out.append(line + " You know this without looking it up — if they ask"
-                          " what is on, just tell them.")
+                          " what is on, just tell them. Knowing what is on is NOT"
+                          " touching it: unless a line below says you did, do not"
+                          " say or act out that you stopped, paused, skipped or"
+                          " changed the music. Measured live: mid-song she wrote"
+                          " '*สะดุด หยุดเพลง*' and the track never missed a beat.")
     elif asked_deck:
         # The deck is empty and they asked what is on. _doing() otherwise says
         # NOTHING on a silent turn — deliberately, because a standing "no music is
@@ -489,6 +492,40 @@ async def respond(db, hist: list, author: str, text: str, images=(),
         # she talks anyway rather than waiting on a stalled router
         memory.log(db, "mini", f"dispatch hit {DISPATCH_TIMEOUT}s — replied without it")
 
+    # DJ'S VERDICT, before she speaks — and this is the one mini she is awaited on.
+    #
+    # `_missed_music()` is a phrase classifier and its loose Thai prefixes ("ขอ ",
+    # "เปิด ") are deliberately over-eager, because the serial path had a model
+    # veto behind them. DJ Tiwa's `none` is that veto now, so it has to arrive
+    # BEFORE `_doing()` tells her a song is coming. Measured live 2026-08-24:
+    # "ขอ ยืมตังหน่อย" (lend me money) started DJ, DJ correctly answered `none`,
+    # and she was told "you are putting on what they just asked for" anyway.
+    #
+    # It is nearly free. DJ starts at t=0 alongside dispatch and both are the
+    # same model — measured on that session, dispatch 1.3-1.9s against DJ
+    # 1.3-1.9s — so waiting for the slower of two things already running costs a
+    # fraction of a second, on music turns only. Quiet turns start no DJ and wait
+    # for nothing.
+    #
+    # The payoff is bigger than the veto: `queued` is now filled in, so she is
+    # told "play Spiderman" instead of "putting on what they just asked for" —
+    # grounded in the words THEY used, which is the only thing she is allowed to
+    # repeat before the search comes back.
+    dj_jobs = [j for j in jobs if j[0] == "dj"]
+    jobs = [j for j in jobs if j[0] != "dj"]  # handled here, not in `acts`
+    dj = early + [asyncio.to_thread(minis.run, db, n, t) for n, t in dj_jobs]
+    playing = False
+    if dj:
+        try:
+            verdict = await asyncio.wait_for(asyncio.gather(*dj), ACT_TIMEOUT)
+            playing = any(isinstance(r, dict) and r.get("action") in ("play", "queue")
+                          for r in verdict)
+        except asyncio.TimeoutError:
+            # A stalled DJ may still reach the deck, so promising silence would
+            # be its own bluff. Fall back to what the classifier believed.
+            memory.log(db, "mini", f"dj hit {ACT_TIMEOUT}s — replied without its verdict")
+            playing = asked_music
+
     # what she is allowed to know she is doing, before she has the answer
     looking_up = ", ".join(t for n, t in jobs if n not in ACTS)
     # _state() decides her language in CODE, never by the model. The follow-up
@@ -499,7 +536,7 @@ async def respond(db, hist: list, author: str, text: str, images=(),
         db, author, text, seen,
         blind=bool(images) and not seen,
         extra=third,
-        dispatching_music=asked_music or any(n == "dj" for n, _ in jobs),
+        dispatching_music=playing,
         looking_up=looking_up,
         voice_asked=want == "dj-only",
     )
@@ -521,10 +558,9 @@ async def respond(db, hist: list, author: str, text: str, images=(),
     # asyncio.run's executor shutdown. She had had the reply in hand since 1.9s.
     # Losing a song is recoverable; making her mute for eight minutes is not.
     results = []
-    if early or acts:
+    if acts:
         try:
-            results = await asyncio.wait_for(
-                asyncio.gather(*early, *acts), ACT_TIMEOUT)
+            results = await asyncio.wait_for(asyncio.gather(*acts), ACT_TIMEOUT)
         except asyncio.TimeoutError:
             memory.log(db, "mini", f"acts hit {ACT_TIMEOUT}s — replied without them")
     spoken.set()

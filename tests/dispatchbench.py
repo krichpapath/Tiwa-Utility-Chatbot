@@ -51,6 +51,24 @@ FORCE_DJ = {13, 23, 24, 35, 38, 40, 41, 52, 54, 60, 63, 65, 67, 82, 83, 87, 88,
 NOT_SEARCH = {3, 29, 58, 62, 73, 74, 86}   # -> dj only
 DECK_QUESTION = {92}                        # "ชื่อเพลง" — _doing() answers it
 
+# THE SET IS FROZEN HERE, and it has to be.
+#
+# `mine()` derives a turn's ground truth from the `tool` rows logged beside it.
+# This branch has no tool pass, so a turn she handles now logs `mini` rows and
+# mines as "needed nothing" — which is how a live Discord session on 2026-08-24
+# quietly appended 32 fixtures, three of them the exact behaviour that session
+# was testing. "ใครชนะบอลเมื่อคืน" arrived labelled `[]` and dispatch was marked
+# WRONG for searching it, which is the one thing it had just been fixed to do.
+#
+# Deriving labels from `mini` rows instead would be worse: grading dispatch
+# against what dispatch did scores 100% by construction. A benchmark cannot mine
+# its own answers from the system under test.
+#
+# So: the corrected set is these 111 turns and stops there. To grow it, replay
+# newer turns, read them, and add the indices to the correction sets above by
+# hand — which is the work that made the first 111 worth anything.
+CORRECTED_THROUGH = 111
+
 
 def mine(db) -> list:
     """Pair each logged turn with the tools that fired during it."""
@@ -68,6 +86,12 @@ def mine(db) -> list:
             cases.append({"author": m.group(1), "text": m.group(2),
                           "reply": m.group(3), "tools": pending})
         pending = []
+
+    extra = len(cases) - CORRECTED_THROUGH
+    if extra > 0:
+        print(f"note: {extra} newer turn(s) mined but NOT scored — no tool rows to "
+              f"label them with. See CORRECTED_THROUGH.")
+    cases = cases[:CORRECTED_THROUGH]
 
     for i, c in enumerate(cases):
         did = sorted({TOOL_TO_MINI[t] for t in c["tools"] if t in TOOL_TO_MINI})
