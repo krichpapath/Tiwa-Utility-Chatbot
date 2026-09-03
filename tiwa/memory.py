@@ -362,6 +362,58 @@ def wipe(db, what: str):
 
 REFLECT_EVERY = 3  # unreflected episodes before thinking about them is worth a call
 
+# THE OTHER KIND OF EVIDENCE. ADR-030 says a taste is earned by them SAYING it or
+# by the note explaining it — and both are judged inside a single turn, which is
+# exactly why a real taste shown by behaviour cannot get in. Asking for Mili once
+# is not evidence of anything. Asking for Mili four times across three days is,
+# and no single turn can see that.
+#
+# So repetition is counted where it already exists: the activity log. `mini` rows
+# carry the search terms DJ Tiwa chose, the `turn` row after one carries the
+# author, and pairing them is the same trick `dispatchbench` uses to mine labels.
+# No new table, and the evidence for every fact this writes is rows you can read
+# on the activity page.
+TASTE_MIN = 3        # times a person must ask before a pattern is worth one call
+TASTE_LOOKBACK = 400  # log rows
+
+_DJ_LOG = re.compile(r"^dj\(.*?\) -> (\{.*\})$", re.S)
+
+
+def unsettled_asks(db, n: int = TASTE_LOOKBACK) -> dict:
+    """Who asked for what music since the last taste pass. {author: [terms]}.
+
+    Only `play` and `queue` count. A skip or a stop is an opinion about the song
+    that is on, not a request for one.
+    """
+    import ast  # stdlib, literals only — the log holds a repr'd dict
+
+    since = db.execute(
+        "SELECT COALESCE(MAX(id), 0) FROM log WHERE kind = 'taste'").fetchone()[0]
+    asks, pending = {}, []
+    for kind, text in db.execute(
+        "SELECT kind, text FROM log WHERE id > ? AND kind IN ('mini','turn') "
+        "ORDER BY id LIMIT ?", (since, n)
+    ):
+        if kind == "mini":
+            m = _DJ_LOG.match(text)
+            if m:
+                try:
+                    out = ast.literal_eval(m.group(1))
+                except (ValueError, SyntaxError):
+                    out = {}
+                terms = str(out.get("terms") or "") if isinstance(out, dict) else ""
+                # a link is never a taste, for the same reason it is never an
+                # entity — "the song at Qdo3-hoAdzE" is not a thing anyone likes
+                if out.get("action") in ("play", "queue") and terms \
+                        and not terms.startswith("http"):
+                    pending.append(terms)
+            continue
+        who = text.split(":", 1)[0].strip()
+        if pending and who and who != TIWA:
+            asks.setdefault(who, []).extend(pending)
+        pending = []
+    return asks
+
 
 def unreflected(db, n: int = 10) -> list:
     """Episodes she has lived but not yet thought about. Newest first.

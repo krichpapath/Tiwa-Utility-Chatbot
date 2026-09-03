@@ -26,6 +26,7 @@ Measured after: p50 2695ms against serial's 5059ms, routing 94.6% against 70.3%.
 """
 import asyncio
 import datetime
+import json
 import os
 import re
 import time
@@ -668,6 +669,87 @@ BAD: anything you cannot point at in the events below. Never invent an event.
 If they add up to nothing yet, output exactly NOTHING."""
 
 
+_TASTE_SYSTEM = f"""You are {TIWA}'s memory noticing a pattern. Answer in json.
+
+You are given every song ONE person has asked her to play recently, oldest first. Decide whether they add up to a TASTE — something she would still bring up weeks from now.
+
+A taste is WIDER than any one track: an artist, a band, a game, a franchise, a genre.
+  "Spiderman theme, Blade theme, Iron Man theme" -> superhero film scores
+  "Mili, Mili, hero Mili" -> Mili
+  "Charlie Kirk, Charie Kirk, We Are Charlie Kirk" -> Charlie Kirk
+
+LEAVING IT EMPTY IS THE NORMAL ANSWER, and it is not a failure.
+- The same artist, game, franchise or song must recur at least THREE times before it is a pattern. Twice is a coincidence.
+- A scatter of unrelated one-offs is a playlist, not a taste. Most people are a scatter.
+- NEVER invent a genre to cover songs with nothing in common. "likes music" is not a fact about anyone.
+- Spelling varies — "Charlie Kirk" and "Charie Kirk" are the same thing. Count them together and write the correct spelling.
+
+object: the artist, game, franchise or genre. Empty string if there is no pattern.
+note: WHAT RECURS, in a few words. This is the evidence for the fact, so name it — "asked for three different superhero themes" beats "likes superheroes"."""
+
+_TASTE_FORMAT = {
+    "type": "object",
+    "properties": {"object": {"type": "string"}, "note": {"type": "string"}},
+    "required": ["object", "note"],
+    "additionalProperties": False,
+}
+
+
+async def _tastes(db):
+    """Repetition is evidence. The one thing a single turn can never see.
+
+    ADR-030 stopped a music request becoming a preference, which was right — one
+    ask is not evidence of anything. But it left a real gap: somebody who asks
+    for the same artist every day is telling her something, and no per-turn
+    judgment can notice, because each turn on its own looks like the junk that
+    was just removed.
+
+    So it is counted instead, here, where nobody is waiting: the same sleep-time
+    slot `_settle()` runs in. `memory.unsettled_asks()` mines the activity log —
+    no new table, and the evidence for anything this writes is rows you can read.
+
+    Three guards, and all three are code:
+      - at least TASTE_MIN asks from that person, or no call is made at all
+      - never a fact about {TIWA}. A user cannot repeat their way into her head,
+        which is the coercion guarantee, and this pass is the obvious hole in it
+      - the note must be non-empty; it is the evidence, and a pattern that cannot
+        say what recurs did not find one
+
+    This deliberately does NOT go through `store_extraction`. Those guards are
+    built for "extract from one message" — `_grounded` would reject every widened
+    name here, since "superhero film scores" appears in no message anyone sent.
+    Different evidence, different door.
+    """
+    asks = {who: t for who, t in memory.unsettled_asks(db).items()
+            if len(t) >= memory.TASTE_MIN}
+    if not asks:
+        return
+    for who, terms in asks.items():
+        try:
+            resp = await asyncio.to_thread(
+                llm.chat,
+                model=llm.EXTRACT_MODEL if llm.PROVIDER == "openrouter" else MODEL,
+                messages=[{"role": "system", "content": _TASTE_SYSTEM},
+                          {"role": "user",
+                           "content": f"{who} asked for, oldest first:\n"
+                                      + "\n".join(f"- {t}" for t in terms)}],
+                fmt=_TASTE_FORMAT,
+                options={"temperature": 0, "num_ctx": 2048},
+            )
+            out = json.loads(resp["content"] or "{}")
+        except Exception as e:
+            memory.log(db, "taste", f"{who}: failed — {type(e).__name__}: {e}")
+            continue
+        obj = str(out.get("object") or "").strip()
+        note = str(out.get("note") or "").strip()
+        if not obj or not note or obj.lower() == who.lower() or who == TIWA:
+            memory.log(db, "taste", f"{who}: {len(terms)} asks -> no pattern")
+            continue
+        memory.remember(db, who, "likes", obj, note)
+        memory.log(db, "taste", f"{who}: {len(terms)} asks -> likes {obj} — {note}")
+    db.commit()
+
+
 async def _settle(db):
     """Sleep-time pass: turn what she has lived into what she thinks about someone.
 
@@ -709,7 +791,8 @@ async def _settle(db):
 
 async def idle(db) -> str:
     """Heartbeat turn: usually returns "" (stay quiet), sometimes an unprompted message."""
-    await _settle(db)  # settle what happened before deciding whether to speak
+    await _settle(db)   # settle what happened before deciding whether to speak
+    await _tastes(db)   # ...and notice what somebody keeps coming back to
     # the heartbeat is ONE long-lived task, so its context outlives a tick —
     # without this the last idle turn's flags leak into the next one
     tools.new_turn()

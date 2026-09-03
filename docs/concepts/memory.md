@@ -135,6 +135,42 @@ time** — a judgment call it always declines. So `worthbench` fails if the bar 
 a real fact, and `extractbench` caught the prompt swinging too far once already:
 "write nothing" started dropping turns that were *both* a request and a fact.
 
+### Repetition is the third kind of evidence {#taste-pass}
+
+The two above are judged inside one turn, which is exactly why a taste shown by
+**behaviour** cannot get in. Asking for Mili once is evidence of nothing. Asking
+for Mili four times across three days is — and no single turn can see it.
+
+So it is counted where the evidence already lives: `pipeline._tastes()` runs on
+the heartbeat beside [`_settle()`](#reflection), mines the activity log, and
+writes at most one fact per person.
+
+```
+Tycoon asked for: Spiderman · Judas · Blade theme · Iron Man theme ·
+                  Charlie Kirk · Charie Kirk · We Are Charlie Kirk · Miku · …
+        ->  Tycoon likes Charlie Kirk
+            [asked for Charlie Kirk three times (with a spelling variation)]
+```
+
+No new table. `mini` rows carry the search terms DJ Tiwa chose, the `turn` row
+after one carries the author, and pairing them is the same trick
+`dispatchbench` uses — so the evidence for anything it writes is rows you can
+read on the [activity page](../surfaces/panel.md).
+
+Four things are code, not prompt:
+
+| | |
+|---|---|
+| **at least 3 asks** | or no model is called at all. Twice is a coincidence |
+| **never about her** | a user must not be able to repeat their way into her head. This pass is the one door that could open the [coercion guarantee](guards.md), so it is nailed shut |
+| **the note is the evidence** | a conclusion that cannot name what recurred did not find a pattern, it guessed one |
+| **a watermark** | a `kind='taste'` log row settles everything before it, or she re-concludes the same fact 28 times a day |
+
+It deliberately does **not** go through `store_extraction`. Those guards are built
+for *"extract from one message"*, and `_grounded` would reject every widened name
+— "superhero film scores" appears in no message anyone sent. Different evidence,
+different door. `tests/tastebench.py`.
+
 **Every rejection is logged** — `kind='memory'` rows naming the fact and the guard
 that killed it. Six guards drop silently otherwise, which makes a working filter
 and one quietly eating true facts look identical from outside. You cannot tune a

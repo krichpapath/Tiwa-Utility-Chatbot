@@ -1062,3 +1062,65 @@ with nothing else in them, and this ADR makes that stricter, not looser. That ne
 to ASK, which is a different change. And ranking facts by how often they are actually
 retrieved is still deferred — the drop log finally has something in it now, so there will
 be data to do it with.
+
+
+## ADR-031 · Repetition is evidence, counted where it already lives {#adr-031}
+
+**Status.** Done, and it is the half [ADR-030](#adr-030) knowingly left open.
+
+**Context.** ADR-030 gave a taste exactly two ways in: they SAID it, or the note says
+why it matters. Both are judged inside a single turn — and that is precisely why a real
+taste shown by *behaviour* cannot get in. Somebody who asks for the same artist every day
+is telling her something, but each of those turns, on its own, looks exactly like the junk
+ADR-030 had just removed. Judged one at a time, the honest answer to every one of them is
+"nothing".
+
+**Options.**
+
+1. **Loosen the per-turn rule.** No — that is the convert rule again, and it has already
+   been tried and measured.
+2. **Count occurrences in a new table.** A `sightings` table, a counter per (person,
+   thing), promote at N. Correct, and it stores a second copy of something already on
+   disk.
+3. **Count what is already logged.** `mini` rows carry the search terms DJ Tiwa chose;
+   the `turn` row that follows one carries the author. Pairing them is the same trick
+   `dispatchbench` uses to mine its labels.
+
+**Decision.** Option 3, on the heartbeat, beside `_settle()` — the sleep-time slot that
+already exists and is already described as thinking time bought and thrown away. Nobody
+is waiting, so the pass is free in the only sense that matters.
+
+**Consequences.**
+
+The evidence for every fact it writes is rows you can read on the activity page, which is
+a stronger property than it sounds: *"asked for Charlie Kirk three times (with a spelling
+variation)"* can be checked against the log by hand.
+
+Four guards, all code:
+
+- **≥ 3 asks or no call at all.** Twice is a coincidence, and a model asked to find a
+  pattern in two things will find one.
+- **Never a fact about her.** This pass is the one door that could open the coercion
+  guarantee — a user repeating "play BLACKPINK" enough times must not become a belief of
+  hers. `tastebench` drives exactly that attack.
+- **The note is the evidence**, so an empty one means no row. A conclusion that cannot
+  name what recurred did not find a pattern, it guessed one.
+- **A watermark**, as a `kind='taste'` log row. Without it she re-concludes the same fact
+  on all 28 heartbeat ticks a day.
+
+It does **not** go through `store_extraction`, and that is deliberate rather than lazy.
+Those guards are built for "extract from one message": `_grounded()` would reject every
+widened name here, because *"superhero film scores"* appears in no message anyone sent.
+Different evidence needs a different door — but the door is narrow, and the four guards
+above are what make it so.
+
+**Measured.** On her real log it read 11 scattered asks from one person and wrote one
+fact — `Tycoon likes Charlie Kirk`, from three asks including a misspelling — while
+correctly declining to invent a genre for the one-off superhero themes. `tastebench
+--live` is 5/5: a repeat becomes a taste, a spelling variation is counted together, three
+tracks from one franchise widen to the franchise, and both a scatter and a
+pattern-of-only-two write nothing.
+
+**Still not fixed.** `Krich` has no facts. He asks for music and says almost nothing else,
+so nothing here helps — the answer is her ASKING, which is a different change and the
+more interesting one.
