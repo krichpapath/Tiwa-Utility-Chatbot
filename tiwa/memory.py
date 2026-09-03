@@ -421,17 +421,27 @@ def idle_fuel(db, n: int = 5) -> str:
 _EXTRACT_SYSTEM = f"""You are {TIWA}'s private memory judgment. Read one chat exchange and decide what she keeps. Output JSON only.
 
 - memories: durable facts linking two named entities (people, topics, things): who likes/hates/knows/did what. Short names. Skip small talk.
-- A ONE-OFF ACTION IS NOT A FACT. "asked for", "requested", "wanted to hear", "ขอ", "อยากฟัง" describe a moment, not a person. They were true for ten seconds. Ask: would she still bring this up weeks from now, to someone else?
-  But do NOT just drop it — CONVERT it. An action usually reveals a durable taste underneath, and that taste is the memory:
-    "เปิดเพลง Mili หน่อย" -> {{"subject": "Tycoon", "relation": "likes", "object": "Mili"}}
-    NOT {{"subject": "Tycoon", "relation": "requested", "object": "Hero - Mili"}}
-    "ขอเพลงจากเกม Blue Archive" -> Tycoon likes Blue Archive. NOT "Tycoon requested เพลงจากเกม Blue Archive".
-  Prefer the WIDER name: the artist, the game, the genre — not the one track. One track is this afternoon; the artist is who they are.
-  If the action reveals nothing durable ("play something", "skip", "อะไรก็ได้"), write no memory at all.
-- THE NOTE IS THE BEST PART, and it has ONE job: the detail that changes how she treats them.
-  It is NOT the request the fact came from, and NOT your reasoning about it. Leave it EMPTY unless they said something worth quoting.
-  BAD, never do this: "requested ATLAS-The Score" · "requested a specific track, suggesting a taste for this artist" · "asked for it twice"
-  GOOD: "mains nobody good, blames the team" · "goes by Tycoon on Discord" · "only listens to it while gaming"
+- A ONE-OFF ACTION IS NOT A FACT, AND IT IS NOT A PREFERENCE EITHER. "asked for", "requested", "wanted to hear", "ขอ", "อยากฟัง", "เปิด", "เล่น" describe a moment, not a person. They were true for ten seconds.
+  WRITE NOTHING AT ALL.
+    "เปิดเพลง Mili หน่อย" -> no memory.
+    "ขอเพลงจากเกม Blue Archive" -> no memory.
+    "play Spiderman theme" -> no memory.
+  Do NOT turn it into a taste. That was tried, and in three days it wrote twelve "<person> likes <song>" rows, one per request, not one of them true — asking to hear something once is not liking it. The song played and the activity log says so; that is the record, and her beliefs are not a log.
+  THIS RULE COVERS THE REQUEST, NOT THE MESSAGE. A message is very often both, and dropping the whole turn because part of it was a request throws away the half that mattered:
+    "กำลังเล่น Marvel Rivals หาเพลงเปิดให้หน่อย ไอภพกำลังเล่นBlade" -> nothing about the song, but ไอภพ plays Blade IS a fact, and so is Krich plays Marvel Rivals.
+    "play venom - eminem, my cousin Steven showed me it" -> nothing about venom, but Krich cousin of Steven IS a fact.
+  Read past the request and ask what else they told you.
+- A PREFERENCE NEEDS EVIDENCE, and there is exactly one kind: THEY SAID IT. "ชอบเพลงนี้มาก", "Mili is my favourite", "I've been into them for years", "เกลียดเพลงนี้" — that is a person telling you who they are, and it is worth a row.
+  Wanting to hear something is not saying you like it. Playing something twice is not saying it either.
+- THE NOTE IS WHAT MAKES A TASTE REAL. Every likes / loves / hates / interested-in MUST carry one: the detail that changes how she treats them. No note means no memory — code drops it and logs the drop.
+  It is NEVER the request the fact came from, and never your reasoning about it. Those are dropped in code too.
+  BAD, dropped: "requested ATLAS-The Score" · "asked for it twice" · "suggests a taste for this artist" · "played it for them"
+  GOOD: "mains nobody good, blames the team" · "goes by Tycoon on Discord" · "only listens to it while gaming" · "has seen them live twice"
+  WHEN THEY GAVE YOU THE REASON IN THE SAME BREATH, THE NOTE IS ALREADY WRITTEN — copy it. Someone who states a taste usually says why in the next clause, and dropping that clause is how a real fact gets thrown away:
+    "กูเกลียดเพลงลูกทุ่งมาก ฟังแล้วปวดหัว" -> hates เพลงลูกทุ่ง, note "ฟังแล้วปวดหัว"
+    "Mili is my favourite, I've listened to them for years" -> likes Mili, note "has listened to them for years"
+  A stated taste whose reason you leave blank is a fact you have thrown away. Look again before you leave it empty.
+  Every OTHER relation — real name, friend of, cousin of, plays, father of — needs no note. A relationship justifies itself; a taste has to.
 - A URL, a video id, a file name or a raw link is NEVER an entity, for the same reason a date is not. "the song at gVQzCR5h4Y8" is not a thing anyone likes. If they linked something and you cannot name it, write no memory at all.
 - DIRECTION IS NOT OPTIONAL. subject = the one doing or feeling it. object = what it points at. Read every fact back as "subject relation object" — if it sounds absurd, you swapped them.
   "my cousin Steven plays guitar" ->
@@ -486,6 +496,45 @@ _EXTRACT_FORMAT = {
 _STANCES = {"like", "likes", "love", "loves", "hate", "hates", "prefer", "prefers",
             "think", "thinks", "want", "wants", "enjoy", "enjoys", "know", "knows",
             "believe", "believes", "trust", "trusts", "misses", "miss"}
+
+# Relations that assert a PREFERENCE — the cheapest thing in the world to claim
+# and the hardest to check. Measured on the real graph 2026-08-25: 15 of 22 facts
+# were `likes`, 12 of them a song somebody had asked for once, and 19 of 22
+# carried no note at all. See ADR-030.
+_TASTES = {"likes", "like", "loves", "love", "hates", "hate", "enjoys", "enjoy",
+           "prefers", "prefer", "into", "interested", "favourite", "favorite",
+           "fan", "ชอบ", "รัก", "เกลียด"}
+
+# A note that describes the REQUEST the fact came from is not a reason, it is the
+# request wearing a hat. This exact shape has been caught twice now:
+# `Tycoon likes ATLAS [requested ATLAS-The Score]`. Treated as no note at all.
+_NOT_A_REASON = ("request", "asked for", "asked her", "asked him", "wanted to hear",
+                 "wanted her", "played it", "playing it", "put it on", "suggest",
+                 "indicat", "implies", "ขอ", "อยากฟัง", "สั่ง")
+
+# Preference words a PERSON uses about themselves or someone else. If one of
+# these is literally in what they said, the taste is EVIDENCED and needs no note
+# — they told her, and that is the whole bar.
+#
+# This exists because requiring a note was a proxy for "is there evidence", and a
+# proxy gets it wrong at the edges: factbench caught "Mint hates coffee btw"
+# being dropped for having no reason attached. There is nothing to justify — the
+# person said it.
+_TASTE_WORDS = ("like", "love", "hate", "favourite", "favorite", "into ",
+                "enjoy", "prefer", "fan of", "obsessed", "sick of", "tired of",
+                "ชอบ", "รัก", "เกลียด", "ปลื้ม", "ติดใจ", "เบื่อ")
+# ..."I'd like you to play X" is a request wearing a preference word. Stripped
+# before the check, or every polite music ask reads as a stated taste.
+_POLITE = ("would like", "'d like", "d like", "would love", "'d love")
+
+
+def _stated_taste(said: str) -> bool:
+    """Did a person actually use a preference word, or is this the model
+    inferring one from a request?"""
+    low = (said or "").lower()
+    for p in _POLITE:
+        low = low.replace(p, " ")
+    return any(w in low for w in _TASTE_WORDS)
 
 
 def _grounded(value: str, source: str) -> bool:
@@ -598,6 +647,28 @@ def store_extraction(db, user: str, data: dict, tiwa_reply: str = "", said: str 
             continue
         m = _role_swap(m, user, said)
         subj, rel, obj = m["subject"], m["relation"], m["object"]
+        # A TASTE HAS TO SAY WHY. Prompts reduce, code decides — and the prompt
+        # alone did not: the previous wording told the model to leave the note
+        # empty unless there was something to quote, and it obliged on 19 facts
+        # out of 22. A bare "X likes Y" is unfalsifiable, unusable, and it is
+        # what a music request turns into when nobody is checking.
+        #
+        # Her OWN stances are exempt: those already pass three harder guards
+        # (from_tiwa_own_words, _STANCES, and grounded in her own reply), and the
+        # evidence for them is the sentence she just said.
+        if subj != TIWA and rel.strip().lower().split()[0] in _TASTES:
+            note = (m.get("note") or "").strip()
+            if any(w in note.lower() for w in _NOT_A_REASON):
+                note = ""  # the request restated is not a reason
+            # Two ways to earn the row, and either is enough: they SAID it, or
+            # the model can say why it matters. "Mint hates coffee btw" needs no
+            # justification; "likes Judas" inferred from `play Judas` needs one
+            # and will never have a real one.
+            if not note and not _stated_taste(said):
+                _drop(db, m, "a taste nobody stated and no reason for it — "
+                             "one ask is not a preference")
+                continue
+            m["note"] = note
         # Not the speaker and not her: "first heard about Krich" while Krich is the
         # one talking is a wasted turn_context line, and everything he said about
         # himself is already a fact she can see. Episodes are for third parties.

@@ -214,6 +214,7 @@ assert len(eps()) == 1, eps()
 # a stance on a new object is still not an event on its own
 memory.store_extraction(ep_db, "Krich", {
     "memories": [{"subject": "Steven", "relation": "likes", "object": "durian",
+                  "note": "eats it straight from the shell",
                   "from_tiwa_own_words": False}],
     "episode": None,
 }, said="Krich Steven likes durian")
@@ -222,6 +223,7 @@ assert len(eps()) == 1, eps()
 # ...but the same belief FLIPPING is
 memory.store_extraction(ep_db, "Krich", {
     "memories": [{"subject": "Steven", "relation": "hates", "object": "durian",
+                  "note": "changed his mind after the trip",
                   "from_tiwa_own_words": False}],
     "episode": None,
 }, said="Krich actually Steven hates durian now")
@@ -231,6 +233,7 @@ assert eps()[-1] == "Steven hates durian now — likes before", eps()
 # an instrument and hate it
 memory.store_extraction(ep_db, "Krich", {
     "memories": [{"subject": "Steven", "relation": "hates", "object": "guitar",
+                  "note": "says his hands hurt",
                   "from_tiwa_own_words": False}],
     "episode": None,
 }, said="Krich Steven hates guitar")
@@ -299,7 +302,10 @@ turns = [
 rate_db = memory.connect(":memory:")
 for s, r, o in turns:
     memory.store_extraction(rate_db, "Krich", {
+        # a taste needs a reason now (ADR-030). This replay is about the episode
+        # RATE, not that rule, so the taste turns carry one.
         "memories": [{"subject": s, "relation": r, "object": o,
+                      "note": "he brings it up constantly" if r in ("likes", "hates") else "",
                       "from_tiwa_own_words": False}],
         "episode": None,
     }, said=f"Krich {s} {r} {o}")

@@ -73,7 +73,7 @@ more than routine gates:
 |---|---|
 | `extractbench.py` | Extraction quality per provider — direction errors, phantom entities, JSON leaking into names. `--think` A/Bs model reasoning on the write pass ([ADR-019](../reference/decisions.md#adr-019)) |
 | `factbench.py` | Confabulation: 7 invented facts → 0 once the code guard landed. Defaults to ollama — pass `openrouter` to run it on the API path |
-| `worthbench.py` | Whether a fact is worth a row, not just true. The convert rule (a music ask becomes a durable taste), and the drop log — five kinds of junk in, five reasons out, nothing written. Partly offline |
+| `worthbench.py` | Whether a fact is worth a row, not just true. A music ask writes **nothing**, a taste needs evidence (they said it, or a real reason), and the drop log — five kinds of junk in, five reasons out, nothing written. Partly offline. Read its docstring: this bench asserted the opposite rule for three days |
 | `moodbench.py` | The anger arc across turns, and that naming her mood made it worse |
 | `episodebench.py` | Episode noise vs real events after raising the bar |
 | `outagebench.py` | A dead provider costs her a turn, never her voice — all three turn call sites, plus the heartbeat surviving three outages. Offline |

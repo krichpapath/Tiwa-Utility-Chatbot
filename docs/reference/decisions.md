@@ -781,6 +781,12 @@ that changes a belief, and a runtime writer would need its own guard chain first
 
 ## ADR-027 · A fact has to be worth a row, not just true {#adr-027}
 
+!!! warning "The convert rule below was wrong — see [ADR-030](#adr-030)"
+    The axis this ADR added is right and stands. Its *mechanism* — convert a
+    one-off action into the taste underneath rather than dropping it — turned
+    out to be a fact factory, measured on the real graph three days later.
+    A request writes nothing now.
+
 **Status.** Built and measured live. `tests/worthbench.py`.
 
 **Context.** The extractor tested one thing: is this fact **true**? Every guard in
@@ -979,3 +985,80 @@ nothing dropping from 12.5% to 6.2%. Neither describes her, so the bench now als
 
 **What stayed precise.** `_DECK_Q`, because it *prevents* an action. A guess that acts is
 unbounded; a guess that declines costs a repeated question.
+
+
+## ADR-030 · A request is not a preference, and a taste needs evidence {#adr-030}
+
+**Status.** Done. [ADR-027](#adr-027)'s convert rule is withdrawn; its axis stands.
+
+**Context.** ADR-027 added the right question — *is this fact worth a row?* — and answered
+it with the wrong mechanism. Refusing outright was the failure this project had already
+hit once (episodes were asked "would this matter in a month?" and the model answered null
+100% of the time), so the rule said: **do not drop a one-off action, CONVERT it** into the
+durable taste underneath, preferring the wider name — the artist, not the track.
+
+The model obeyed the first half and ignored the second. Three days of real traffic later,
+the graph:
+
+| | Jul 31 – Aug 22 (3 weeks) | **Aug 23 – 25 (3 days)** |
+|---|---|---|
+| facts written | 11 | **13** |
+| carrying a note | 3 | **0** |
+| shape | names, friendships, games | 12 × `Tycoon likes <a song he asked for once>` |
+
+15 of 22 facts were `likes`. 19 of 22 had no note. The drop log — the instrument ADR-027
+added to make the bar visible — held **one row**, because almost nothing was being
+rejected. And a second rule of mine made it worse: *"Leave [the note] EMPTY unless they
+said something worth quoting"*. So the graph filled with unjustifiable preferences and
+then could not explain any of them.
+
+What she was handed about one person, every turn: twelve lines, seven of them songs he
+had requested once, with `TURN_FACTS = 12` about to start pushing the real ones out.
+
+**Decision.** Three changes, in the order they matter.
+
+1. **A request writes nothing.** Not a taste, not a weaker taste. The song played and the
+   activity log says so; her beliefs are not a log.
+2. **A taste needs evidence, and there are exactly two kinds.** Either they SAID it — a
+   preference word from a person, checked in code against their actual message — or the
+   note says why it matters. `likes` / `hates` / `interested in` with neither is dropped
+   and logged. Every other relation (`real name`, `plays`, `cousin of`) needs neither: a
+   relationship justifies itself, a taste has to.
+3. **Her own stances are exempt.** They already pass three harder guards, and the evidence
+   for them is the sentence she just said.
+
+**Consequences.**
+
+The note requirement came first and was a *proxy* for evidence. `factbench` caught the
+proxy failing at the edge: *"Mint hates coffee btw"* was dropped for carrying no reason,
+when the person had just said it out loud. So the code now measures the thing itself —
+`_stated_taste()` looks for a preference word in what they typed, with `"I'd like you to
+play X"` stripped first, because every polite music ask is phrased that way.
+
+**The prompt swung too far before it settled, and only the benches showed it.** With
+"WRITE NOTHING AT ALL" in front of it, the extractor started dropping whole turns that
+were *both* a request and a fact — `extractbench` went 8/8 → 6/8, losing
+*"หาเพลงเปิดให้หน่อย ไอภพกำลังเล่นBlade"*, where the song is noise and *ไอภพ plays Blade* is
+not. The rule now says explicitly that it covers the request, not the message. Back to
+8/8.
+
+`worthbench` had to be rewritten, because it was asserting the rule being withdrawn — it
+required a music ask to *become* a taste. Its docstring keeps the history, since a bench
+that was confidently wrong for three days is worth remembering. Its `keeps()` now makes
+two attempts per case, not out of leniency but to tell "the bar is wrong" from "the model
+wobbled" — measured while writing it, a Thai stated preference landed 2 runs in 3.
+
+**Measured after.** `factbench`: 0 invented facts, 0 real facts missed.
+`extractbench`: 8/8 twice. `worthbench`: 6/6 music asks write nothing, 4 bare tastes
+dropped with reasons logged, structural facts and stated preferences all survive.
+22 benches green.
+
+**The existing graph was cleaned to match**, backed up first: 22 facts → 8, 24 entities →
+10. Fourteen went, twelve of them one-per-request from the convert era. Two predated it
+and were the same shape; they are in the backup if they turn out to have been real.
+
+**Not fixed by this.** `Krich` still has no facts at all — his turns are music requests
+with nothing else in them, and this ADR makes that stricter, not looser. That needs her
+to ASK, which is a different change. And ranking facts by how often they are actually
+retrieved is still deferred — the drop log finally has something in it now, so there will
+be data to do it with.

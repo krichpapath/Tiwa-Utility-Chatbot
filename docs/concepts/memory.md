@@ -104,19 +104,36 @@ opens knowing you, with no tool call.
 and useless a week later, and her graph filled with rows like it until they
 crowded the good facts past the `TURN_FACTS` cap.
 
-The rule now is **convert, don't refuse**: a one-off action becomes the durable
-taste underneath it, and prefers the wider name — the artist, not the track.
+!!! danger "The first version of this rule was a fact factory"
+    It said **convert, don't refuse**: a one-off action became the durable taste
+    underneath it. In three days that wrote twelve `<person> likes <song>` rows,
+    one per music request, none of them true — and 19 of 22 facts in the whole
+    graph carried no note. Withdrawn: [ADR-030](../reference/decisions.md#adr-030).
 
-| they said | stored |
-|---|---|
-| `play venom - eminem` | `Maa Yan likes Eminem` |
-| `ขอเพลงจากเกม Blue Archive` | `Krich likes Blue Archive` |
-| `เปิดเพลงอะไรก็ได้` | nothing — it reveals nothing |
+**A request writes nothing.** Not a taste, not a weaker taste. The song played and
+the activity log says so; her beliefs are not a log.
 
-Convert rather than skip on purpose. Episodes were once asked *"would this matter
-in a month?"* and the model answered null **100% of the time** — a judgment call
-it always declines. Giving it something to write instead of something to withhold
-is what stops the same collapse here. `tests/worthbench.py` measures both halves.
+**A taste needs evidence**, and there are exactly two kinds of it:
+
+| they said | stored | why |
+|---|---|---|
+| `play venom - eminem` | nothing | a request is not a preference |
+| `ขอเพลงจากเกม Blue Archive` | nothing | same |
+| `Mint hates coffee btw` | `Mint hates coffee` | **they said it** — a preference word, checked in code |
+| `กูเกลียดเพลงลูกทุ่งมาก ฟังแล้วปวดหัว` | `Tycoon hates เพลงลูกทุ่ง [ฟังแล้วปวดหัว]` | said it, and gave the reason |
+| `Mili is my favourite, listened for years` | `Krich likes Mili [has listened to them for years]` | said it |
+| a `likes` with no note and nobody saying it | nothing, logged | this is the one that filled the graph |
+
+`likes` / `hates` / `interested in` need one of the two. **Every other relation
+needs neither** — `real name`, `plays`, `cousin of`: a relationship justifies
+itself, a taste has to. Her own stances are exempt; the evidence is the sentence
+she just said, and they already pass three harder guards.
+
+The refusal failure is still the worse one, and still guarded. Episodes were once
+asked *"would this matter in a month?"* and the model answered null **100% of the
+time** — a judgment call it always declines. So `worthbench` fails if the bar eats
+a real fact, and `extractbench` caught the prompt swinging too far once already:
+"write nothing" started dropping turns that were *both* a request and a fact.
 
 **Every rejection is logged** — `kind='memory'` rows naming the fact and the guard
 that killed it. Six guards drop silently otherwise, which makes a working filter
