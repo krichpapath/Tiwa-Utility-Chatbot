@@ -166,6 +166,52 @@ Four things are code, not prompt:
 | **the note is the evidence** | a conclusion that cannot name what recurred did not find a pattern, it guessed one |
 | **a watermark** | a `kind='taste'` log row settles everything before it, or she re-concludes the same fact 28 times a day |
 
+### ...and when there is nothing to count, she asks {#the-asking}
+
+Counting repetition needs something to count. `Krich` talked to her for a month
+and the graph held **not one fact about him** — his turns are music requests and
+he never says anything about himself. No pattern, nothing stated, and both
+evidence rules above come up empty forever.
+
+She has to ask, and she could not, because nothing told her there was a gap:
+`turn_context()` is silent when it knows nothing, so a stranger and an old friend
+hand her the same empty string. That is the [empty-deck bug](action-state.md#empty-deck)
+one layer up — *saying nothing on a quiet turn* left her with zero state on the
+one turn it mattered.
+
+So `memory.should_ask()` decides, in code, and the state block tells her:
+
+| | |
+|---|---|
+| **under 3 facts** | two facts is still a stranger |
+| **not for another 8 of THEIR turns** | a question every turn is an interview, which the persona rules already forbid by name. A busy channel must not burn down a quiet person's timer |
+| **never herself** | she does not interview herself |
+| **a declined nudge costs nothing** | the cooldown counts questions she *asked*, not nudges she was given |
+
+That last one is the mechanism working. She ignores the nudge on a bare `hey`
+or a `skip`, and she is right to — *"what do you do for work?"* mid-skip is not a
+friend talking. Spending her one chance in eight turns on a turn that could never
+have worked is the bug it avoids.
+
+**Naming the shape of the question is what made it work.** The first version said
+*"ask something real about themselves"* and measured 3/5 — all three about the
+**moment**: *"มึงเบื่ออะไรล่ะ"*, *"what's up?"*, *"skip what?"*. That is the reflex
+filler the rules already forbid, with a question mark on it. The nudge now lists
+the shape — `มึงทำงานอะไร`, `เล่นเกมอะไรอยู่`, `who do you actually play with` —
+and names the filler it must not be.
+
+Measured over six turns as a stranger:
+
+```
+Krich: เปิดเพลง Mili ให้หน่อย
+ทิวา:  อือ เปิดให้แล้ว Mili เนี่ย มึงชอบเพลงไหนของเค้าเป็นพิเศษ
+       (which of his songs do you like in particular?)
+       ...and no nudge again for the next five turns
+```
+
+...and the loop closes, because the answer is a *stated* taste with the reason
+attached: `ชอบ hero มากสุด ฟังมาตั้งแต่ ม.ปลาย` → `Krich likes hero — ฟังมาตั้งแต่ ม.ปลาย`.
+
 It deliberately does **not** go through `store_extraction`. Those guards are built
 for *"extract from one message"*, and `_grounded` would reject every widened name
 — "superhero film scores" appears in no message anyone sent. Different evidence,

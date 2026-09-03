@@ -1124,3 +1124,63 @@ pattern-of-only-two write nothing.
 **Still not fixed.** `Krich` has no facts. He asks for music and says almost nothing else,
 so nothing here helps — the answer is her ASKING, which is a different change and the
 more interesting one.
+
+
+## ADR-032 · She asks, because some people never say anything {#adr-032}
+
+**Status.** Done. The last of the three memory gaps, and the only one no rule about
+*storing* could have closed.
+
+**Context.** [ADR-030](#adr-030) decides what to keep from what someone says.
+[ADR-031](#adr-031) counts what they repeat. Both are useless against a person who does
+neither: `Krich` had talked to her for a month, and the graph held **zero facts about
+him**, because every one of his turns is a music request with nothing else in it. Nothing
+stated, no pattern to count. Under the rules as written, she was never going to know one
+thing about the person who owns her.
+
+The prompt already told her to ask when she wanted to know something. She never did — and
+the reason turned out to be the same bug as the empty deck. `turn_context()` returns `""`
+when it knows nothing, so a stranger and an old friend hand her **the identical silence**.
+She had no way to notice the gap, so she never filled it.
+
+**Decision.** Tell her, in code, on the turns where it is true. `memory.should_ask()`
+gates it; the question itself is entirely hers.
+
+**Consequences.**
+
+Four guards, all code:
+
+- **Under `KNOW_LITTLE` (3) facts.** Two facts is still a stranger.
+- **Not again for `ASK_EVERY` (8) of THEIR turns.** A question every turn is an interview,
+  which the persona rules forbid by name — *"แล้วมึงล่ะ"*, *"what about you?"*. The
+  cooldown counts that person's turns, so a busy channel cannot burn down a quiet
+  person's timer.
+- **Never about herself.**
+- **A declined nudge costs nothing.** The cooldown counts questions she *asked*, not
+  nudges she was given.
+
+That last guard came out of watching it work. She ignores the nudge on a bare `hey` and
+on `skip` — and she is **right** both times; *"what do you do for work?"* mid-skip is not
+a friend talking. Burning her one chance in eight turns on a turn that could never have
+worked was the real bug, and the fix was to stop treating a nudge as an ask. `_is_question()`
+is deliberately over-eager, because a false positive there makes her ask *less* often.
+
+**Naming the shape of the question is what made it work at all.** The first version said
+*"ask ONE real question about themselves"* and sat mid-paragraph. Measured 3/5, and every
+one of the three was about the **moment** — *"มึงเบื่ออะไรล่ะ"*, *"what's up?"*,
+*"skip what?"*. That is precisely the reflex filler the rules above already forbid, with
+a question mark on it. The nudge now goes last in the block and lists the shape
+(`มึงทำงานอะไร`, `เล่นเกมอะไรอยู่`, `who do you actually play with`) while naming the
+filler it must not be.
+
+**Measured, six turns as a stranger:** she asked on turn 1 — *"Mili เนี่ย มึงชอบเพลงไหน
+ของเค้าเป็นพิเศษ"*, tied naturally to the song he had just asked for — and then said
+nothing more about it for five turns. And the loop closes: his answer is a *stated* taste
+with the reason attached, so `ชอบ hero มากสุด ฟังมาตั้งแต่ ม.ปลาย` stores as
+`Krich likes hero — ฟังมาตั้งแต่ ม.ปลาย`, and `ทำงานเป็น dev` stores as `Krich works as dev`
+with no note needed at all.
+
+**What this is not.** It is not a curiosity mini and it should not become one. The dead
+`ask` field on the dispatch router already recorded why — she is better at asking than a
+router is, and she has the whole conversation to ask from. Code decides *whether*; she
+decides *what*.

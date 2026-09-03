@@ -125,6 +125,18 @@ _DECK_Q = ("อะไรอยู่", "ชื่ออะไร", "เล่น
            "what are you playing")
 
 
+# Thai rarely writes "?", so a question mark alone misses most of hers. Biased
+# towards over-detecting on purpose: this only decides whether an ask-nudge
+# counted, and a false positive makes her ask LESS often, never more.
+_QUESTION_MARK = ("?", "ไหม", "มั้ย", "อะไร", "ยังไง", "ไหน", "ทำไม", "เหรอ",
+                  "ป่าว", "รึเปล่า", "หรือยัง", "ใคร")
+
+
+def _is_question(reply: str) -> bool:
+    """Did she actually ask them something?"""
+    return any(q in reply for q in _QUESTION_MARK)
+
+
 def _maybe_music(text: str) -> bool:
     """Might this be about music? A HINT, and only ever a hint.
 
@@ -518,6 +530,11 @@ async def respond(db, hist: list, author: str, text: str, images=(),
             memory.log(db, "mini", f"dj hit {ACT_TIMEOUT}s — replied without its verdict")
             playing = maybe_music
 
+    # She knows almost nothing about whoever this is, and nothing tells her so —
+    # turn_context() is silent when it is empty. Decided in code so it can be
+    # rate-limited; what she actually asks is hers.
+    ask_about = memory.should_ask(db, author)
+
     # what she is allowed to know she is doing, before she has the answer
     looking_up = ", ".join(t for n, t in jobs if n not in ACTS)
     # _state() decides her language in CODE, never by the model. The follow-up
@@ -531,6 +548,7 @@ async def respond(db, hist: list, author: str, text: str, images=(),
         dispatching_music=playing,
         looking_up=looking_up,
         voice_asked=want == "dj-only",
+        ask_about=ask_about,
     )
 
     spoken = asyncio.Event()  # nothing follows up before she has said the first thing
@@ -556,6 +574,17 @@ async def respond(db, hist: list, author: str, text: str, images=(),
         except asyncio.TimeoutError:
             memory.log(db, "mini", f"acts hit {ACT_TIMEOUT}s — replied without them")
     spoken.set()
+    if ask_about and _is_question(reply):
+        # THE COOLDOWN COUNTS QUESTIONS SHE ASKED, NOT NUDGES SHE WAS GIVEN, and
+        # that distinction is the whole mechanism working.
+        #
+        # She declines the nudge on turns where asking would be strange —
+        # measured, she ignored it on a bare "hey" and on "skip", and she was
+        # right both times: "what do you do for work?" mid-skip is not a friend
+        # talking. Burning the cooldown there would spend her one chance every
+        # eight turns on a turn that could never have worked. Declining now costs
+        # nothing and she gets another go on a turn with room in it.
+        memory.log(db, "ask", f"{author}: knows too little — she asked")
     memory.log(db, "turn", f"{author}: {text[:100]} -> {reply[:120]}",
                (time.perf_counter() - turn0) * 1000)
 
@@ -574,7 +603,7 @@ async def respond(db, hist: list, author: str, text: str, images=(),
 def _state(db, author: str, text: str, seen: str = "",
            blind: bool = False, extra: str = "",
            dispatching_music: bool = False, looking_up: str = "",
-           voice_asked: bool = False) -> str:
+           voice_asked: bool = False, ask_about: bool = False) -> str:
     """Everything the persona pass is told this turn, besides the persona itself.
 
     There is no inner brief on this branch. What the tool pass used to fetch
@@ -625,6 +654,29 @@ def _state(db, author: str, text: str, seen: str = "",
         "ashamed. You are not the one who did something wrong. Stay sharp while it "
         "is still going, and let it go once they do."
     )
+    if ask_about:
+        # The empty-deck fix, applied to people. `turn_context()` says NOTHING
+        # when it knows nothing, so a stranger and an old friend hand her the
+        # same silence and she has no way to notice the gap. Gated in code by
+        # memory.should_ask() — genuinely short of facts, and not again for
+        # another ASK_EVERY of their turns.
+        #
+        # LAST in the block on purpose, and specific on purpose. The first
+        # version sat mid-paragraph and said "ask something real about
+        # themselves"; measured 3/5, and all three were about the MOMENT —
+        # "มึงเบื่ออะไรล่ะ", "what's up?", "skip what?" — which is the reflex
+        # filler the rules above already forbid, not a question about a person.
+        # Naming the shape is what fixed it.
+        rules += (
+            f" One more thing, and it matters: you know NOTHING about {author}."
+            " Not their job, not what they play, not one person in their life."
+            " Fix that here — answer them first, then ask ONE thing about THEM."
+            " Not about this moment ('เบื่ออะไร', 'what's up', 'skip what') —"
+            " that is the filler above wearing a question mark. About their life:"
+            " มึงทำงานอะไร · เล่นเกมอะไรอยู่ · ชอบวงไหนเป็นพิเศษ · ไปเที่ยวไหนมาบ้าง"
+            " · who do you actually play with · what got you into this. Short, in"
+            " your voice, and something you would genuinely want the answer to."
+        )
     # `extra` is what the tool pass used to fetch with a `recall` call: facts
     # about third parties named in the message, read straight from sqlite.
     return "\n".join(x for x in (rules, auto, extra) if x)

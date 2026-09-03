@@ -201,6 +201,47 @@ def lookup(db, name: str) -> str:
 
 TURN_FACTS = 12  # ponytail: flat cap. Rank by recency when someone has 50.
 
+# THE OTHER HALF OF THE MEMORY PROBLEM, and the one nothing else can reach.
+# ADR-030 and ADR-031 both decide what to do with what someone SAYS. Neither
+# helps with a person who says nothing about themselves: Krich has talked to her
+# for a month and the graph holds not one fact about him, because his turns are
+# music requests with nothing else in them. There is no pattern to count and
+# nothing stated to keep.
+#
+# She has to ask. And she cannot decide to, because she is never told there is a
+# gap — `turn_context()` returns "" when it knows nothing, so a stranger and an
+# old friend produce the same silence. This is exactly the empty-deck bug in
+# `_doing()`: saying nothing on a quiet turn left her with zero state on the one
+# turn it mattered, and she filled the vacuum instead of noticing it. See ADR-032.
+KNOW_LITTLE = 3  # facts about someone before she stops being nudged to ask
+ASK_EVERY = 8    # of THEIR turns between nudges — she asks, she does not interview
+
+
+def should_ask(db, name: str) -> bool:
+    """Does she know so little about this person that she should ask them something?
+
+    Two conditions, both code. She must actually be short of facts, and she must
+    not have been nudged recently — a question every turn is an interview, which
+    the persona prompt already forbids by name ("แล้วมึงล่ะ", "what about you?").
+
+    The cooldown counts THEIR turns, not all turns: a busy channel must not burn
+    down a quiet person's timer.
+    """
+    if not name or name == TIWA:
+        return False
+    facts = lookup(db, name)
+    if not facts.startswith("no memory") and len(facts.splitlines()) >= KNOW_LITTLE:
+        return False
+    last = db.execute(
+        "SELECT COALESCE(MAX(id), 0) FROM log WHERE kind = 'ask' AND text LIKE ?",
+        (f"{name}:%",)).fetchone()[0]
+    if not last:
+        return True
+    theirs = db.execute(
+        "SELECT COUNT(*) FROM log WHERE kind = 'turn' AND id > ? AND text LIKE ?",
+        (last, f"{name}:%")).fetchone()[0]
+    return theirs >= ASK_EVERY
+
 
 def turn_context(db, user: str) -> str:
     """Per-turn automatic context: what she knows about whoever is talking, as
