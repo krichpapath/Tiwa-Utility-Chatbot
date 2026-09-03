@@ -109,8 +109,15 @@ imperative with a title after it. Four turns in one session, every one silent:
 | `Queue เพลง ビビデバ - BIBBIDIBA` | none | none |
 | `play tung tung tung sahur orchestra` | none | none |
 
-So `_MUSIC_VERB` now matches a verb at the **start** of the message. Anchored, because a
-bare `play` substring also matches *"my dad plays Warframe"* and would put on a random song.
+So the trigger matched a verb at the **start** of the message. Anchored, because a bare
+`play` substring also matches *"my dad plays Warframe"* and would have put on a random song.
+
+!!! note "Anchoring is gone — the veto moved"
+    That anchoring is what made her deaf to the bare word `skip`, four times in her own
+    log. `_maybe_music()` is greedy now and *"my dad plays Warframe"* does reach DJ Tiwa
+    — which answers `none`, so nothing plays. Measured in `djminibench --live`; it caught
+    DJ getting that exact sentence wrong on the first run, and the fix was DJ's prompt.
+    See [the swarm](the-swarm.md) and [ADR-029](../reference/decisions.md#adr-029).
 
 And the same session produced the mirror failure, which is worse:
 

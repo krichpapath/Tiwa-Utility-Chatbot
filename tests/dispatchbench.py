@@ -116,8 +116,7 @@ async def run(cases) -> list:
         raw = await minis.dispatch(db, c["author"], c["text"], c["recent"])
         # grade the SYSTEM, not the model alone: production always applies the
         # deterministic veto and net over the router's answer
-        jobs = pipeline.route(db, raw["dispatch"], c["text"],
-                          pipeline._missed_music(c["text"]))
+        jobs = pipeline.route(db, raw["dispatch"], c["text"])
         out.append(sorted({name for name, _ in jobs}))
         print(f"\r  dispatching {i}/{len(cases)}...", end="", flush=True)
     print("\r" + " " * 40 + "\r", end="")
@@ -159,6 +158,25 @@ def report(cases, got):
           f"{empty_new_fp:>6}/{empty_total:<8}")
     print(f"{'  turns needing none':22} | {empty_old_fp/empty_total*100:15.1f}% | "
           f"{empty_new_fp/empty_total*100:14.1f}%")
+
+    # WHAT THE ROUTER ALONE MISSES IS NOT WHAT SHE MISSES.
+    #
+    # This table grades one model call. Production has a second, free path to DJ:
+    # `_maybe_music()` is a greedy word-and-deck hint that starts DJ at t=0
+    # whatever the router says. It used to be folded into `route()` as a NET, so
+    # this bench scored the pair as one number — which flattered the router and
+    # hid which half was working.
+    #
+    # Scored apart, honestly: the router misses `dj` a fair amount, and the hint
+    # catches those for nothing. Neither number alone describes her.
+    dj_missed = [c for c, want, g in misses if "dj" in want and "dj" not in g]
+    caught = [c for c in dj_missed if pipeline._maybe_music(c["text"])]
+    if dj_missed:
+        print(f"\nof the {len(dj_missed)} dj asks the router missed, the free hint "
+              f"catches {len(caught)} — DJ still ran on those.")
+        for c in dj_missed:
+            if c not in caught:
+                print(f"  BOTH missed: {c['text'][:60]}")
 
     print(f"\nfirst misses ({len(misses)} total):")
     for c, want, g in misses[:8]:

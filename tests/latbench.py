@@ -58,8 +58,8 @@ def sample(db, n: int) -> list:
     # sample is almost all "play X" — which times the same path over and over and
     # tells personabench nothing, because voice shows up in chat and in fights,
     # not in a queue confirmation. Half music, half everything else.
-    ask = [t for t in turns if pipeline._missed_music(t["text"])]
-    chat = [t for t in turns if not pipeline._missed_music(t["text"])]
+    ask = [t for t in turns if pipeline._maybe_music(t["text"])]
+    chat = [t for t in turns if not pipeline._maybe_music(t["text"])]
     half = n // 2
     picked = []
     for group, want in ((ask, n - half), (chat, half)):

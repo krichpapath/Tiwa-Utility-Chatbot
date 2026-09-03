@@ -100,15 +100,33 @@ Same stance as tools: [a bad tool is a no-op, never a dead turn](tools.md).
   the way the tool pass can.
 - `"dispatch": []` is the **normal** answer. The prompt says so in those words.
 
-### The classifier overrules the model, and backs it up
+### Two ways to reach DJ, and one deterministic veto
 
-`turn.route()` applies deterministic rules over the router's answer, in both
-directions. Both were measured on 111 real turns (`tests/dispatchbench.py`):
+DJ Tiwa is reached twice over, and neither path can silence the other:
 
 | | what it does | why |
 |---|---|---|
-| **veto** | drops `dj` when `_DECK_Q` matches | dispatch answered `dj` to *"มึงเล่นเพลงไรอยู่เนี่ย"* — which would start a track over her answer |
-| **net** | adds `dj` when `_missed_music` matches and the router did not | the model misses a music ask about 1 in 4–6; a net that only runs when the router noticed is not a net |
+| **the router** | dispatches `dj` when it reads a music ask | it is the one that understands sentences |
+| **the hint** | `_maybe_music()` starts DJ at t=0, before dispatch answers | speed — otherwise a song waits ~1.5s for a model to agree |
+| **the veto** | `route()` drops `dj` when `_DECK_Q` matches | dispatch answered `dj` to *"มึงเล่นเพลงไรอยู่เนี่ย"* — which would start a track over her answer |
+
+Measured on the 111-turn set: the router alone gets `dj` right about 80% of the
+time, and **the free hint catches every ask it misses**. Neither number describes
+her on its own, so `dispatchbench` now prints both.
+
+`_maybe_music()` is deliberately **greedy** — one word anywhere, either language,
+plus "something is already playing". It used to be a careful phrase list, because
+on the old path whatever it matched went straight to `play_music` with nobody to
+check it. That precision is why she could not hear the word `skip`: measured
+against her own log, the careful version silently missed **25 real music asks**.
+
+It can afford to be wrong now because it no longer decides. DJ reads the whole
+message and answers `none`, and `respond()` waits for that verdict before she is
+told anything — so a false positive is one cheap call nobody ever sees. The
+precision moved into DJ's prompt, where `djminibench --live` measures it.
+
+The one thing still holding a hard line is the **veto**, because it *prevents* an
+action rather than guessing at one.
 
 ### Late results
 

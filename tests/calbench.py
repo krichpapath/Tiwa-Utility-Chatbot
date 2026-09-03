@@ -74,8 +74,7 @@ async def main():
     for label, author, text, recent in CASES:
         tools.new_turn()
         out = await minis.dispatch(db, author, text, recent)
-        jobs = pipeline.route(db, out["dispatch"], text,
-                              pipeline._missed_music(text))
+        jobs = pipeline.route(db, out["dispatch"], text)
         for name, task in jobs:
             await asyncio.to_thread(minis.run, db, name, task)
         names = ", ".join(f"{n}({t[:26]})" for n, t in jobs) or "*none*"

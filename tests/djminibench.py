@@ -112,8 +112,72 @@ def degrades():
     print("degrade ok  — a junk decision leaves the deck untouched and never raises")
 
 
+def the_veto(argv):
+    """THE guard, live. `_maybe_music()` is greedy on purpose — it starts DJ on
+    anything with a hint word in it — so DJ's `none` is the only thing standing
+    between "ขอโทษนะ" (sorry) and a random song.
+
+    It used to be a phrase list's job, done by anchoring "ขอ " and "เปิด " to the
+    start of the message with a trailing space. That was precise and it was also
+    why she could not hear the word `skip`. The precision moved here, to the one
+    place that reads the whole sentence.
+
+    Offline this file fakes the model, so this half needs `--live` and real
+    tokens. It is the reason the loosening is safe; without it the loosening is
+    a guess.
+    """
+    if "--live" not in argv:
+        print("\nveto      — SKIPPED. `--live` runs it; it is what makes the greedy"
+              " hint safe.")
+        return
+    import importlib
+
+    importlib.reload(llm)                 # undo the fake_chat monkeypatch
+    importlib.reload(minis)
+
+    CASES = [
+        # must NOT play — every one of these starts DJ via a hint word
+        ("ขอโทษนะ", "none", "sorry"),
+        ("ขอบคุณมาก", "none", "thank you"),
+        ("ขอ ยืมตังหน่อย", "none", "lend me money — the live 2026-08-24 turn"),
+        ("เปิดประตูให้หน่อย", "none", "open the door"),
+        ("my dad plays Warframe", "none", "plays, as in a game"),
+        ("he plays guitar", "none", "plays, as in an instrument"),
+        ("อยากกินข้าว", "none", "อยาก = want, nothing to do with music"),
+        ("เปิดไฟหน่อย", "none", "turn on the light"),
+        # must play — the ones the old list could not hear
+        ("skip", "skip", "a bare verb"),
+        ("เปิดSunflowerให้หน่อย", "play", "no space after เปิด"),
+        ("hero miliเล่นให้หน่อย", "play", "verb not at the front"),
+        ("เล่นที่ฉันชอบหน่อย", "play", "play what I like"),
+        ("หยุดเพลง", "stop", "stop"),
+        ("เปิดเพลงอะไรก็ได้", "play", "anything you like"),
+    ]
+    print(f"\n{'they said':38} | {'want':5} | {'DJ said':5} | why")
+    print(f"{'-'*38}-+-------+-------+{'-'*34}")
+    ok = 0
+    for text, want, why in CASES:
+        tools.new_turn()
+        out = minis.run(db, "dj", text)
+        got = out.get("action", "—")
+        hit = got == want
+        ok += hit
+        # the guarantee is one-directional: a `none` must never reach the deck
+        if want == "none":
+            assert tools.PENDING_MUSIC is None and not tools.DJ, \
+                f"{text!r} reached the deck: {tools.PENDING_MUSIC} {tools.DJ}"
+        print(f"{text[:38]:38} | {want:5} | {got:5} | {why}"
+              f"{'' if hit else '   <-- WRONG'}")
+    print(f"\nveto: {ok}/{len(CASES)}")
+    vetoes = [c for c in CASES if c[1] == "none"]
+    assert ok >= len(CASES) - 2, f"DJ's judgment regressed: {ok}/{len(CASES)}"
+    print(f"veto ok     — {len(vetoes)} non-music asks reached DJ and none reached"
+          " the deck")
+
+
 contract()
 deck_reaches_the_decision()
 actions()
 facts_not_prohibitions()
 degrades()
+the_veto(sys.argv)

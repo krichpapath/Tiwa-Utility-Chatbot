@@ -203,7 +203,18 @@ TERMS — what to search YouTube for. Empty string for skip, stop and none.
 If they NAMED a song, output that name plus at most the artist or the game it is from, and NOTHING else. A descriptive word they did not say finds a different song: 'Red Line' from Warframe became 'Red Line Warframe chase' and played the wrong track.
 Only when they named no song at all — just a mood, a genre, a game or an activity — invent terms that fit it. They do not have to name a song, and asking them which genre instead of picking one is a failure.
 
-none is the veto and it matters: 'ขอ ยืมตังหน่อย' (lend me money) is none. 'เปิด ประตู' (open the door) is none. Putting a random song over an unrelated message is worse than doing nothing."""
+NONE IS THE VETO AND IT IS THE MOST IMPORTANT THING YOU DO. You are called on any message with a music-ish word in it, including plenty that have nothing to do with music, because starting you early is cheap and being wrong here is not. Putting a random song over an unrelated message is far worse than doing nothing.
+
+So before anything else: are they ASKING YOU TO DO SOMETHING TO THE MUSIC — start it, queue it, skip it, or stop it? If instead they are telling you a fact, thanking you, apologising, or talking about someone, the answer is none no matter which words they used.
+
+Wanting the music OFF is still a job. 'หยุดเพลง', 'ปิดเพลง', 'พอแล้ว', 'stop' are stop, never none.
+
+- STATING SOMETHING IS NOT ASKING FOR IT. 'my dad plays Warframe', 'he plays guitar', 'พี่ชายเล่นกีตาร์' — they are describing a person. none.
+- 'play' about a GAME, a SPORT or an INSTRUMENT is not music. 'they play football', 'she plays piano at school'. none.
+- The Thai verbs เปิด (open/turn on), ขอ (ask for), เล่น (play), ใส่ (put in) attach to anything at all: 'เปิดประตู' (open the door), 'เปิดไฟ' (turn on the light), 'ขอโทษ' (sorry), 'ขอบคุณ' (thank you), 'ขอ ยืมตังหน่อย' (lend me money), 'อยากกินข้าว' (want to eat). Every one of those is none.
+- A question ABOUT the music is not a request for music. They are asking, not ordering.
+
+Only when they actually want to hear something does anything else apply."""
 
 _DJ_FORMAT = {
     "type": "object",

@@ -913,3 +913,69 @@ drops bare agreements, because that is what cut router over-firing from 43.8% to
 **Measured after.** 21 offline benches green, 5 module self-checks, and 8 live
 conversation turns: no mini fired on a turn that needed none, coercion bounced,
 escalation answered, Thai stayed Thai.
+
+
+## ADR-029 · The music trigger stops deciding and starts guessing {#adr-029}
+
+**Status.** Done. The precision it gave up moved into DJ Tiwa's prompt, where it is
+measured live.
+
+**Context.** `_missed_music()` was a careful phrase classifier: exact phrases, verbs
+anchored to the start of the message, a trailing space to separate a foreign song title
+from ordinary Thai, and a question veto over the top. Every rule was earned by a real
+failure, and together they made it narrow.
+
+Measured against her own log, that narrowness cost 25 real music asks:
+
+| she said | why it missed |
+|---|---|
+| `skip` ×4 | a bare verb matched no phrase |
+| `เปิดSunflowerให้หน่อย` | no space after `เปิด` |
+| `hero miliเล่นให้หน่อย` | the verb was not at the front |
+| `ไม่ใช่ ของMili` (*no, the Mili one*) | no music word at all |
+| `มันจบแล้ว เล่นอีกรอบ` (*it's over, play it again*) | mid-session reference |
+
+It had to be careful because on the serial path whatever it matched went **straight to
+`play_music`** with nobody to check it. It was the decision.
+
+**It stopped being the decision, and nobody noticed.** DJ Tiwa reads the whole message
+with the deck in front of it and answers `none` when it is not a music ask; since
+[ADR-028](#adr-028) that verdict arrives *before* she is briefed. The classifier's only
+remaining job is starting DJ at t=0 beside dispatch rather than ~1.5s behind it. It buys
+latency, nothing else.
+
+**Decision.** Invert the trade. `_maybe_music()` is greedy: any hint word anywhere, in
+either language, no anchoring — plus **"something is already playing"**, which is what
+reaches `skip` and `ไม่ใช่ ของMili` and every other mid-session reference that carries no
+music word at all.
+
+`route()`'s NET went with it. It force-added `dj` whenever the classifier fired, and it
+had been dead in production since ADR-028 — `respond()` passed `dj_already_running=True`
+on exactly the turns that would have triggered it. It survived only to make the bench
+agree with a system it had stopped modelling.
+
+**Consequences.**
+
+A false positive is now one cheap call that answers `none`, writes nothing, and never
+reaches her. *"my dad plays Warframe"* does start DJ. That is fine — and it is also the
+whole risk, so it is measured rather than assumed.
+
+**`djminibench --live` is the new load-bearing check**, and it earned its place on the
+first run by catching DJ answering `play` with terms `"Warframe"` to that exact sentence.
+The old anchoring had been hiding it. DJ's prompt now says a stated fact is not a request,
+and that `play` about a game, a sport or an instrument is not music. 14/14, with the 8
+non-music asks all vetoed and none reaching the deck.
+
+One regression came out of that same fix and the bench caught it too: the first wording
+asked *"are they asking to HEAR something?"*, and `หยุดเพลง` (stop the music) is not — so
+DJ said `none` to a stop. The question is now *"are they asking you to do something to the
+music"*, with wanting it off named explicitly.
+
+**The measured numbers moved, and one of them is honest rather than better.**
+`dispatchbench` used to grade the router and the classifier as one figure — 94.6%. Scored
+apart it grades the router alone: **~80% on `dj`**, with false positives on turns needing
+nothing dropping from 12.5% to 6.2%. Neither describes her, so the bench now also prints
+*"of the N `dj` asks the router missed, the free hint catches M"* — so far M is always N.
+
+**What stayed precise.** `_DECK_Q`, because it *prevents* an action. A guess that acts is
+unbounded; a guess that declines costs a repeated question.

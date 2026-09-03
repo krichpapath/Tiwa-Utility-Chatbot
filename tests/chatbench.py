@@ -58,7 +58,7 @@ async def main():
         # what the concurrent path decides and what it hands her, before judging
         tools.new_turn()
         raw = await minis.dispatch(db, who, text)
-        jobs = pipeline.route(db, raw["dispatch"], text, pipeline._missed_music(text))
+        jobs = pipeline.route(db, raw["dispatch"], text)
         mem = memory.turn_context(db, who) + memory.mentioned(db, text, skip=who)
 
         fired = ",".join(sorted({n for n, _ in jobs})) or "—"

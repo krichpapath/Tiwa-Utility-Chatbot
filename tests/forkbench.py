@@ -117,11 +117,20 @@ def net_under_the_router():
     assert pending == "bad apple", pending
     print("net ok      — router missed the music ask, the classifier caught it")
 
-    calls.clear()
-    _, pending, dj = run_turn("he plays guitar")
-    assert not any("You are the DJ" in c for c in calls), "DJ fired on a non-ask"
-    assert pending is None and dj == [], (pending, dj)
-    print("veto ok     — 'he plays guitar' still reaches no DJ")
+    # "he plays guitar" DOES reach DJ now, and that is the design: the hint is
+    # greedy because being wrong costs one cheap call, and DJ is what decides.
+    # What must never happen is a song. `DJ_SAYS` is the veto here; the real
+    # model answering `none` to this exact sentence is djminibench --live.
+    global DJ_SAYS
+    was, DJ_SAYS = DJ_SAYS, {"action": "none", "terms": ""}
+    try:
+        calls.clear()
+        _, pending, dj = run_turn("he plays guitar")
+        assert any("You are the DJ" in c for c in calls), "the hint stopped being greedy"
+        assert pending is None and dj == [], f"a veto reached the deck: {pending} {dj}"
+    finally:
+        DJ_SAYS = was
+    print("veto ok     — 'he plays guitar' reaches DJ, and DJ keeps it off the deck")
 
 
 def cannot_name_what_she_has_not_heard():

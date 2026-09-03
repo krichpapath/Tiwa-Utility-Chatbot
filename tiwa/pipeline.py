@@ -78,43 +78,40 @@ def _clean(text: str) -> str:
     return re.sub(r"^(Tiwa|ทิวา)\s*:\s*", "", text.strip()).strip()
 
 
-# ponytail: precision over recall. A false positive plays a song nobody asked
-# for; a false negative is just today's behaviour. Phrases, not the bare word
-# เพลง, which shows up in questions ABOUT music as often as requests for it.
-_MUSIC_ASK = ("เปิดเพลง", "ขอเพลง", "อยากฟัง", "อยากได้เพลง", "ฟังเพลง", "หาเพลง",
-              "จัดเพลง", "เปิดอะไร", "play some", "play music", "play a song",
-              "play something", "put on some", "want to hear", "wanna hear",
-              "some music",
-              # "เพลงไม่ออกใส่ queue ด้วย" — a queue ask with the verb in the
-              # middle, so no prefix in _MUSIC_VERB could ever reach it
-              "ใส่คิว", "ใส่ queue", "เข้าคิว", "ลงคิว")
+# A HINT, not a verdict. Read _maybe_music() before touching this.
+#
+# This used to be two lists doing precision work — exact phrases, anchored
+# prefixes, a question veto — because on the serial path whatever matched here
+# went straight to `play_music` with nobody to check it. It was the decision, so
+# it had to be careful, and being careful made it narrow: measured against her
+# own log, it silently missed 25 real music asks, including the bare word `skip`
+# four separate times. "เปิดSunflowerให้หน่อย" missed for want of a space.
+# "hero miliเล่นให้หน่อย" missed because the verb was not at the front.
+#
+# DJ Tiwa is the decision now, and it reads the whole message with the deck in
+# front of it. So this stopped needing to be right and only needs to be EARLY:
+# all it buys is starting DJ at t=0 beside dispatch instead of ~1.5s later. A
+# false positive costs one cheap call that answers `none` and writes nothing.
+#
+# Which flips the trade completely: recall over precision. Single words, matched
+# anywhere, in either language. When she misses a phrasing, add the word — but
+# know that missing it only made her slower, never wrong.
+_MUSIC_HINT = (
+    # Thai — verbs, nouns, and the words that show up mid-session
+    "เพลง", "ฟัง", "ร้อง", "เปิด", "ขอ", "เล่น", "ใส่", "คิว", "ต่อ", "ข้าม",
+    "หยุด", "ปิด", "ดนตรี", "เสียง", "จัด", "หา", "เปลี่ยน", "อยาก", "พอแล้ว",
+    "ถัดไป", "ดัง", "เบา", "อีกรอบ", "อัลบั้ม", "วง",
+    # English
+    "play", "queue", "song", "music", "listen", "track", "tune", "skip", "stop",
+    "next", "pause", "resume", "vibe", "lofi", "ost", "remix", "album", "band",
+    "artist", "volume", "louder", "quieter", "put on", "another one",
+)
 
-# A bare imperative — "play <title>", "queue <title>" — is the most common ask
-# there is, and none of the phrases above match it. Live log, four turns in a
-# row: `play ビビデバ - BIBBIDIBA`, `Queue เพลง ビビデバ`, `play tung tung tung
-# sahur orchestra` all called no tool, hit no retry, and she claimed she had put
-# them on. Anchored to the START of the message, because a bare `play` substring
-# also fires on "my dad plays Warframe" and would put on a random song.
-# ponytail: prefix match on the raw message. bot.py strips the @mention before
-# this sees it, so "@Tiwa play X" works — but "หนู play X" does not. Parse the
-# first word properly if leading filler turns out to be common.
-_MUSIC_VERB = ("play ", "queue ", "put on ", "เปิดเพลง", "เล่นเพลง", "ต่อคิว",
-               "เปลี่ยนเพลง",
-               # Thai verb + a title, with no "เพลง" glued on: "ขอ ATLAS-The
-               # Score" reached none of the lists above and she claimed she had
-               # put it on. The trailing space is what keeps "ขอโทษ" (sorry) and
-               # "ขอบคุณ" (thanks) out — Thai does not space its own words, so a
-               # space here means a foreign title follows.
-               "ขอ ", "เปิด ", "เล่น ", "ต่อ ")
-
-# ...but an imperative is not always a request. "ตอนนี้เปิดเพลงอะไรอยู่" (what
-# song is on right now?) matched _MUSIC_ASK, and a random Thai song went on over
-# the top of her answer. That is worse than the silence this classifier exists
-# to fix.
-# Phrases, not the bare word อะไร: "เปิดอะไรก็ได้" (put on anything) is a real ask.
-# Split out, because these two do different jobs. _DECK_Q means "they are asking
-# ABOUT the deck" — which vetoes the retry AND, when nothing is on, is the one
-# moment telling her the deck is empty is worth the tokens.
+# The one thing that still has to be precise, because it PREVENTS an action.
+# "ตอนนี้เปิดเพลงอะไรอยู่" (what song is on right now?) is not a request, and a
+# random Thai song once went on over the top of her answer. _DECK_Q means "they
+# are asking ABOUT the deck" — it vetoes DJ entirely AND, when nothing is on, is
+# the one moment telling her the deck is empty is worth the tokens.
 # Phrases, never the bare word อะไร — "เปิดเพลงอะไรก็ได้" (put on anything) is a
 # real ask, and a looser "เพลงอะไร" swallows it. djbench catches that one.
 _DECK_Q = ("อะไรอยู่", "ชื่ออะไร", "เล่นเพลงไร", "เพลงไรอยู่",
@@ -125,48 +122,45 @@ _DECK_Q = ("อะไรอยู่", "ชื่ออะไร", "เล่น
            "ชื่อเพลง",
            "what song", "which song", "what's playing", "what is playing",
            "what are you playing")
-_QUESTION = _DECK_Q + ("?", "อะไรบ้าง", "ไหม", "มั้ย", "ทำไม", "เมื่อไหร่")
-
-# A youtube link always carries "?v=", and "?" is in _QUESTION — so every
-# `queue https://www.youtube.com/watch?v=...` was read as a question and the
-# retry never fired. Strip links before asking "is this a question?", never
-# before the verb check, which needs the trailing space in "queue ".
-_URL = re.compile(r"https?://\S+")
 
 
-def _missed_music(text: str) -> bool:
-    """They asked for music, deterministically, for free, in 0ms.
+def _maybe_music(text: str) -> bool:
+    """Might this be about music? A HINT, and only ever a hint.
 
-    Named for the job it used to do — catching the ~1 ask in 4-6 the tool pass
-    forgot. There is no tool pass now, so it does the whole job: it is what
-    starts DJ Tiwa at t=0, and what `route()` uses to overrule a router that
-    missed a music ask.
+    Answering yes starts DJ Tiwa at t=0, beside dispatch instead of ~1.5s behind
+    it. Answering no costs a second and a half on a music turn. Nothing else
+    hangs on it: DJ reads the message itself and answers `none` when it is not a
+    music ask, and `respond()` waits for that verdict before she is told
+    anything. So a false positive is one cheap call nobody sees.
 
-    PENDING_MUSIC == "" means stop_music already fired; leave it.
+    Which is why it is deliberately greedy, and why it is allowed to fire on
+    turns that are plainly not music. Two ways in:
 
-    The loose Thai prefixes in _MUSIC_VERB ("ขอ ", "เปิด ") are over-eager on
-    purpose: they used to sit behind _force_music's NONE veto. DJ Tiwa's `none`
-    action is that veto now, and respond() waits for it before building the state
-    block — so a false positive like "ขอ ยืมตังหน่อย" (lend me money) starts DJ,
-    DJ says none, and she is never told a song is coming. Closed 2026-08-24 after
-    it fired in a real Discord turn.
+    A LIVE DECK. Mid-session almost everything is about the song — "skip",
+    "ไม่ใช่ ของMili" (no, the Mili one), "อีกเพลง", "มันจบแล้ว เล่นอีกรอบ". None of
+    those carry a music word at all, and the old phrase list missed every one of
+    them. If something is playing or queued, just ask DJ.
 
-    Deliberately does NOT care whether something is already playing. It used to
-    skip a busy deck, to stop "เพลงนี้ชื่ออะไร" starting a track over her answer —
-    but the phrase list never matched that anyway, and the guard silently disabled
-    the retry for "put on a different one", which is the common case. Measured in
-    the live log: three confabulated turns in one session, every one of them with
-    a song already on.
+    ONE HINT WORD. Otherwise any of _MUSIC_HINT, anywhere in the message, either
+    language, no anchoring. "เปิดSunflowerให้หน่อย" needed no space; the word
+    `skip` needed no sentence around it.
 
-    It DOES care whether the sentence is a question — that is a different guard,
-    and the one this function was missing. See _QUESTION.
+    Two things still stop it, and both prevent an ACTION rather than guess at
+    one:
+      - a music actuator already fired this turn (PENDING_MUSIC == "" is
+        stop_music having fired — leave it alone)
+      - they are asking what is ON, which _doing() answers for free from the deck
     """
     if tools.PENDING_MUSIC is not None or tools.DJ:
         return False
-    low = text.lower().strip()
-    if any(q in _URL.sub("", low) for q in _QUESTION):
+    if _asked_deck(text):
         return False  # asking about music is not asking for music
-    return low.startswith(_MUSIC_VERB) or any(k in low for k in _MUSIC_ASK)
+    from . import music  # lazy: keeps av out of import for non-Discord callers
+
+    if music.NOW["title"] or music.QUEUE:
+        return True
+    low = text.lower()
+    return any(w in low for w in _MUSIC_HINT)
 
 
 def _terms(content: str) -> str:
@@ -387,38 +381,35 @@ async def _late(db, author: str, jobs: list, on_late, spoken=None,
                  on_late, spoken, lang)
 
 
-def route(db, jobs: list, text: str, asked_music: bool,
-          dj_already_running: bool = False) -> list:
-    """The router's answer, with the deterministic rules applied over the top.
+def route(db, jobs: list, text: str) -> list:
+    """The router's answer, with the one deterministic rule applied over the top.
 
-    This is the hybrid: the classifier does not merely back the model up, it
-    also overrules it. Both directions were measured on 111 real turns
-    (`dispatchbench`), and both fire on real traffic.
+    There used to be a NET here as well as this veto: whenever the phrase
+    classifier said "music", `dj` was forced into the job list. It is gone,
+    because it never fired in production — `respond()` passed
+    `dj_already_running=True` on exactly the turns that would have triggered it,
+    so the branch existed only to make the bench agree with a system it was no
+    longer modelling.
 
-    Exported so the bench grades the SYSTEM rather than the model alone —
-    grading the raw dispatch call would measure something production never runs.
+    Nothing is lost. DJ is reached two independent ways and neither is this one:
+    the greedy `_maybe_music()` hint starts it at t=0, and the router asking for
+    it starts it after dispatch. Whichever arrives, DJ decides.
+
+    Exported so the bench grades the SYSTEM rather than the model alone.
     """
-    out = list(jobs)
-
     # VETO. Dispatch answered `dj` to "มึงเล่นเพลงไรอยู่เนี่ย" (what song is even
     # playing), which would start a track over her answer — the exact failure
     # djbench exists for. _DECK_Q is the narrow list of phrases that are
     # unambiguously questions ABOUT the deck and never requests, so it cannot
-    # swallow a polite ask or a youtube link the way the full _QUESTION list would.
+    # swallow a polite ask or a youtube link.
+    #
+    # This one stays deterministic on purpose: it PREVENTS an action. A guess
+    # that acts is unbounded, a guess that declines costs a repeated question.
     if _asked_deck(text):
-        if any(n == "dj" for n, _ in out):
+        if any(n == "dj" for n, _ in jobs):
             memory.log(db, "mini", f"dj vetoed — {text[:50]!r} asks what is on")
-        out = [j for j in out if j[0] != "dj"]
-        return out
-
-    # NET. The model failed to notice a music ask — measured at 1 in 4-6 before,
-    # and dispatch still misses some. In respond() DJ is already running by now,
-    # started at t=0; the bench has no such head start and asks for the job back.
-    if asked_music:
-        out = [j for j in out if j[0] != "dj"]
-        if not dj_already_running:
-            out.append(("dj", text))
-    return out
+        return [j for j in jobs if j[0] != "dj"]
+    return list(jobs)
 
 
 async def respond(db, hist: list, author: str, text: str, images=(),
@@ -449,7 +440,7 @@ async def respond(db, hist: list, author: str, text: str, images=(),
 
     # code, ~3ms. This is what the recall tool used to cost a model call for.
     third = memory.mentioned(db, text, skip=author)
-    asked_music = _missed_music(text)
+    maybe_music = _maybe_music(text)
 
     # Voice has no mini — 0 calls in 135 logged turns — so the classifier reaches
     # the actuators directly. Returns "" under TIWA_VOICE=dj (the default), where
@@ -461,11 +452,12 @@ async def respond(db, hist: list, author: str, text: str, images=(),
     elif want == "leave":
         tools.leave_voice(db)
 
-    # DJ starts NOW, not after dispatch. The classifier already said this is a
-    # music ask, deterministically and for free — making the song wait for a
-    # model to agree is the exact round trip this whole design removes.
+    # DJ starts NOW, not after dispatch. The hint already said music is
+    # plausible, deterministically and for free — making the song wait for a
+    # model to agree is the exact round trip this whole design removes. If the
+    # hint is wrong, DJ answers  below and nobody ever finds out.
     early = [asyncio.create_task(asyncio.to_thread(minis.run, db, "dj", text))
-             ] if asked_music else []
+             ] if maybe_music else []
 
     # Dispatch runs BEFORE she speaks, and this is a deliberate reversal.
     #
@@ -486,8 +478,7 @@ async def respond(db, hist: list, author: str, text: str, images=(),
     try:
         out = await asyncio.wait_for(
             minis.dispatch(db, author, text, recent), DISPATCH_TIMEOUT)
-        jobs = route(db, out["dispatch"], text, asked_music,
-                     dj_already_running=bool(early))
+        jobs = route(db, out["dispatch"], text)
     except asyncio.TimeoutError:
         # she talks anyway rather than waiting on a stalled router
         memory.log(db, "mini", f"dispatch hit {DISPATCH_TIMEOUT}s — replied without it")
@@ -524,7 +515,7 @@ async def respond(db, hist: list, author: str, text: str, images=(),
             # A stalled DJ may still reach the deck, so promising silence would
             # be its own bluff. Fall back to what the classifier believed.
             memory.log(db, "mini", f"dj hit {ACT_TIMEOUT}s — replied without its verdict")
-            playing = asked_music
+            playing = maybe_music
 
     # what she is allowed to know she is doing, before she has the answer
     looking_up = ", ".join(t for n, t in jobs if n not in ACTS)

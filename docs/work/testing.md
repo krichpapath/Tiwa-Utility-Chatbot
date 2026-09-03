@@ -2,7 +2,7 @@
 
 ## What this is
 
-Thirty-four scripts in `tests/`. Not unit tests — each one runs real code and **prints a
+Thirty-five scripts in `tests/`. Not unit tests — each one runs real code and **prints a
 markdown table you read and judge**. No pytest, no fixtures, no CI.
 
 ## Why it's here
@@ -27,6 +27,7 @@ Recommended canon. Run these and you know the system is sound:
 | `test_memory.py` | check | **The guards**, coercion + confabulation by name, plus the episode rate, belief supersession and the reflection pass | yes |
 | `djbench.py` | check | The whole DJ engine — queue, skip, auto-advance, stop, action state | yes |
 | `panelbench.py` | check | Control panel: 38 assertions incl. "never writes secrets" | yes |
+| `discordbench.py` | check | **Every Discord entry point.** Who gets answered, message splitting, images, the ✅ gate, the late follow-up, a dead turn | yes |
 | `dispatchbench.py` | measure | Right mini, right task, on 111 hand-corrected real turns | no |
 | `pickbench.py` | measure | Music asks with **no song named** — the newest regression | no |
 | `searchbench.py` | both | Search mechanics offline; `--live` shows the keywords she picks | partly |
@@ -94,12 +95,12 @@ are the evidence the design was accepted on:
 | `minibench.py` | check | The dispatch layer: strict-schema legality at every depth, the literal word "json" in the prompt (DeepSeek returns empty without it), and six routing shapes including an invented mini and non-JSON junk |
 | `forkbench.py` | check | The tool pass is gone but nothing she needed from it is. Wall-clock proves the shape — two calls, not three — and `TURN_MODE` cannot come back |
 | `latebench.py` | check | Actions land before she speaks, speech lands after, neither is silent. Uses the *measured* uneven delays; equal ones hid a real bug once |
-| `djminibench.py` | check | DJ Tiwa's action choice, the deck reaching the decision as a fact, and none of `play_music`'s instruction paragraph leaking into its return |
+| `djminibench.py` | both | DJ Tiwa's action choice, the deck reaching the decision as a fact, and none of `play_music`'s instruction paragraph leaking into its return. **`--live` is the veto**: 14 real messages, 8 of them not music at all, and none may reach the deck — this is what makes the greedy hint safe |
 | `searchminibench.py` | check | Keywords not sentences, today's year in the prompt, a flake staying quiet — plus a source scan asserting **no mini can reach a memory write** |
 | `calminibench.py` | check | Ambiguous date asks and queues nothing; a clash is flagged but still queued; the reply always lands before the follow-up |
 | `growthbench.py` | check | **The thesis.** Register a fourth mini, assert Main Tiwa's prompt did not grow. Also that no tool registry can grow back, and that every actuator has a named caller — two were silently orphaned once |
 | `latbench.py` | measure | Real turns from her own log, timed. p50 2.7s here against `main`'s 5.1s. One arm per run — `--tag` names it, and it writes `data/ab_<tag>.json` |
-| `dispatchbench.py` | measure | Routing accuracy on 111 hand-corrected real turns: 94.6% vs the tool pass's 70.3%. The set is **frozen** at those 111 — this branch logs no tool rows, so newer turns mine as "needed nothing" and would rot the labels |
+| `dispatchbench.py` | measure | Routing accuracy on 111 hand-corrected real turns. Grades **the router alone** — about 80% on `dj`, and it prints how many of its `dj` misses the free `_maybe_music()` hint catches (so far: all of them). The set is **frozen** at those 111 — this branch logs no tool rows, so newer turns mine as "needed nothing" and would rot the labels |
 | `personabench.py` | measure | Blind pairwise A/B over **two** `latbench` files — run it on each branch, then hand both here. Each pair judged twice with the sides swapped. Not 1–5 scoring — [LLM judges hit ~69% on role identification](https://arxiv.org/pdf/2508.10014) where humans hit 90.8% |
 | `chatbench.py` | measure | The turns that need **no mini at all** — 59% of real traffic, and where memory and personality are the whole product. Asserts no mini fires on any of them, then prints her replies for you to read |
 | `livechat.py` | measure | One real scripted conversation end to end. The only thing that shows a *sequence* — deck carrying between turns, follow-ups landing, her staying in character while a mini works |
