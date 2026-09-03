@@ -93,6 +93,32 @@ def a_clash_is_pointed_out_not_blocked():
     print("clash ok    — flagged, and still queued for him to decide")
 
 
+def a_dead_calendar_is_not_read_aloud():
+    """Google unreachable. gcal never raises, so the failure arrives as TEXT —
+    and `events` reaches her voice verbatim through VOICE_FIELDS.
+
+    Found live 2026-08-24 with a real expired refresh token: she was handed
+    "calendar unavailable: ('invalid_grant: Bad Request', {...})" as the week's
+    events, ready to read out. `search` has had this guard since S4; this one
+    did not.
+    """
+    from tiwa import gcal
+
+    was, gcal.upcoming = gcal.upcoming, lambda: (
+        "calendar unavailable: ('invalid_grant: Bad Request', {'error': 'x'})")
+    try:
+        tools.new_turn()
+        out = minis.run(db, "calendar", "ลงปฏิทินให้หน่อย นัดหมอฟัน อาทิตย์หน้า 13.00")
+        assert "invalid_grant" not in str(out), f"the raw error reached her: {out}"
+        assert out["action"] == "none", out
+        assert tools.PENDING_CALENDAR == [], \
+            f"a ✅ was queued for a write that cannot happen: {tools.PENDING_CALENDAR}"
+        assert "cannot reach the calendar" in out["events"], out
+    finally:
+        gcal.upcoming = was
+    print("outage ok   — an unreachable calendar is said plainly, never quoted")
+
+
 def junk_degrades():
     tools.new_turn()
     for bad in ({}, {"action": "maybe"}, {"request": "add x"}):
@@ -157,6 +183,7 @@ the_week_is_read_not_asked()
 a_write_only_queues()
 ambiguity_asks_and_changes_nothing()
 a_clash_is_pointed_out_not_blocked()
+a_dead_calendar_is_not_read_aloud()
 junk_degrades()
 she_speaks_first()
 print("\ncalendar ok — judgment only; the parse and the ✅ gate never moved")

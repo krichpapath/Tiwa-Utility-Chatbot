@@ -385,6 +385,18 @@ def calendar(db, task: str) -> dict:
     from . import gcal, tools  # lazy: gcal pulls in the google client
 
     week = gcal.upcoming()
+    # Google is unreachable — an expired refresh token, usually. gcal never
+    # raises, so this arrives as text, and `events` reaches her voice verbatim
+    # through VOICE_FIELDS: without this she reads out
+    # "calendar unavailable: ('invalid_grant: Bad Request', {...})". Same guard
+    # `search` already has, and found the same way — by the thing actually
+    # breaking. Do not queue a write either: the ✅ would only fail later, and
+    # asking someone to confirm something that cannot happen is its own bluff.
+    if week.startswith("calendar unavailable"):
+        memory.log(db, "mini", f"calendar({task!r}) -> {week[:90]}")
+        return {"action": "none", "queued": "", "ask": "", "clash": "",
+                "events": "you cannot reach the calendar at all right now — say so,"
+                          " and say nothing about what is or is not on it"}
     now = datetime.datetime.now()
     resp = llm.chat(
         model=llm.TOOL_MODEL if llm.PROVIDER == "openrouter" else MODEL,
