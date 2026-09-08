@@ -162,7 +162,7 @@ async def main():
     # is. She has not seen the search result at this point in the turn, so every
     # title she could name here would be invented — measured, three at once.
     told = pipeline._doing(dispatching_music=True)
-    assert "It IS happening" in told and "do NOT name a SONG TITLE" in told, told
+    assert "Playback is NOT confirmed" in told and "do NOT name a SONG TITLE" in told, told
     tools.PENDING_MUSIC = "lofi"  # DJ already acted -> she may name what SHE searched
     assert "play lofi" in pipeline._doing(dispatching_music=True)
     tools.PENDING_MUSIC = None

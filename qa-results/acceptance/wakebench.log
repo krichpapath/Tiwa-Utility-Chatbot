@@ -1,0 +1,38 @@
+[tiwa] TIWA_LOG_PROMPTS in .env is IGNORED — your system environment already sets it, and that wins. Clear it there, or edit it there instead of in .env.
+[tiwa] OpenRouter key ...7b80 (from .env)
+| transcript | wakes? | want | she hears |
+|---|---|---|---|
+| `hey tiwa what time is it` | yes | yes | what time is it |
+| `Hey Tiwa, play something` | yes | yes | play something |
+| `hey teewa play some lofi` | yes | yes | play some lofi |
+| `hey tewa stop the music` | yes | yes | stop the music |
+| `hay tiva what's up` | yes | yes | what's up |
+| `hey tiwah play something` | yes | yes | h play something |
+| `hi tiwa are you there` | yes | yes | are you there |
+| `yo tiwa come here` | yes | yes | come here |
+| `ok tiwa stop` | yes | yes | stop |
+| `tiwa what time is it` | yes | yes | what time is it |
+| `teewah play music` | yes | yes | h play music |
+| `ทิวา อยู่ไหม` | yes | yes | อยู่ไหม |
+| `ที่ว่าเปิดเพลงหน้อย` | yes | yes | เปิดเพลงหน้อย |
+| `ที่ว่า เปิดเพลงหน่อย` | yes | yes | เปิดเพลงหน่อย |
+| `ทีวา เปิดเพลง` | yes | yes | เปิดเพลง |
+| `ที่วา อยู่ไหม` | yes | yes | อยู่ไหม |
+| `เฮ้ ทิวา เปิดเพลงหน่อย` | yes | yes | เปิดเพลงหน่อย |
+| `เฮ้ย ที่ว่า อยู่ไหม` | yes | yes | อยู่ไหม |
+| `เฮ้ทิวาเปิดเพลง` | yes | yes | เปิดเพลง |
+| `I told tiwa about it yesterday` | no | no | — |
+| `ask tiwa when she gets back` | no | no | — |
+| `เมื่อวานคุยกับทิวาแล้ว` | no | no | — |
+| `do you think tiwa would like this` | no | no | — |
+| `hey what time is it` | no | no | — |
+| `what time is it` | no | no | — |
+| `ที่นี่กินอร่อยดีคิดไม่ออกเลย` | no | no | — |
+| `ที่ไหนก็ได้` | no | no | — |
+| `ที่บ้านมีคนเยอะ` | no | no | — |
+| `ที่จริงแล้วไม่ใช่` | no | no | — |
+| `the water is cold` | no | no | — |
+| `she said the tea was good` | no | no | — |
+| `I was watching a movie yesterday` | no | no | — |
+
+all 32 cases correct

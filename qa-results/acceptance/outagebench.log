@@ -1,0 +1,16 @@
+[tiwa] TIWA_LOG_PROMPTS in .env is IGNORED — your system environment already sets it, and that wins. Clear it there, or edit it there instead of in .env.
+[tiwa] OpenRouter key ...7b80 (from .env)
+[bot] turn failed: HTTPStatusError: Client error '401 Unauthorized'
+  HTTPStatusError    -> ⚠️ my brain call failed — Client error '401 Unauthorized' — OPENROUTER_A
+[bot] turn failed: ConnectError: nope
+  ConnectError       -> ⚠️ my brain call failed — cannot reach the model provider — network, or 
+[bot] turn failed: ValueError: something else
+  ValueError         -> ⚠️ my brain call failed — ValueError
+apologise ok — every failure reaches the channel AND the log
+[bot] heartbeat failed, loop continues: HTTPStatusError: Client error '401 Unauthorized'
+[bot] heartbeat failed, loop continues: HTTPStatusError: Client error '401 Unauthorized'
+[bot] heartbeat failed, loop continues: HTTPStatusError: Client error '401 Unauthorized'
+heartbeat ok — 3 outages, 3 log rows, loop still alive
+sites ok    — 2 turn call sites, every one guarded
+
+outage ok — a dead provider costs her a turn, never her voice

@@ -1,0 +1,9 @@
+reset ok   — a new turn starts empty in the same task
+write ok   — the old names stay writable without shadowing the shim
+thread ok  — a flag set inside to_thread reaches the caller
+turn   | PENDING_MUSIC  | DJ                     | PENDING_CALENDAR
+-------+----------------+------------------------+-------------------------
+lofi   | lofi           | [('queue', 'lofi pt2')] | ['lofi listening party']
+metal  | metal          | [('queue', 'metal pt2')] | ['metal listening party']
+
+concurrent ok — neither turn saw the other's music, DJ list or calendar

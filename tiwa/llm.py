@@ -10,6 +10,7 @@ import datetime
 import json
 import os
 import time
+import threading
 from pathlib import Path
 
 import httpx
@@ -109,24 +110,56 @@ OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 # runaway insurance, not budgeting: a looping bug should not bill all night.
 # 2M tokens/day is ~$0.30 at V4 Flash rates and far beyond normal chat.
 DAILY_TOKENS = int(os.environ.get("TIWA_DAILY_TOKENS", "2000000"))
-SPEND_FILE = Path(__file__).parents[1] / "data" / "spend.json"
+SPEND_FILE = Path(os.environ.get("TIWA_DATA_DIR") or Path(__file__).parents[1] / "data") / "spend.json"
+SPEND_FILE = Path(os.environ.get("TIWA_SPEND_FILE") or SPEND_FILE)
+_spend_lock = threading.Lock()
 
 _ollama = Client()
 
 
 def spend(add: int = 0) -> int:
     """Tokens used today. Resets on date change. Returns the running total."""
+    with _spend_lock:
+        SPEND_FILE.parent.mkdir(parents=True, exist_ok=True)
+        # The bot and local panel are separate processes; a thread lock alone loses usage.
+        with SPEND_FILE.with_suffix(".lock").open("a+b") as lock:
+            lock.seek(0, 2)
+            if not lock.tell():
+                lock.write(b"0")
+                lock.flush()
+            lock.seek(0)
+            if os.name == "nt":
+                import msvcrt
+                msvcrt.locking(lock.fileno(), msvcrt.LK_LOCK, 1)
+            else:
+                import fcntl
+                fcntl.flock(lock, fcntl.LOCK_EX)
+            try:
+                return _spend(add)
+            finally:
+                lock.seek(0)
+                if os.name == "nt":
+                    msvcrt.locking(lock.fileno(), msvcrt.LK_UNLCK, 1)
+                else:
+                    fcntl.flock(lock, fcntl.LOCK_UN)
+
+
+def _spend(add: int = 0) -> int:
     today = datetime.date.today().isoformat()
     try:
         d = json.loads(SPEND_FILE.read_text())
-    except Exception:
+    except FileNotFoundError:
         d = {}
+    except (ValueError, OSError) as error:
+        raise RuntimeError("cannot read daily usage ledger; repair it before paid calls") from error
     if d.get("date") != today:
         d = {"date": today, "tokens": 0}
     if add:
         d["tokens"] += add
-        SPEND_FILE.parent.mkdir(exist_ok=True)
-        SPEND_FILE.write_text(json.dumps(d))
+        SPEND_FILE.parent.mkdir(parents=True, exist_ok=True)
+        temporary = SPEND_FILE.with_suffix(".tmp")
+        temporary.write_text(json.dumps(d))
+        temporary.replace(SPEND_FILE)
     return d["tokens"]
 
 

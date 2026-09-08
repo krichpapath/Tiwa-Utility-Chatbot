@@ -49,7 +49,7 @@ page you'd use to debug a bad calendar parse.
 
 **Now:** routed through `llm.chat(..., fmt=_EVENT_FORMAT)`, picking `llm.EXTRACT_MODEL` on
 the API path just like `memory.extract` does. `api` mode needs nothing local, and calendar
-parses show up on the llm tab with everything else.
+parses show up on the **Model calls** tab with everything else.
 
 One thing that had to change with it: `_EVENT_FORMAT` now marks **every** property required
 plus `additionalProperties: false`. OpenRouter sends the schema as a *strict* json_schema
@@ -152,12 +152,13 @@ construction that died early raised `AttributeError` from a destructor. Now a `g
 
 ## F7 · `dashboard.py` is the largest file in the project {#f7}
 
-**Severity: observation. Nothing to fix — deliberately left alone.** ~720 lines, bigger than
-`voice.py` (570) and more than double `pipeline.py` (234).
+**Severity: observation. Nothing to fix — deliberately left alone.** ~890 lines, bigger than
+`voice.py` (570) and more than triple `pipeline.py` (234).
 
-It's a single-file HTML-in-Python server with no template engine. That's the right trade
-for one localhost user: a template engine would be a dependency, and splitting it into
-modules would spread one debugging tool across five files.
+A sixth of it is the `SETTINGS` catalogue: 24 knobs, each with the plain-English answer to
+"what happens if I leave it alone". Another sixth is one stylesheet, which exists because
+Gradio spaces every block equally and equal spacing is no grouping at all. The rest is
+queries. Splitting it would spread one debugging tool across five files.
 
 It's recorded because of what it does to a newcomer's instincts. **The biggest file in the
 repo is a debugging tool, not a brain** — it is the *least* important file to understand and

@@ -92,10 +92,10 @@ check("told to react, not narrate", "Do NOT describe it back" in persona_prompt(
 check("never claims blindness while seeing",
       "cannot see it" not in persona_prompt())
 
-# the tool pass gets it too, so a game she does not know can be searched
+# Dispatch gets the image too, so an unfamiliar game can be searched.
 inner = [msgs for mo, msgs in calls
-         if any("inner thoughts" in str(x.get("content", "")) for x in msgs or [])]
-check("the tool pass can see it too", "Marvel Rivals" in str(inner))
+         if any("minis should handle" in str(x.get("content", "")) for x in msgs or [])]
+check("dispatch can see it too", "Marvel Rivals" in str(inner))
 
 # --- caption-less image: the common case --------------------------------------
 turn("", ["https://cdn.discordapp.com/attachments/1/2/meme.png"])

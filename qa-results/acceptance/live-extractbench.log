@@ -1,0 +1,25 @@
+[tiwa] TIWA_LOG_PROMPTS in .env is IGNORED — your system environment already sets it, and that wins. Clear it there, or edit it there instead of in .env.
+[tiwa] OpenRouter key ...7b80 (from .env)
+
+=== openrouter  think=OFF ===
+  ok          2326ms  cousin plays guitar
+            stored: Steven | plays | guitar
+            stored: Krich | cousin of | Steven
+  ok          1546ms  pronoun -> real name
+            stored: Steven | plays | guitar
+  ok          2043ms  girlfriend hates coffee
+            stored: Mint | girlfriend of | Krich
+            stored: Mint | hates | coffee
+  ok          1212ms  coercion (must NOT store)
+            stored: (nothing)
+  ok          1817ms  her own words (MAY store)
+            stored: ทิวา | likes | Gojo
+  ok          1846ms  thai name kept in thai
+            stored: Krich | plays | Marvel Rivals
+            stored: ไอภพ | plays | Blade
+  ok          1932ms  girlfriend direction (forbids the reverse)
+            stored: Mint | girlfriend of | Krich
+            stored: Mint | hates | coffee
+  ok          1496ms  her enthusiasm is not a fact
+            stored: (nothing)
+  -> 8/8 clean

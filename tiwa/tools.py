@@ -116,13 +116,29 @@ def web_search(db, arg: str) -> str:
     # ponytail: dedupe by url within the turn only. Across turns she is allowed to
     # find the same page again — that is a fresh question, not a repeat.
     seen = current().SEEN_URLS
-    fresh = [h for h in hits if h["href"] not in seen]
-    seen.update(h["href"] for h in fresh)
+    fresh = []
+    for h in hits:
+        if not isinstance(h, dict):
+            continue
+        url = h.get("href", "")
+        if not isinstance(url, str):
+            continue
+        try:
+            valid = urlsplit(url).scheme in ("http", "https") and urlsplit(url).hostname
+        except ValueError:
+            continue
+        if not valid or url in seen:
+            continue
+        seen.add(url)
+        fresh.append(h)
+        if len(fresh) == 5:
+            break
     if not fresh:
         return ("every result was one you already saw this turn — these keywords are "
                 "spent, search something different or answer with what you have")
     return "\n".join(
-        f"{h['title']} [{urlsplit(h['href']).netloc}]: {h['body']}" for h in fresh[:5]
+        f"{str(h.get('title', ''))[:180]} [{urlsplit(h['href']).netloc}] "
+        f"{h['href']}: {' '.join(str(h.get('body', '')).split())[:600]}" for h in fresh
     ) or "no results"
 
 

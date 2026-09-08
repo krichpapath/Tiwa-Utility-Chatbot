@@ -1,5 +1,9 @@
 # Tiwa — friend chatbot  ·  `swarm`
 
+First deployment: [deployment instructions](DEPLOYMENT.md) and
+[acceptance verdict and evidence](qa-results/acceptance/REPORT.md).
+Use the project `.venv`; `setup.ps1` installs the captured dependency versions.
+
 ทิวา: a Discord companion with her own opinions, human-like memory, a voice, and
 coercion immunity — users can never write her beliefs; she decides what she
 remembers.

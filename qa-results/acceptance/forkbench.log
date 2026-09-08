@@ -1,0 +1,18 @@
+[tiwa] TIWA_LOG_PROMPTS in .env is IGNORED — your system environment already sets it, and that wins. Clear it there, or edit it there instead of in .env.
+[tiwa] OpenRouter key ...7b80 (from .env)
+message                          | speaker  | found | why
+---------------------------------+----------+-------+----------------------------------
+Steven is coming over tonight    | Krich    | True  | third party found
+what do you think of Gateaux     | Krich    | True  | third party found
+how are you                      | Krich    | False | nobody named
+hey                              | Steven   | False | the speaker is turn_context's job, not this
+recall ok   — named third parties found, speaker skipped, no model call
+
+fork ok     — dispatch then persona in 0.61s, no tool pass (serial would be 0.90s+)
+veto ok     — DJ's `none` lands before the briefing, and `play` names the terms
+path ok     — one turn, two calls, no tool pass to fall back to
+net ok      — router missed the music ask, the classifier caught it
+veto ok     — 'he plays guitar' reaches DJ, and DJ keeps it off the deck
+guard ok    — mid-dispatch she knows a song is coming and names none of it
+
+fork ok — tool pass gone, nothing it fetched is missing, guard still holds

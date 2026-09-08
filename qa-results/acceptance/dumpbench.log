@@ -1,0 +1,31 @@
+[tiwa] TIWA_LOG_PROMPTS in .env is IGNORED — your system environment already sets it, and that wins. Clear it there, or edit it there instead of in .env.
+[tiwa] OpenRouter key ...7b80 (from .env)
+| transcript | filename produced |
+|---|---|
+[voice] saved 123151966_Tycoon_Hello how are you.wav
+| `Hello  how are you?` | 'Hello how are you' |
+[voice] saved 123151969_Tycoon_she said what then left.wav
+| `she said "what" then left` | 'she said what then left' |
+[voice] saved 123151971_Tycoon_whowhatwhere.wav
+| `who/what\where` | 'whowhatwhere' |
+[voice] saved 123151972_Tycoon_ratio 5050 best ever.wav
+| `ratio 50:50 <best> |ever|` | 'ratio 5050 best ever' |
+[voice] saved 123151972_Tycoon_trailing dots.wav
+| `trailing dots...` | 'trailing dots' |
+[voice] saved 123151975_Tycoon_trailing space.wav
+| `trailing space ` | 'trailing space' |
+[voice] saved 123151976_Tycoon_ทิวา เปิดเพลงหน่อย.wav
+| `ทิวา เปิดเพลงหน่อย` | 'ทิวา เปิดเพลงหน่อย' |
+[voice] saved 123151978_Tycoon_nothing.wav
+| `**********************************` | 'nothing' |
+[voice] saved 123151979_Tycoon_nothing.wav
+| `` | 'nothing' |
+[voice] saved 123151980_Tycoon_nothing.wav
+| `   ` | 'nothing' |
+[voice] saved 123151981_Tycoon_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.wav
+| `aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa` | 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' |
+
+wrote 11 files, all readable:
+[voice] saved 123151986_Tycoon_xxxxx.wav
+
+ok — every case written, nothing raised, listener safe

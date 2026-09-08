@@ -1,0 +1,12 @@
+[tiwa] TIWA_LOG_PROMPTS in .env is IGNORED — your system environment already sets it, and that wins. Clear it there, or edit it there instead of in .env.
+[tiwa] OpenRouter key ...7b80 (from .env)
+contract ok — 5 facts, strict schema, and told she is not a butler
+read ok     — the week reaches her without a tool call
+write ok    — queued for ✅ only; no mini can reach the calendar API
+ask ok      — ambiguous date asks and queues nothing
+clash ok    — flagged, and still queued for him to decide
+outage ok   — an unreachable calendar is said plainly, never quoted
+degrade ok  — a junk decision queues nothing and never raises
+order ok    — the reply always lands before the follow-up
+
+calendar ok — judgment only; the parse and the ✅ gate never moved

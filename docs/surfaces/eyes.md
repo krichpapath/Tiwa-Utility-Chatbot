@@ -3,7 +3,7 @@
 !!! warning "Testing state"
 
     Shipped and green on the bench, but it has not lived through a week of real
-    Discord traffic yet. Watch the `look(...)` rows on the [log tab](panel.md#reading-the-tool-rows)
+    Discord traffic yet. Watch the `look(...)` rows on the [**Activity log** tab](panel.md#reading-the-tool-rows)
     and turn `TIWA_VISION` to `0` if it misbehaves.
 
 ## What this is
@@ -44,7 +44,7 @@ flowchart LR
     A[Discord attachment] --> B{image/*?}
     B -- no --> Z[ignored]
     B -- yes --> C[eyes.look<br/>vision model + what they said]
-    C -- text --> D[inner pass<br/>can search what she saw]
+    C -- text --> D[dispatch<br/>can send what she saw to Search Tiwa]
     C -- text --> E[her rules<br/>verbatim]
     C -- "empty (failed)" --> F[blind rule<br/>say you cannot see it]
     D --> G[her reply]
@@ -61,7 +61,7 @@ existed.</figcaption>
 |---|---|
 | `bot.py` | attachments whose `content_type` starts `image/` become a url list. A caption-less image still logs `Krich: [image]`, so "ดูสิ" three messages later still resolves |
 | `eyes.look()` | one OpenRouter call: system prompt + **what they said** + the image url |
-| the inner pass | gets the description as context, so a game or product she does not recognise can be [searched](../concepts/search.md) before she replies |
+| dispatch | gets the description as context, so a game or product she does not recognise can be [searched](../concepts/search.md) while she replies |
 | her rules | get the description **verbatim**, never filtered through the 8B's brief, plus the one instruction that matters |
 | `memory.extract` | sees `[image]` in the chatlog, so she remembers you showed her something |
 

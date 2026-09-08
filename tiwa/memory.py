@@ -8,7 +8,7 @@ from pathlib import Path
 
 MODEL = "huihui_ai/qwen3-abliterated:8b"
 TIWA = "ทิวา"
-DATA_DIR = Path(__file__).parents[1] / "data"
+DATA_DIR = Path(os.environ.get("TIWA_DATA_DIR") or Path(__file__).parents[1] / "data")
 DB_PATH = str(DATA_DIR / "tiwa.db")
 
 _SCHEMA = """
@@ -31,7 +31,7 @@ EPISODES_KEEP = 25  # per person. Beyond this it is diary, not memory.
 
 def connect(path: str = DB_PATH) -> sqlite3.Connection:
     if path == DB_PATH:
-        DATA_DIR.mkdir(exist_ok=True)
+        DATA_DIR.mkdir(parents=True, exist_ok=True)
     db = sqlite3.connect(path, check_same_thread=False)
     db.executescript(_SCHEMA)
     db.execute("INSERT OR IGNORE INTO entities(name, kind) VALUES(?, 'person')", (TIWA,))
@@ -466,9 +466,9 @@ def unreflected(db, n: int = 10) -> list:
     reflection is what she has not processed.
     """
     last = db.execute(
-        "SELECT MAX(ts) FROM episodes WHERE user = ?", (TIWA,)).fetchone()[0] or 0
+        "SELECT MAX(id) FROM episodes WHERE user = ?", (TIWA,)).fetchone()[0] or 0
     return list(db.execute(
-        "SELECT user, text FROM episodes WHERE user != ? AND ts > ? ORDER BY ts DESC LIMIT ?",
+        "SELECT user, text FROM episodes WHERE user != ? AND id > ? ORDER BY ts DESC, id DESC LIMIT ?",
         (TIWA, last, n)))
 
 
@@ -824,24 +824,22 @@ def extract(db, user: str, user_text: str, tiwa_reply: str, context: str = ""):
     from . import llm  # late import: memory is imported by llm's callers first
 
     prefix = f"earlier lines (context only):\n{context}\n\n" if context else ""
-    resp = llm.chat(
-        model=llm.EXTRACT_MODEL if llm.PROVIDER == "openrouter" else MODEL,
-        messages=[
-            {"role": "system", "content": _EXTRACT_SYSTEM},
-            {
-                "role": "user",
-                "content": f"{prefix}{user} said: {user_text}\n{TIWA} replied: {tiwa_reply}",
-            },
-        ],
-        fmt=_EXTRACT_FORMAT,
-        # reasoning tokens share this window with the JSON, so the ceiling goes up
-        # when thinking is on. 4096-with-thinking was never measured; it was raised
-        # so a truncated <think> block could not be the explanation for a bad result.
-        options={"temperature": 0, "num_ctx": 16384 if EXTRACT_THINK else 4096},
-        think=EXTRACT_THINK,
-    )
     try:
+        resp = llm.chat(
+            model=llm.EXTRACT_MODEL if llm.PROVIDER == "openrouter" else MODEL,
+            messages=[
+                {"role": "system", "content": _EXTRACT_SYSTEM},
+                {"role": "user", "content":
+                 f"{prefix}{user} said: {user_text}\n{TIWA} replied: {tiwa_reply}"},
+            ],
+            fmt=_EXTRACT_FORMAT,
+            options={"temperature": 0, "num_ctx": 16384 if EXTRACT_THINK else 4096},
+            think=EXTRACT_THINK,
+        )
         data = json.loads(resp["content"] or "{}")
-    except json.JSONDecodeError:
-        return  # 8B gibberish turn — drop it, next turn tries again
+        if not isinstance(data, dict) or not isinstance(data.get("memories", []), list):
+            raise ValueError("invalid memory extraction shape")
+    except Exception as error:
+        log(db, "error", f"memory extraction failed: {type(error).__name__}; turn not stored")
+        return
     store_extraction(db, user, data, tiwa_reply, said=f"{user} {context} {user_text}")

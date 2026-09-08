@@ -272,22 +272,28 @@ enable_dave_decrypt()
 
 async def join(author) -> str:
     """Join the voice channel `author` is sitting in. Returns what to say back."""
-    ch = getattr(author.voice, "channel", None)
+    ch = getattr(getattr(author, "voice", None), "channel", None)
     if ch is None:
         return "you're not in a voice channel"
     vc = author.guild.voice_client
-    if vc is not None:
-        await vc.move_to(ch)
-    else:
-        await ch.connect(cls=voice_recv.VoiceRecvClient)
+    try:
+        if vc is not None:
+            await vc.move_to(ch)
+        else:
+            await ch.connect(cls=voice_recv.VoiceRecvClient)
+    except Exception as error:
+        return f"couldn't join voice: {type(error).__name__}; check connection and channel permissions"
     return f"joined {ch.name}"
 
 
 async def leave(guild) -> str:
-    vc = guild.voice_client
+    vc = getattr(guild, "voice_client", None)
     if vc is None:
         return "not in a voice channel"
-    await vc.disconnect()
+    try:
+        await vc.disconnect()
+    except Exception as error:
+        return f"couldn't leave voice: {type(error).__name__}"
     return "left"
 
 

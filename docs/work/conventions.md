@@ -100,7 +100,7 @@ that skips them is invisible when you're debugging, and it quietly breaks
 | She ignores you in a server | not `@`-mentioned | [Discord](../surfaces/discord.md) |
 | Settings change did nothing | env read at import — restart | [panel](../surfaces/panel.md) |
 | `calendar unavailable` | never ran `gcal_auth.py` | [calendar](../surfaces/calendar.md) |
-| Music plays nothing, no error | tool never fired — read the llm tab | [tools](../concepts/tools.md) |
+| Music plays nothing, no error | tool never fired — read the **Model calls** tab | [tools](../concepts/tools.md) |
 | `NotImplementedError` on every song | MRO order in `music.source()` | [music](../surfaces/music.md) |
 | Listener dies after one utterance | voice_recv router, needs the patch | [transport](../toolchain/discord-transport.md) |
 | "Thanks for watching!" from silence | VAD disabled | [voice in](../surfaces/voice-in.md) |

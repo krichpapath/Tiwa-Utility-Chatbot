@@ -1,0 +1,6 @@
+Traceback (most recent call last):
+  File "C:\Work\Tiwa\tests\searchbench.py", line 101, in <module>
+    offline()
+  File "C:\Work\Tiwa\tests\searchbench.py", line 33, in offline
+    import ddgs
+ModuleNotFoundError: No module named 'ddgs'

@@ -84,46 +84,68 @@ def _plus1h(start_iso: str) -> str:
     return (dt.datetime.fromisoformat(start_iso) + dt.timedelta(hours=1)).isoformat()
 
 
-def apply_change(text: str) -> str:
-    """Run AFTER Krich's ✅ only. Schema-constrained parse (reliable) -> API call.
-
-    Goes through llm.chat like every other model call: it used to build an ollama
-    client directly, which meant a confirmed calendar write needed ollama running
-    even in `api` mode — the one mode whose point is needing nothing local — and
-    the call never showed up in the model-call log.
-    """
+def prepare_change(text: str) -> dict:
+    """Parse and validate once, before asking the human to approve exact details."""
     from . import llm
-
-    now = dt.datetime.now()
+    now = dt.datetime.now(dt.timezone(dt.timedelta(hours=7)))
     resp = llm.chat(
-        # same per-pass model choice as memory.extract: this is an extraction job
         model=llm.EXTRACT_MODEL if llm.PROVIDER == "openrouter" else MODEL,
-        messages=[
-            {
-                "role": "system",
-                # the word "JSON" is load-bearing: DeepSeek returns empty content
-                # without it, and llm.chat asserts it is present
-                "content": f"Now: {now:%Y-%m-%d %H:%M} ({now:%A}), timezone {TZ}. "
-                "Convert this calendar request to JSON. Resolve relative dates.",
-            },
-            {"role": "user", "content": text},
-        ],
-        fmt=_EVENT_FORMAT,
-        options={"temperature": 0, "num_ctx": 2048},
-    )
+        messages=[{"role": "system", "content":
+                   f"Now: {now:%Y-%m-%d %H:%M} ({now:%A}), timezone {TZ}. "
+                   "Convert this calendar request to JSON. Resolve relative dates. "
+                   "Only add or cancel. Do not guess missing dates or titles; return empty fields."},
+                  {"role": "user", "content": text}],
+        fmt=_EVENT_FORMAT, options={"temperature": 0, "num_ctx": 2048})
+    return validate_change(json.loads(resp["content"] or "{}"))
+
+
+def validate_change(ev: dict) -> dict:
+    if not isinstance(ev, dict) or ev.get("action") not in ("add", "cancel"):
+        raise ValueError("calendar action must be add or cancel")
+    if not isinstance(ev.get("title"), str) or not ev["title"].strip():
+        raise ValueError("calendar title is required")
+    if len(ev["title"]) > 200:
+        raise ValueError("calendar title must be at most 200 characters")
+    start = dt.datetime.fromisoformat(ev["start"])
+    if "T" not in ev["start"]:
+        raise ValueError("calendar start needs date and time")
+    end = dt.datetime.fromisoformat(ev.get("end") or _plus1h(ev["start"]))
+    if end <= start:
+        raise ValueError("calendar end must be after start")
+    return dict(action=ev["action"], title=ev["title"].strip(),
+                start=start.isoformat(), end=end.isoformat())
+
+
+def describe_change(ev: dict) -> str:
+    return f"{ev['action']}: {ev['title']} | {ev['start']} → {ev['end']} ({TZ})"
+
+
+def apply_change(text) -> str:
+    """Apply the exact approved plan. String input supports older direct callers.
+
+    Interactive surfaces pass a validated dict so approval never triggers a
+    second model interpretation. Provider, parse and API failures return errors.
+    """
+
     try:
-        ev = json.loads(resp["content"] or "{}")
+        ev = prepare_change(text) if isinstance(text, str) else validate_change(text)
         svc = _service()
         if ev["action"] == "cancel":
             hits = (
                 svc.events()
-                .list(calendarId="primary", q=ev["title"], singleEvents=True, maxResults=1,
-                      timeMin=dt.datetime.now(dt.timezone.utc).isoformat())
+                .list(calendarId="primary", q=ev["title"], singleEvents=True, maxResults=250,
+                      timeMin=_aware(ev["start"]).isoformat(),
+                      timeMax=(_aware(ev["start"]) + dt.timedelta(seconds=1)).isoformat())
                 .execute()
                 .get("items", [])
             )
+            hits = [hit for hit in hits if hit.get("summary", "").casefold() == ev["title"].casefold()
+                    and hit.get("start", {}).get("dateTime")
+                    and _aware(hit["start"]["dateTime"]) == _aware(ev["start"])]
             if not hits:
                 return f"couldn't find '{ev['title']}' to cancel"
+            if len(hits) != 1:
+                return "calendar change refused: multiple matching events; cancel in Google Calendar"
             svc.events().delete(calendarId="primary", eventId=hits[0]["id"]).execute()
             return f"cancelled: {hits[0].get('summary', ev['title'])}"
         created = (
@@ -143,6 +165,11 @@ def apply_change(text: str) -> str:
         return f"calendar change failed: {e}"
 
 
+def _aware(value: str):
+    stamp = dt.datetime.fromisoformat(value)
+    return stamp if stamp.tzinfo else stamp.replace(tzinfo=dt.timezone(dt.timedelta(hours=7)))
+
+
 if __name__ == "__main__":  # runnable check: pure helpers + schema, no network
     import inspect
 
@@ -151,7 +178,7 @@ if __name__ == "__main__":  # runnable check: pure helpers + schema, no network
 
     # every model call goes through llm.chat, so `api` mode needs nothing local
     # and the call lands in the model-call log
-    src = inspect.getsource(apply_change)
+    src = inspect.getsource(prepare_change)
     assert "llm.chat" in src, "apply_change must route through llm.chat"
     assert "from ollama import" not in src, "apply_change bypasses the provider layer"
     assert "json" in src.lower(), "schema-constrained call needs 'json' in the prompt"

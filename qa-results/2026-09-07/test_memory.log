@@ -1,0 +1,8 @@
+episode rate: 4/12 turns -> first heard about Gateaux | first heard about Mint | first heard about Nara | Mint hates coffee now — likes before
+Traceback (most recent call last):
+  File "C:\Work\Tiwa\tests\test_memory.py", line 351, in <module>
+    from tiwa import llm, pipeline  # noqa: E402
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Work\Tiwa\tiwa\llm.py", line 15, in <module>
+    import httpx
+ModuleNotFoundError: No module named 'httpx'

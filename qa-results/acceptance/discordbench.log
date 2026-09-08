@@ -1,0 +1,14 @@
+[tiwa] TIWA_LOG_PROMPTS in .env is IGNORED — your system environment already sets it, and that wins. Clear it there, or edit it there instead of in .env.
+[tiwa] OpenRouter key ...7b80 (from .env)
+who ok      — mention in a server, anything in a DM, bots never, everything recorded
+[bot] empty reply — running queued actions anyway
+send ok     — >2000 chars split, an empty reply still runs the flush
+eyes ok     — images pass, a .zip does not, a bare picture is '[image]'
+gate ok     — ✅ writes once, ❌ drops, her own reaction and 🎉 do nothing
+late ok     — a second message, capped, and it reaches history
+cmd ok      — join/leave are free and exact; a sentence still reaches her
+music ok    — a song brings her into the call, and a failure is spoken
+[bot] turn failed: RuntimeError: 401 Unauthorized — User not found.
+outage ok   — a dead turn names the cause in the channel
+
+discord ok — every entry point drives the real bot.py, no model involved

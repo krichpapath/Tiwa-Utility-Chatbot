@@ -1,0 +1,20 @@
+[tiwa] TIWA_LOG_PROMPTS in .env is IGNORED — your system environment already sets it, and that wins. Clear it there, or edit it there instead of in .env.
+[tiwa] OpenRouter key ...7b80 (from .env)
+                       |   before |    after | delta
+-----------------------+----------+----------+------
+minis registered       |        3 |        4 | +1
+MAIN TIWA prompt       |     4609 |     4609 | +0
+dispatch prompt        |     3806 |     3880 | +74
+
+growth ok   — a new capability cost Main Tiwa 0 chars and dispatch 74
+main ok     — she is handed no tools to choose between, and no pass to run
+
+4 music tool descriptions Main used to read :  1643 chars
+the one dj line she reads instead           :   312 chars
+contain ok  — 5x less, and it stays flat as DJ gains tools
+owners ok   — all 8 actuators have a named caller
+voice ok    — dj-only: inert and honest; the classifier still correct
+dj ok       — a song still pulls her into the channel; join() ungated
+acts ok     — the two minis bot.py has to flush for are named explicitly
+
+growth ok — a mini costs Main Tiwa nothing. That was the whole bet.

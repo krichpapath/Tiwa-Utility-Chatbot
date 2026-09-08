@@ -170,7 +170,7 @@ def the_veto(argv):
               f"{'' if hit else '   <-- WRONG'}")
     print(f"\nveto: {ok}/{len(CASES)}")
     vetoes = [c for c in CASES if c[1] == "none"]
-    assert ok >= len(CASES) - 2, f"DJ's judgment regressed: {ok}/{len(CASES)}"
+    assert ok == len(CASES), f"DJ's judgment regressed: {ok}/{len(CASES)}"
     print(f"veto ok     — {len(vetoes)} non-music asks reached DJ and none reached"
           " the deck")
 

@@ -138,7 +138,7 @@ def cannot_name_what_she_has_not_heard():
     tools.new_turn()
     music.NOW["title"] = None
     state = pipeline._state(db, "Krich", "เปิดเพลงอะไรก็ได้", dispatching_music=True)
-    for must in ("It IS happening", "do NOT name a SONG TITLE",
+    for must in ("Playback is NOT confirmed", "do NOT name a SONG TITLE",
                  "Do not sing or quote its lyrics"):
         assert must in state, f"missing from a mid-dispatch turn: {must}"
     assert "came up empty" not in state, "told her it failed before it had run"
@@ -147,7 +147,7 @@ def cannot_name_what_she_has_not_heard():
     # worse — she echoed it. The prohibition carries the guarantee on its own.
 
     quiet = pipeline._state(db, "Krich", "how are you")
-    assert "It IS happening" not in quiet, "a standing music line came back"
+    assert "Playback is NOT confirmed" not in quiet, "a standing music line came back"
     print("guard ok    — mid-dispatch she knows a song is coming and names none of it")
 
 
@@ -170,7 +170,7 @@ def dj_has_the_last_word_before_she_speaks():
         _, pending, dj = run_turn("ขอ ยืมตังหน่อย")
         assert pending is None and dj == [], f"a veto still reached the deck: {pending} {dj}"
         assert states, "the persona pass never ran"
-        assert "It IS happening" not in states[-1], \
+        assert "Playback is NOT confirmed" not in states[-1], \
             f"she was told a song is coming after DJ vetoed it:\n{states[-1]}"
     finally:
         DJ_SAYS = was

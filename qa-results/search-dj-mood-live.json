@@ -1,0 +1,30 @@
+[
+  {
+    "task": "play something chill for studying",
+    "choice": {
+      "action": "play",
+      "terms": "Nujabes Aruarian Dance",
+      "playing": null,
+      "queued": 0
+    },
+    "track": {
+      "title": "aruarian dance",
+      "id": "qYcoJpqCha4",
+      "duration": 250
+    }
+  },
+  {
+    "task": "มีเพลงแนะนำมั้ย เปิดให้ฟังหน่อย",
+    "choice": {
+      "action": "play",
+      "terms": "Three Man Down ฝนตกไหม",
+      "playing": null,
+      "queued": 0
+    },
+    "track": {
+      "title": "ฝนตกไหม - Three Man Down |Official MV|",
+      "id": "ENnGPkhVu2g",
+      "duration": 317
+    }
+  }
+]

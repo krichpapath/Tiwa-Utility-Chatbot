@@ -1,0 +1,10 @@
+[tiwa] TIWA_LOG_PROMPTS in .env is IGNORED — your system environment already sets it, and that wins. Clear it there, or edit it there instead of in .env.
+[tiwa] OpenRouter key ...7b80 (from .env)
+PASS owner gate, exact preview, one shot, wrong channel, expiry, DM voice/music
+PASS calendar outage, malformed plans, reversed times, ambiguous cancellation
+PASS malformed router data, equal-timestamp memory watermark and ordering
+PASS failed/malformed extraction is logged and never crashes the conversation
+[tiwa] daily token ceiling hit (140) — falling back to local
+PASS usage thread/process contention, token ceiling routing, corrupt ledger fails closed
+wrote C:\Users\krich\AppData\Local\Temp\tiwa-graph-1apl22pl\graph.html — 3 nodes, 1 edges
+PASS graph treats stored names and tooltip notes as data, not executable HTML

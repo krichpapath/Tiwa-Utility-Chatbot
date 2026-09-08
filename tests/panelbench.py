@@ -202,7 +202,7 @@ check("wipe whitelist holds", refused(dashboard.wipe, "entities", True)
 seen = {}
 
 
-async def fake_respond(db_, hist, author, text, images=()):
+async def fake_respond(db_, hist, author, text, images=(), on_late=None):
     seen["hist"] = [dict(m) for m in hist]
     tools.DJ.append(("queue", "lofi"))
     tools.PENDING_CALENDAR.append("lunch tomorrow")

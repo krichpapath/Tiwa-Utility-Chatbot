@@ -2,39 +2,48 @@
 
 How to do the things you'll actually be asked to do. Each one names the files, in order.
 
-## Add a tool
+## Add a skill — a Mini Tiwa {#add-a-tool}
 
-Give her a new ability.
+Give her a new ability. On this branch that means a **mini**, not a tool.
 
 ```
-tiwa/tools.py     ← write the function, decorate it
-bot.py            ← ONLY if it acts on Discord (then it sets a flag)
-tests/toolbench.py ← add a probe
+tiwa/minis.py     ← write the function, decorate it
+tiwa/tools.py     ← ONLY if it needs a new hand — a way to touch the world
+bot.py            ← ONLY if that hand acts on Discord (then it sets a flag)
+tests/dispatchbench.py ← add a probe
+tests/growthbench.py   ← name the caller of any new actuator
 ```
 
-1. Write it. One string argument, returns a string, never raises:
+1. Write it. One string task in, a dict of **declared facts** out, never raises:
 
     ```python
-    @tool(
-        "One sentence on WHEN to call this. Then Thai trigger phrases. "
-        "Then examples of what to pass.",
-        "what the argument means",
+    @mini(
+        "One sentence on WHAT it does and what to give it. Then Thai trigger "
+        "phrases. Written for Main Tiwa, who sees this line and nothing else.",
+        ("field", "another_field"),      # every key it may return
     )
-    def my_tool(db, arg: str) -> str:
-        return "what she should know as a result"
+    def my_mini(db, task: str) -> dict:
+        return {"field": "a fact", "another_field": 3}
     ```
 
-2. If it touches Discord, don't. Set a module flag and drain it in `bot.py` after her
-   reply — [why](../concepts/tools.md#tools-set-flags-they-dont-act).
+    The field list is the guarantee. Anything undeclared is dropped by
+    `minis.clean()` before it can reach her — that is how a mini is stopped from
+    smuggling prose into her voice. Adding a field is a visible edit somebody
+    reviews.
 
-3. Check the registry: `py -X utf8 -m tiwa.tools`
+2. If it acts on Discord, don't act. Set a flag on the `Turn` and let `bot.py`
+   drain it after her reply — [why](../concepts/tools.md#tools-set-flags-they-dont-act).
+
+3. Check the contract: `py -X utf8 -m tiwa.minis`, then `py -X utf8 tests\growthbench.py`.
 
 4. **Write the description like it's the code**, because it is. Include Thai phrasings —
-   the model does not generalise from English. Say what *not* to call it for.
+   the model does not generalise from English. Say what *not* to send it.
 
-!!! warning "Every tool you add competes with the others"
-    More tools measurably degrades selection. `now_playing` was deleted for this reason.
-    Ask whether [action state](../concepts/action-state.md) could just tell her instead.
+!!! tip "This is the one that is supposed to be cheap"
+    Adding a mini costs Main Tiwa's prompt **0 characters** — `growthbench` asserts it,
+    by registering a fourth mini and diffing. That was the whole point of the swarm.
+    Adding a *tool* used to cost every other tool some accuracy; `now_playing` was
+    deleted for it.
 
 ## Add a setting
 
@@ -52,10 +61,10 @@ somebody who has never seen the codebase — write the sentence you'd want.
 | Want | Edit | Why there |
 |---|---|---|
 | Her personality, voice, values | `prompts/tiwa.md` | Source of truth |
-| A rule she keeps breaking | `pipeline.respond()` per-turn rules | Strongest prompt lever |
+| A rule she keeps breaking | `pipeline._state()` per-turn rules | Strongest prompt lever |
 | Something that must never fail | code | Prompts reduce, code decides |
 
-Order of effectiveness, measured repeatedly: **code > per-turn rules > tool description >
+Order of effectiveness, measured repeatedly: **code > per-turn rules > mini description >
 persona prompt.**
 
 ## Change what she remembers
@@ -87,7 +96,7 @@ For anything touching Discord, import `bot` (it's import-safe) and fake the voic
 
 ```mermaid
 flowchart TB
-    A[she did something weird] --> B[open the panel<br/>llm tab]
+    A[she did something weird] --> B[open the panel<br/>Model calls tab]
     B --> C{which pass?}
     C -->|no tool fired| D[thinking pass:<br/>fix the tool DESCRIPTION]
     C -->|tool fired, words wrong| E[her reply pass:<br/>check injected rules]
@@ -99,7 +108,7 @@ flowchart TB
     H --> I[fix it]
 ```
 
-<figcaption>The llm tab tells you which of the three passes to blame. Guessing wastes a
+<figcaption>The **Model calls** tab tells you which of the three passes to blame. Guessing wastes a
 day.</figcaption>
 
 Then reproduce in `chat.py`, not Discord — same brain, no gateway, instant restarts.

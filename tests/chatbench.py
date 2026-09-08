@@ -19,6 +19,7 @@ things a music turn cannot:
 Costs real tokens: 2 turns + 2 judge calls per case.
 """
 import asyncio
+import os
 import sys
 from pathlib import Path
 
@@ -46,6 +47,10 @@ async def one(db, hist, who, text):
 
 async def main():
     db = memory.connect()  # her real memory; nothing here writes to the graph
+    if os.environ.get("TIWA_QA_FIXTURES") == "1":
+        memory.remember(db, "Gateaux", "plays", "Marvel Rivals")
+        memory.remember(db, "Krich", "friend of", "Gateaux")
+        memory.remember(db, "Tycoon", "plays", "Marvel Rivals")
     music.NOW["title"] = None
     music.QUEUE.clear()
 

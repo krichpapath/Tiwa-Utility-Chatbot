@@ -1,0 +1,22 @@
+[
+  {
+    "check": "calbench",
+    "exit": 0,
+    "seconds": 52.73
+  },
+  {
+    "check": "djminibench",
+    "exit": 0,
+    "seconds": 20.23
+  },
+  {
+    "check": "chatbench",
+    "exit": 0,
+    "seconds": 37.88
+  },
+  {
+    "check": "pickbench",
+    "exit": 0,
+    "seconds": 27.75
+  }
+]

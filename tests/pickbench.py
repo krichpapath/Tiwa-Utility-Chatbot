@@ -48,6 +48,7 @@ async def main():
         mark = "" if ok else "  <- WRONG"
         print(f"| {text} | {queued or 'nothing'}{mark} | {reply[:70]} |")
     print(f"\n{good}/{len(CASES)} correct")
+    assert good == len(CASES), "music recommendations or non-music veto regressed"
     tools.PENDING_MUSIC = None
     tools.DJ.clear()
 

@@ -1,6 +1,6 @@
 # Dependency table
 
-Every package, what it does, why it's here, and what replacing it would cost. Sixteen,
+Every package, what it does, why it's here, and what replacing it would cost. Seventeen,
 all declared in `requirements.txt`.
 
 !!! tip "The bar for adding one"
@@ -27,6 +27,7 @@ all declared in `requirements.txt`.
 | **edge-tts** | Text to speech | Free, no key, has **Thai** neural voices | `tiwa/voice.py` | Low, but Thai narrows the field hard |
 | **yt-dlp** | YouTube search + direct audio URL | The only thing that reliably keeps working | `tiwa/music.py` | High — nothing else is as maintained |
 | **av** (PyAV) | Decode the audio stream | FFmpeg libs as a wheel, no binary | `tiwa/music.py` | Medium |
+| **gradio** | The whole control panel — tabs, self-filtering tables, live refresh, the chat tab | Sortable searchable tables and a chat UI for no frontend code. It replaced ~420 lines of hand-written CSS, HTML and `http.server` | `dashboard.py` | Medium — the panel would go back to hand-written HTML. Nothing in the bot imports it |
 
 ## Declared because the code imports them directly
 
@@ -37,6 +38,7 @@ music and voice on import.
 | Package | What it does | Imported by | Cost to replace |
 |---|---|---|---|
 | **numpy** | Array maths on audio buffers — RMS for the noise gate, peak checks | `tiwa/voice.py`, `tiwa/music.py` | Medium. `array` + `math` could do the RMS, but onnx-asr wants numpy anyway |
+| **pandas** | Every panel table and the activity plot are `DataFrame`s | `dashboard.py` (arrives with gradio, but imported directly) | Low — lists of tuples, if gradio ever stops needing it |
 | **davey** | Discord's DAVE (E2EE voice) session — `decrypt()` for received audio | `tiwa/voice.py` | High. Without it she cannot hear anything; see [transport](discord-transport.md) |
 
 ## Docs only
@@ -52,7 +54,7 @@ music and voice on import.
 | LangChain / LlamaIndex / any agent framework | The 30-line registry in `tools.py` does the job. A framework would add indirection and its own opinions |
 | An ORM (SQLAlchemy, Peewee) | Five tables and hand-written SQL. An ORM would be more code, not less |
 | A vector DB (Chroma, FAISS, pgvector) | Recall is a substring scan over a small graph. FTS5 comes first if that ever hurts — it's built into SQLite |
-| A web framework (Flask, FastAPI) | The control panel is `http.server`, one localhost user, no dependency |
+| A web framework (Flask, FastAPI) | The control panel is Gradio, which brings its own server. Nothing else in the project serves HTTP |
 | `python-dotenv` | `llm.load_env()` is 8 lines and does exactly what's needed |
 | `pytest` | Benches are runnable scripts that print tables you read. See [the bench suite](../work/testing.md) |
 | ffmpeg (system binary) | PyAV and soundfile cover it. See [audio and speech](audio-speech.md) |

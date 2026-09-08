@@ -1,4 +1,4 @@
-"""Search Tiwa: keywords, then one search. Offline.
+"""Search Tiwa: keyword planner, evidence reviewer, and error responses. Offline.
 
 `searchbench` measures the real index against the real web. This measures the
 layer above it — that the sentence never reaches the search engine, that the year
@@ -8,6 +8,7 @@ message she would read out loud.
     py -X utf8 tests\\searchminibench.py
 """
 import datetime
+import json
 import sys
 from pathlib import Path
 
@@ -21,6 +22,10 @@ result = {"out": "Some Match 3-1 [thairath.co.th]: they won"}
 
 
 def fake_chat(**kw):
+    if kw.get("fmt") == minis._SEARCH_REVIEW_FORMAT:
+        failed = result["out"].startswith(("search failed", "every result"))
+        return {"content": json.dumps({"enough": not failed, "answer": result["out"] if not failed else "",
+                                       "sources": [1] if not failed else [], "query": ""})}
     asked.update(kw)
     return {"content": keywords["out"], "tool_calls": [], "raw": {}}
 
@@ -97,11 +102,12 @@ def a_failure_is_not_an_answer():
                     "every result was one you already saw this turn"):
         result["out"] = failure
         out = minis.run(db, "search", "who won")
-        assert out["found"] == "", f"an error came back as a finding: {out}"
+        assert "Could not establish" in out["found"], out
+        assert failure not in out["found"], out
     result["out"] = "Some Match 3-1 [thairath.co.th]: they won"
     out = minis.run(db, "search", "who won")
-    assert out["found"].startswith("Some Match"), out
-    print("failure ok  — a flake returns nothing, so _late() says nothing")
+    assert "Some Match" in out["found"], out
+    print("failure ok  — unavailable evidence is reported without exposing raw errors")
 
 
 def read_only():
@@ -120,4 +126,4 @@ the_year_is_now()
 empty_model_falls_back()
 a_failure_is_not_an_answer()
 read_only()
-print("\nsearch ok — keywords not sentences, right year, a flake stays quiet")
+print("\nsearch ok — keywords not sentences, right year, a flake stays honest")

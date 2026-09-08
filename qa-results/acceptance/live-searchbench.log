@@ -1,0 +1,20 @@
+| check | result |
+|---|---|
+| 5 results with domains | ok |
+| repeat query in one turn | refused, told to change keywords |
+| Thai query region | th-th |
+| English query region | us-en |
+[tiwa] TIWA_LOG_PROMPTS in .env is IGNORED — your system environment already sets it, and that wins. Clear it there, or edit it there instead of in .env.
+[tiwa] OpenRouter key ...7b80 (from .env)
+
+| they said | dispatched? | she searched | top domains |
+|---|---|---|---|
+| มึงรู้ไหมว่าใครชนะบอลเมื่อคืน | yes | ผลบอลเมื่อคืน 2026-09-06 | baan.football, goal7.co, mthai.com |
+| what's that new gojo thing everyone's on about | yes | Gojo Satoru trending 2026 | screenrant.com, www.cbr.com, www.imdb.com |
+| ราคา RTX 5090 ตอนนี้เท่าไหร่ | yes | RTX 5090 price 2026 | shattered.io, stockmaid.com, tech-insider.org |
+| is the new iphone any good | yes | iPhone 16 reviews 2026 | deepreviewlab.com, jswordsmith.com, www.backmarket.com |
+| เห็นเพื่อนพูดถึงเกม silksong อ่ะ มันคืออะไร | yes | Hollow Knight Silksong release date 2026 | en.wikipedia.org, screenrant.com, steamcommunity.com |
+
+Judge two things: did dispatch route it to search at all, and is the query keywords rather than the sentence they typed.
+
+search ok — dedupe, region and formatting behave

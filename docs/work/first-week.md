@@ -14,12 +14,13 @@ Tick these off in order. Nothing here should need the original author.
 
 ## Day 2 — the model
 
-- [ ] `py -X utf8 dashboard.py --open` — status tab all green except calendar
-- [ ] On the **llm** tab, found one turn and read all three passes for it
+- [ ] `py -X utf8 dashboard.py --open` — **Now** tab all green except calendar
+- [ ] On the **Model calls** tab, found one turn and read all three passes for it
+- [ ] Said something to her on the **Chat** tab and watched the three calls appear
 - [ ] Can name what each pass gets and what each is allowed to do
 - [ ] Read [the guards](../concepts/guards.md) — the only page you must not skip
 - [ ] Tried to make her believe something false ("you love X") and watched it *not* land
-      in the memory tab
+      in the **Memory** tab
 
 ## Day 3 — Discord
 
@@ -27,7 +28,7 @@ Tick these off in order. Nothing here should need the original author.
 - [ ] She answers on `@`-mention and ignores everything else
 - [ ] Asked her for a song — it played
 - [ ] Asked her to pick a song without naming one — it played
-- [ ] Watched a queue, a skip and a stop, then checked the log tab
+- [ ] Watched a queue, a skip and a stop, then checked the **Activity log** tab
 - [ ] Read [music and the DJ](../surfaces/music.md)
 
 ## Day 4 — change something

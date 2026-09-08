@@ -71,7 +71,7 @@ Everything above works. The thing that actually failed in real use is one step e
 ```
 
 No `calendar_write` row. She said she'd done it and hadn't — the same confabulation as
-[the music case](music.md), and the reason to trust the **log tab, never her reply**.
+[the music case](music.md), and the reason to trust the ****Activity log** tab, never her reply**.
 
 The cause was in `_INNER_SYSTEM`, which gave music four lines and the calendar one word:
 *"check the calendar"*. So a message leading with a calendar word mapped to
@@ -101,7 +101,7 @@ Two things worth taking from that:
   run it for you.
 - **She will happily say she wrote it without writing it.** See below; this is the
   failure mode to watch for, and the panel's log tab is where you check.
-- **The parse is a normal `llm.chat()` call**, so it shows up on the panel's llm tab like
+- **The parse is a normal `llm.chat()` call**, so it shows up on the panel's **Model calls** tab like
   everything else — that's where to look when a date comes out wrong. It bypassed the
   provider layer until 2026-07-30 ([F3](../reference/findings.md#f3)), which made `api`
   mode secretly need Ollama.

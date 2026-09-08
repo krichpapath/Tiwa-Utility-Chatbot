@@ -25,6 +25,9 @@ import bot  # noqa: E402  (imports discord, does not connect)
 bot.db = memory.connect(":memory:")
 
 ME = types.SimpleNamespace(id=999, bot=True, display_name="Tiwa")
+bot.OWNER_ID = "7"
+bot.gcal.prepare_change = lambda text: text
+bot.gcal.describe_change = lambda text: text
 bot.client = types.SimpleNamespace(user=ME, loop=None,
                                    get_channel=lambda i: CHANNELS.get(i),
                                    fetch_channel=None)
@@ -210,6 +213,8 @@ def the_calendar_gate():
     assert not applied, "her OWN reaction confirmed the write"
     asyncio.run(bot.on_raw_reaction_add(react("🎉")))
     assert not applied and bot.pending_confirms, "an unrelated emoji consumed the gate"
+    asyncio.run(bot.on_raw_reaction_add(react("✅", uid=8)))
+    assert not applied and bot.pending_confirms, "a stranger approved the owner's calendar"
 
     asyncio.run(bot.on_raw_reaction_add(react("✅")))
     assert applied == ["add dentist tomorrow 15:00"], applied

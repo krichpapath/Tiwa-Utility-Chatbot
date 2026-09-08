@@ -3,8 +3,10 @@ import asyncio
 import faulthandler
 import logging
 import os
+import time
 from collections import defaultdict, deque
 from datetime import datetime
+from functools import partial
 
 import discord
 from discord.ext import tasks
@@ -31,10 +33,11 @@ locks = defaultdict(asyncio.Lock)  # serialize replies per channel
 
 intents = discord.Intents.default()
 intents.message_content = True
-client = discord.Client(intents=intents)
+client = discord.Client(intents=intents, allowed_mentions=discord.AllowedMentions.none())
 
 HOME = os.environ.get("TIWA_HOME_CHANNEL")  # channel id for unprompted messages; unset = quiet
 pending_confirms = {}  # confirm-message id -> plain-language calendar request
+OWNER_ID = os.environ.get("TIWA_OWNER_ID")  # defaults to Discord application owner at login
 
 
 voice_channel = {}  # guild id -> text channel to mirror the transcript into
@@ -72,10 +75,13 @@ def _later(channel):
     return send
 
 
-async def _heard(name: str, text: str):
+async def _heard(name: str, text: str, channel=None):
     """Everything said in voice becomes chatlog (G6). The model runs ONLY when
     her name is in it (G7) — Whisper is cheap, the LLM is not."""
-    for ch in list(voice_channel.values()):
+    channels = [channel] if channel is not None else list(voice_channel.values())
+    if channel is None and len(channels) > 1:
+        return  # an unscoped transcript must never leak across servers
+    for ch in channels:
         history[ch.id].append({"role": "user", "content": f"{name}: {text}"})
         memory.log(db, "voice", f"{name}: {text}")
         asked = voice.wake(text)
@@ -89,16 +95,20 @@ async def _heard(name: str, text: str):
             except Exception as e:
                 await _apologise(ch, e)
                 continue
-            if not reply:
-                continue
-            history[ch.id].append({"role": "assistant", "content": reply})
-            ctx = memory.history_context(list(history[ch.id]))
-            asyncio.create_task(
-                asyncio.to_thread(memory.extract, db, name, asked, reply, ctx)
-            )
-            await ch.send(reply[:2000])
-            await voice.say(ch.guild, reply)  # G8: answer out loud, ducks music
+            if reply:
+                history[ch.id].append({"role": "assistant", "content": reply})
+                ctx = memory.history_context(list(history[ch.id]))
+                asyncio.create_task(
+                    asyncio.to_thread(memory.extract, db, name, asked, reply, ctx)
+                )
+                await ch.send(reply[:2000])
+                try:
+                    await voice.say(ch.guild, reply)
+                except Exception as e:
+                    memory.log(db, "error", f"speech failed: {type(e).__name__}")
+                    await ch.send("⚠️ speech unavailable; text and queued actions still work")
             await _flush_music(ch)
+            await _flush_calendar_queue(ch)
             await _flush_leave(ch, asked)  # she can be told to leave out loud too
 
 
@@ -190,6 +200,9 @@ async def _flush_music(channel, author=None):
         tools.PENDING_MUSIC = None
     if not jobs:
         return
+    if channel.guild is None:
+        await channel.send("music needs a server voice channel — ask me there")
+        return
 
     vc = channel.guild.voice_client
     if vc is None and author is not None:
@@ -199,6 +212,7 @@ async def _flush_music(channel, author=None):
             await channel.send(result)
             return
         voice_channel[channel.guild.id] = channel
+        voice.listen(channel.guild, partial(_heard, channel=channel), client.loop)
         vc = channel.guild.voice_client
     if vc is None:
         await channel.send("i'm not in a voice channel")
@@ -240,6 +254,8 @@ async def _flush_music(channel, author=None):
 
 async def _hang_up(guild) -> str:
     """Leave the call. Disconnecting kills playback, so the deck goes with it."""
+    if guild is None:
+        return "voice commands need a server voice channel"
     voice_channel.pop(guild.id, None)
     music.QUEUE.clear()
     music.NOW["title"] = None
@@ -260,10 +276,22 @@ async def _flush_calendar_queue(channel):
     """calendar_write only queues; every write is gated behind Krich's ✅ here."""
     while tools.PENDING_CALENDAR:
         text = tools.PENDING_CALENDAR.pop(0)
-        m = await channel.send(f"📅 calendar change: **{text}** — ✅ to confirm, ❌ to drop")
+        if not OWNER_ID:
+            await channel.send("calendar writes unavailable: configure TIWA_OWNER_ID or reconnect the bot")
+            continue
+        try:
+            plan = await asyncio.to_thread(gcal.prepare_change, text)
+        except Exception as e:
+            await channel.send(f"calendar proposal failed: {type(e).__name__}; provide title, date and time")
+            continue
+        now = time.monotonic()
+        for mid, (_, _, expires) in list(pending_confirms.items()):
+            if expires <= now:
+                pending_confirms.pop(mid, None)
+        m = await channel.send(f"📅 calendar change: **{gcal.describe_change(plan)}** — ✅ to confirm, ❌ to drop (owner only; expires in 10 minutes)")
+        pending_confirms[m.id] = (plan, channel.id, now + 600)
         await m.add_reaction("✅")
         await m.add_reaction("❌")
-        pending_confirms[m.id] = text
 
 
 @tasks.loop(seconds=30)
@@ -285,7 +313,7 @@ async def keep_listening():
         elif not vc.is_listening():
             # log the restart, not the attempt: a line saying "restarting" when
             # nothing restarted is what buried the log in the first place
-            if voice.listen(ch.guild, _heard, client.loop) == "listening":
+            if voice.listen(ch.guild, partial(_heard, channel=ch), client.loop) == "listening":
                 memory.log(db, "voice", "listening had stopped — restarted")
 
 
@@ -326,6 +354,9 @@ async def idle_turn():
 
 @client.event
 async def on_ready():
+    global OWNER_ID
+    if not OWNER_ID:
+        OWNER_ID = str((await client.application_info()).owner.id)
     print(f"logged in as {client.user}")
     print(f"[music] {music.ready()}")
     if HOME and not idle_turn.is_running():
@@ -336,15 +367,24 @@ async def on_ready():
 
 @client.event
 async def on_raw_reaction_add(payload):
-    text = pending_confirms.get(payload.message_id)
-    if text is None or payload.user_id == client.user.id or str(payload.emoji) not in "✅❌":
+    pending = pending_confirms.get(payload.message_id)
+    if pending is None or str(payload.user_id) != str(OWNER_ID) or str(payload.emoji) not in ("✅", "❌"):
+        return
+    text, channel_id, expires = pending
+    if payload.channel_id != channel_id:
         return
     del pending_confirms[payload.message_id]  # one shot
     channel = client.get_channel(payload.channel_id) or await client.fetch_channel(
         payload.channel_id
     )
+    if time.monotonic() >= expires:
+        await channel.send("calendar proposal expired; ask again")
+        return
     if str(payload.emoji) == "✅":
-        result = await asyncio.to_thread(gcal.apply_change, text)
+        try:
+            result = await asyncio.to_thread(gcal.apply_change, text)
+        except Exception as e:
+            result = f"calendar change failed: {type(e).__name__}; check calendar before retrying"
         await channel.send(result)
     else:
         await channel.send("dropped.")
@@ -354,7 +394,7 @@ async def on_raw_reaction_add(payload):
 async def on_message(message: discord.Message):
     if message.author.bot:
         return
-    text = message.content.replace(f"<@{client.user.id}>", "").strip()
+    text = message.content.replace(f"<@{client.user.id}>", "").replace(f"<@!{client.user.id}>", "").strip()
     # content_type is None for some clients; treat that as not-an-image rather than
     # paying a vision call on a .zip
     images = [a.url for a in message.attachments
@@ -377,7 +417,7 @@ async def on_message(message: discord.Message):
         result = await voice.join(message.author)
         if result.startswith("joined"):
             voice_channel[message.guild.id] = message.channel
-            result += " — " + voice.listen(message.guild, _heard, client.loop)
+            result += " — " + voice.listen(message.guild, partial(_heard, channel=message.channel), client.loop)
         await message.channel.send(result)
         return
     if cmd in ("leave", "leave vc", "get out", "ออกไป", "ออกห้อง"):
@@ -422,7 +462,7 @@ async def on_message(message: discord.Message):
                 result = await voice.join(message.author)
                 if result.startswith("joined"):
                     voice_channel[message.guild.id] = message.channel
-                    voice.listen(message.guild, _heard, client.loop)
+                    voice.listen(message.guild, partial(_heard, channel=message.channel), client.loop)
                 else:
                     await message.channel.send(result)
         await _flush_music(message.channel, message.author)

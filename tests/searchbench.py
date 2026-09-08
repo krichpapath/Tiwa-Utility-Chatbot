@@ -44,6 +44,8 @@ def offline():
 
     # the exact complaint: search again, get the same page back
     again = tools.web_search(db, "premier league results")
+    assert "Result 5" in again and "Result 0" not in again, again
+    again = tools.web_search(db, "premier league results")
     assert "already saw this turn" in again, again
     assert len(tools.SEEN_URLS) == 8
 

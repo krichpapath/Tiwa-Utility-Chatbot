@@ -4,6 +4,8 @@ yt-dlp finds a direct audio URL, av decodes it to PCM, discord plays the PCM.
 """
 import os
 import queue
+import re
+import unicodedata
 import threading
 import time
 from urllib.parse import quote
@@ -83,7 +85,10 @@ _YDL = {
     "no_warnings": True,
     "noplaylist": True,
     "skip_download": True,
-    "default_search": "ytsearch1",
+    "default_search": "ytsearch5",
+    "socket_timeout": 8,
+    "retries": 1,
+    "extractor_retries": 1,
     "extractor_args": {"youtube": {"player_client": [YT_CLIENT]}},
 }
 if YT_COOKIES:
@@ -118,23 +123,6 @@ _RECENT = []  # ponytail: last few video ids, so the same query stops replaying
 _RECENT_KEEP = 20
 
 
-def _ok(e: dict, trust_short: bool = False) -> bool:
-    """Could this result be a song?
-
-    `trust_short` is for the filtered search below, whose entries report
-    `duration: None` — measured, all 5 of them for "lofi study". On a plain search
-    a missing duration means livestream; on that page YouTube has promised every
-    result is under four minutes, so it means "not reported". It still lists live
-    streams, which is why `find()` re-checks after resolving.
-    """
-    if "list=" in (e.get("url") or ""):
-        return False  # a "Mix - ..." radio playlist, not a video
-    seconds = e.get("duration")
-    if seconds is None:
-        return trust_short
-    return 0 < seconds <= MAX_TRACK_S and e.get("id") not in _RECENT
-
-
 # ponytail: YouTube's own "under 4 minutes" search filter. A mood query returns
 # NOTHING but mixes — measured 0 songs in the top 20 for "hype gaming EDM", and
 # 261/264 usable with this filter on. The sp= value is a magic constant that only
@@ -151,74 +139,115 @@ def _search(target: str, n: int) -> list:
         return (ydl.extract_info(target, download=False) or {}).get("entries") or []
 
 
-def find(query: str) -> dict:
-    """Search YouTube, return {title, url, duration, id} for the best song hit.
+def _words(text: str) -> set:
+    return set(re.findall(r"[^\W_]+", unicodedata.normalize("NFKC", text).casefold()))
 
-    A bare video id or url skips the search entirely — that is how `_decode`
-    re-resolves the track it is ALREADY playing without risking a different song.
+
+# Qualifiers affect WHICH recording is wanted, not merely its search ranking.
+_VERSIONS = ("cover", "remix", "live", "karaoke", "instrumental", "sped up",
+             "slowed", "nightcore", "reaction", "tutorial", "คาราโอเกะ", "สอนเล่น")
+_GENERIC = _words("official audio video music lyric lyrics ost soundtrack song เพลง")
+
+
+def _rank(query: str, entry: dict) -> float:
+    """Rank title/artist match before popularity; never silently change version."""
+    title = str(entry.get("title") or "")
+    channel = str(entry.get("channel") or entry.get("uploader") or "")
+    terms = _words(query) - _GENERIC
+    text = _words(title + " " + channel)
+    # Search spelling may split a compound title: 'Red Line' versus 'Redline'.
+    ordered = re.findall(r"[^\W_]+", unicodedata.normalize("NFKC", query).casefold())
+    for left, right in zip(ordered, ordered[1:]):
+        if left + right in text:
+            text.update((left, right))
+    coverage = len(terms & text) / max(1, len(terms))
+    if coverage < 1:
+        return -1
+    # Phrase tests use the original order; word tests avoid e.g. 'Live' in 'Oliver'.
+    for version in _VERSIONS:
+        wanted = _words(version) <= _words(query)
+        present = _words(version) <= _words(title)
+        if present and not wanted:
+            return -1
+        if wanted and not present:
+            return -1
+    score = coverage * 10
+    if "official" in text or channel.casefold().endswith(" - topic"):
+        score += 1
+    if "lyrics" in _words(title) and "lyrics" not in _words(query):
+        score -= 0.5
+    if entry.get("id") in _RECENT:
+        score -= 0.2  # an explicitly requested song may be played again
+    return score
+
+
+def find(query: str) -> dict:
+    """Compare candidates and retry weak matches; never substitute a random mix.
+
+    Explicit URLs still resolve exactly, including decoder reconnection URLs.
+    Search uses at most three keyword variants and four stream resolutions.
     """
     import yt_dlp
 
-    if query.startswith("http"):  # a real url, not something to search for
+    query = query.strip()
+    if not query:
+        raise LookupError("empty song query")
+    if query.startswith(("https://", "http://")):
         with yt_dlp.YoutubeDL(_YDL) as ydl:
             return _hit(ydl.extract_info(query, download=False))
 
-    entries = _search(f"ytsearch{SEARCH_N}:{query}", SEARCH_N)
-    cands = [e for e in entries if _ok(e)]
-    if not cands:
-        # the filtered page is a fallback because its sp= value is YouTube's, not ours
-        # capped at 2: these are unverified (duration None), and the finite tail
-        # below has to stay reachable inside the extraction budget
-        cands = [e for e in _search(_SHORT.format(q=quote(query)), SEARCH_N)
-                 if _ok(e, trust_short=True)][:2]
-    # tail: anything with a length at all. Some queries have no song on YouTube —
-    # "lofi study" is 24/7 streams most of the way down — and a long mix that ENDS
-    # still lets the queue advance, which a livestream never does.
-    seen = {e.get("id") for e in cands}
-    cands += [e for e in entries if e.get("id") not in seen and e.get("duration")]
-    if not cands:
-        raise LookupError(f"no results for {query!r}")
-
-    hit = best = None
-    for cand in cands[:4]:  # flat metadata lies; the resolved duration does not
+    seen, resolved = set(), 0
+    targets = [f"ytsearch{SEARCH_N}:{query}",
+               f"ytsearch{SEARCH_N}:{query} official audio",
+               _SHORT.format(q=quote(query))]
+    for target in targets:
         try:
-            with yt_dlp.YoutubeDL(_YDL) as ydl:
-                hit = _hit(ydl.extract_info(cand["url"], download=False))
-        except Exception as e:
-            if _rate_limited(e):
-                # Not this video's fault and not fixable by trying the next one —
-                # every remaining candidate will fail identically, and asking is
-                # what makes the throttle worse. Stop, and say something a person
-                # can act on instead of relaying yt-dlp's four-line error.
-                raise LookupError(
-                    "YouTube is rate-limiting this machine (\"sign in to confirm "
-                    "you're not a bot\"). Set TIWA_YT_COOKIES or "
-                    "TIWA_YT_COOKIE_BROWSER, or wait it out."
-                ) from e
-            # A DEAD candidate must not lose the live ones behind it. This loop was
-            # written to survive bad METADATA — livestreams, three-hour mixes — and
-            # an unavailable video is a different failure that walked straight out
-            # of find(). Live log 2026-08-23: "[youtube] 5Z8N9TTvKeQ: This video is
-            # not available" ended the whole request while three good results sat
-            # untried. Deleted, private, region-locked and age-gated all land here.
-            # Same rule as the voice router: one bad packet must not deafen her.
-            print(f"[music] skipping {cand.get('id') or cand.get('url')}: "
-                  f"{type(e).__name__}: {str(e).splitlines()[-1][:90]}")
+            entries = _search(target, SEARCH_N)
+        except Exception as error:
+            if _rate_limited(error):
+                raise LookupError("YouTube is rate-limiting this machine; wait before retrying.") from error
             continue
-        if 0 < hit["duration"] <= MAX_TRACK_S:
-            break  # a real song, not a livestream and not a three-hour mix
-        if hit["duration"] and best is None:
-            best = hit  # long, but it ends
-    else:
-        hit = best or hit
-    if hit is None:
-        # every candidate was dead. Same shape as no results at all, so bot._find
-        # reports it in her voice instead of raising through the turn.
-        raise LookupError(f"every result for {query!r} was unavailable")
-    if hit["id"]:
-        _RECENT.append(hit["id"])
-        del _RECENT[:-_RECENT_KEEP]
-    return hit
+        candidates = []
+        for entry in entries:
+            if not isinstance(entry, dict):
+                continue
+            key = entry.get("id") or entry.get("url")
+            if not key or key in seen:
+                continue
+            seen.add(key)
+            seconds = entry.get("duration")
+            if (entry.get("is_live") or entry.get("live_status") in ("is_live", "is_upcoming")
+                    or "list=" in (entry.get("url") or "")
+                    or (seconds is not None and not 0 < seconds <= MAX_TRACK_S)):
+                continue
+            score = _rank(query, entry)
+            if score >= 0:
+                candidates.append((score, entry))
+        for score, cand in sorted(candidates, key=lambda pair: pair[0], reverse=True):
+            if resolved >= 4:
+                break
+            resolved += 1
+            try:
+                with yt_dlp.YoutubeDL(_YDL) as ydl:
+                    info = ydl.extract_info(cand.get("url") or watch_url(cand["id"]), download=False)
+                hit = _hit(info)
+                # Flat metadata may be missing or stale: check the actual recording too.
+                if (info.get("is_live") or info.get("live_status") in ("is_live", "is_upcoming")
+                        or not 0 < hit["duration"] <= MAX_TRACK_S
+                        or _rank(query, {**cand, **info}) < 0):
+                    continue
+                if hit["id"]:
+                    _RECENT.append(hit["id"])
+                    del _RECENT[:-_RECENT_KEEP]
+                print(f"[music] matched {hit['title']!r} (score {score:.1f}, query {query!r})")
+                return hit
+            except Exception as error:
+                if _rate_limited(error):
+                    raise LookupError("YouTube is rate-limiting this machine; wait before retrying.") from error
+                print(f"[music] candidate unavailable: {type(error).__name__}")
+        if resolved >= 4:
+            break
+    raise LookupError(f"no confident playable match for {query!r}; give the artist/version or a YouTube link")
 
 
 def watch_url(vid: str) -> str:

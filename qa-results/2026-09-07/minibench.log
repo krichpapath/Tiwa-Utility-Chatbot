@@ -1,0 +1,7 @@
+Traceback (most recent call last):
+  File "C:\Work\Tiwa\tests\minibench.py", line 21, in <module>
+    from tiwa import llm, memory, minis  # noqa: E402
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Work\Tiwa\tiwa\llm.py", line 15, in <module>
+    import httpx
+ModuleNotFoundError: No module named 'httpx'

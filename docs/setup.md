@@ -121,7 +121,8 @@ py -X utf8 dashboard.py --open
 ```
 
 <http://127.0.0.1:8787> — health checks, every setting with an explanation, her memory,
-and every model call with its full prompt. When something behaves strangely, this is
+and every model call with its full prompt. There is also a **Chat** tab, so you can talk
+to her here before Discord is set up at all. When something behaves strangely, this is
 where you look first. See [the control panel](surfaces/panel.md).
 
 ## Optional: calendar

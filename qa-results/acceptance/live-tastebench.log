@@ -1,0 +1,27 @@
+[tiwa] TIWA_LOG_PROMPTS in .env is IGNORED — your system environment already sets it, and that wins. Clear it there, or edit it there instead of in .env.
+[tiwa] OpenRouter key ...7b80 (from .env)
+gap ok      — a stranger earns a nudge, a friend does not, and never herself
+rate ok     — one question every ASK_EVERY of THEIR turns, nobody else's
+decline ok  — a nudge she ignores does not spend her turn
+nudge ok    — names the shape of the question, and only when gated on
+mine ok     — terms paired to the right author; skips, links and her own asks all ignored
+mark ok     — a taste row settles what came before it, nothing after
+bar ok      — under TASTE_MIN there is no call and no row
+coercion ok — her own asks reach no model and write no fact about her
+note ok     — empty object, empty note and self-reference all refused; a named pattern lands with its evidence
+outage ok   — the pass logs its own failure and the heartbeat survives
+[tiwa] TIWA_LOG_PROMPTS in .env is IGNORED — your system environment already sets it, and that wins. Clear it there, or edit it there instead of in .env.
+[tiwa] OpenRouter key ...7b80 (from your system environment)
+
+asks                                                 | wrote
+-----------------------------------------------------+------
+a real pattern: Mili, hero Mili, Mili limbus, Bad Ap | Mili — asked for Mili four times, includ
+spelling varies: Charlie Kirk, Charie Kirk, We Are C | Charlie Kirk — asked for Charlie Kirk th
+one franchise, three tracks: Spiderman theme, Blade  | superhero film scores — asked for three 
+a scatter — the normal answer: Bad Apple, Rick Roll, | (nothing)
+twice is not a pattern: Mili, Mili, Bad Apple, Rick  | (nothing)
+
+pattern: 5/5
+live ok     — a repeat becomes a taste, a scatter stays a playlist
+
+taste ok — repetition is counted, and only a named pattern earns a row

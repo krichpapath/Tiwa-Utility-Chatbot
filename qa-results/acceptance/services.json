@@ -1,0 +1,15 @@
+{
+  "discord": {
+    "bot": "Tiwa",
+    "channel": "1531708740888428827",
+    "channel_type": 0,
+    "owner_id": "1255802826081304606"
+  },
+  "provider": "ok",
+  "calendar": "available",
+  "music_runtime": "music UNAVAILABLE — ImportError: DLL load failed while importing frame: An Application Control policy has blocked this file.",
+  "music_search": {
+    "title": "Mili - Hero [Limbus Company]"
+  },
+  "web_search": "Our Documentation | Python.org [www.python.org]: The official home of the Python Programming Language\nPython - 3.14.7 Documentation [docs.python.org]: The official Python documentation. This page is licensed under the Python Software Foundation License Version 2.\nThe Python Tutorial — Python 3.14.7 documentation [docs.python.org]: Python is an easy to learn, powerful programming language. It has e"
+}
