@@ -1,28 +1,8 @@
-"""One Tiwa turn: dispatch to the Mini Tiwas, then her voice — while they work.
+"""Turn orchestration: recall and specialist dispatch, persona reply, then actions.
 
-She starts talking before the minis finish. There is no tool pass on this branch
-and no `TIWA_TURN` knob: this IS the turn. The serial three-pass shape it
-replaced still lives on `main`, and that is the whole difference between the two
-versions.
-
-What changed, measured on her own log (111 turns) before the swap:
-
-    whole turn   p50 6431ms     inner pass runs 1.7x per turn
-    inner pass   p50 2597ms     tools competing for one model's attention
-    persona      p50 1958ms
-    tools RUN in   3ms          the work was never what was slow
-
-The six seconds was her deciding what to look up before she was allowed to open
-her mouth. So the tool pass is gone entirely, and each of its jobs went
-somewhere cheaper:
-
-    recall -> bounded Memory Mini selection, running beside dispatch
-    music   (71 of 135 calls) -> DJ Tiwa, dispatched, flushed after she speaks
-    search  ( 8 of 135 calls) -> Search Tiwa, late
-    calendar( 1 of 135 calls) -> Calendar Tiwa
-
-Nothing an LLM dispatches is on the path between her ears and her mouth.
-Measured after: p50 2695ms against serial's 5059ms, routing 94.6% against 70.3%.
+DJ and Calendar results are awaited before the reply. Web search can deliver a
+late follow-up. Blocking providers run in workers; actions belong to tools.Turn.
+The Discord controllers execute queued actions after respond() returns.
 """
 
 import asyncio
@@ -46,7 +26,7 @@ PERSONA_MODEL = os.environ.get("TIWA_PERSONA_MODEL") or (
     llm.PERSONA_API_MODEL if PERSONA_PROVIDER == "openrouter" else MODEL
 )
 
-# Minis whose result is an ACTION bot.py has to flush — the deck, the ✅ gate.
+# Minis whose result is an ACTION bot.py has to flush — music and calendar approval.
 # These finish before she speaks, because the flush runs the moment respond()
 # returns. Everything else produces SPEECH and goes late.
 ACTS = {"dj", "calendar"}
@@ -70,7 +50,7 @@ DISPATCH_TIMEOUT = 4.0
 _pending = {}
 
 # Facts an ACTION mini produces that she should still say. Not `queued` — bot.py
-# already posts the ✅ prompt for that, and saying it twice is worse than once.
+# already posts the calendar proposal for that, and saying it twice is worse than once.
 VOICE_FIELDS = ("ask", "clash", "events")
 
 
@@ -569,7 +549,7 @@ async def respond(db, hist: list, author: str, text: str, images=(), on_late=Non
 
     # Voice has no mini — 0 calls in 135 logged turns — so the classifier reaches
     # the actuators directly. Returns "" under TIWA_VOICE=dj (the default), where
-    # _flush_music brings her in by itself. Wired anyway, so TIWA_VOICE=full is
+    # Player.flush brings her in by itself. Wired anyway, so TIWA_VOICE=full is
     # one env var and not a rewrite.
     want = _asked_voice(text)
     if want == "join":

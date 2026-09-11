@@ -1,16 +1,7 @@
-"""Mini Tiwa registry. Every mini: fn(db, task: str) -> dict of facts.
+"""Specialist registry and planners for DJ, web search and Calendar.
 
-Same shape as tools.py, and for the same reason: this IS the framework. A mini is
-a function, a description, and the list of facts it is allowed to return.
-
-The difference from a tool is what the caller gets back. A tool returns a string
-that lands in her brief; a mini returns FACTS, and code — not the mini — decides
-what she is told about them. See SWARM.md rule 2.
-
-Main Tiwa sees the descriptions here and nothing else. That is the whole point:
-DJ Tiwa can own nine tools inside itself and Main's list stays four long.
-
-    py -X utf8 -m tiwa.minis
+Each mini accepts (db, task) and returns validated facts. Main dispatch sees the
+registered descriptions; controllers execute pending actions after the reply.
 """
 
 import asyncio
@@ -461,7 +452,7 @@ def dj(db, task: str) -> dict:
     )
 
     # The tool functions still do the acting, so they still write to the Turn and
-    # bot._flush_music still drains it unchanged. What changed is who decides.
+    # Player.flush still drains it unchanged. What changed is who decides.
     if action in ("play", "queue") and not terms:
         action = "none"  # a play with no terms would search the empty string
     if action == "none":
@@ -690,15 +681,14 @@ _CAL_FORMAT = {
     "reads and changes Krich's calendar. Give it what they said about a plan — "
     "'put dentist on Tuesday', 'what have I got on', 'cancel Friday'. It reads the "
     "week itself, spots clashes, and asks when a date is ambiguous instead of "
-    "guessing. Krich still confirms every change with a reaction.",
+    "guessing. The requester confirms the proposal conversationally before any write.",
     ("action", "events", "queued", "ask", "clash"),
 )
 def calendar(db, task: str) -> dict:
     """The judgment half. The mechanics below it were already right.
 
     Parsing a date into an event is `gcal._EVENT_FORMAT`, and it handles Thai
-    titles, relative dates and Buddhist years already. The write itself is the ✅
-    gate. Neither moves here, and neither is ever an agent's call — this decides
+    titles, relative dates and Buddhist years already. The write itself is handled by discord_calendar.Calendar. Neither moves here, and neither is ever an agent's call — this decides
     WHAT to propose, never that it happens.
     """
     from . import gcal, tools  # lazy: gcal pulls in the google client
@@ -723,7 +713,7 @@ def calendar(db, task: str) -> dict:
     # through VOICE_FIELDS: without this she reads out
     # "calendar unavailable: ('invalid_grant: Bad Request', {...})". Same guard
     # `search` already has, and found the same way — by the thing actually
-    # breaking. Do not queue a write either: the ✅ would only fail later, and
+    # breaking. Do not queue a write either: approval would only fail later, and
     # asking someone to confirm something that cannot happen is its own bluff.
     if week.startswith("calendar unavailable"):
         memory.log(db, "mini", f"calendar({task!r}) -> {week[:90]}")
@@ -760,7 +750,7 @@ def calendar(db, task: str) -> dict:
     if ask:
         action = "none"  # asking and acting in the same breath is the guess it replaces
     if action == "write" and request:
-        tools.calendar_write(db, request)  # queues only; Krich's ✅ is the write
+        tools.calendar_write(db, request)  # queues only; requester approval triggers the write
     return {
         "action": action,
         "events": week[:600] if action == "read" else "",

@@ -18,7 +18,7 @@ class Calendar:
         self.requesters = {}
 
     async def propose(self, channel, user_id=None):
-        """calendar_write only queues; every write is gated behind Krich's ✅ here."""
+        """Parse queued requests into concrete, requester-owned proposals."""
         while tools.PENDING_CALENDAR:
             text = tools.PENDING_CALENDAR.pop(0)
             if not self.owner_id:

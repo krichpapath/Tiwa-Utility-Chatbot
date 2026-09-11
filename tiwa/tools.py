@@ -161,7 +161,7 @@ def web_search(db, arg: str) -> str:
 
 def join_voice(db, arg: str = "") -> None:
     if VOICE_DJ_ONLY:
-        return  # the channel is a speaker for music; _flush_music brings her in
+        return  # the channel is a speaker for music; Player.flush brings her in
     current().PENDING_JOIN = True
 
 
@@ -209,8 +209,8 @@ def skip_music(db, arg: str = "") -> None:
 
 # ---------------------------------------------------------------- calendar
 
-# Turn.PENDING_CALENDAR holds plain-language change requests awaiting Krich's ✅.
-# Calendar Tiwa decides WHAT to propose; this only queues it, and the reaction is
+# Turn.PENDING_CALENDAR holds plain-language change requests awaiting requester approval.
+# Calendar Tiwa decides WHAT to propose; this only queues it, and conversational approval is
 # still the write.
 
 

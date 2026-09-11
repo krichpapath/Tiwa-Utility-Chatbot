@@ -98,17 +98,22 @@ async def real_start():
 # Catch callers forgetting to await startup, including recovery paths.
 import ast
 
-source = ast.parse((Path(__file__).resolve().parents[1] / "bot.py").read_text(encoding="utf-8"))
-parents = {child: parent for parent in ast.walk(source) for child in ast.iter_child_nodes(parent)}
-for node in ast.walk(source):
-    if (
-        isinstance(node, ast.Call)
-        and isinstance(node.func, ast.Attribute)
-        and isinstance(node.func.value, ast.Name)
-        and node.func.value.id == "voice"
-        and node.func.attr == "listen"
-    ):
-        assert isinstance(parents[node], ast.Await), "voice.listen must be awaited"
+for source_path in ("bot.py", "tiwa/discord_player.py"):
+    source = ast.parse(
+        (Path(__file__).resolve().parents[1] / source_path).read_text(encoding="utf-8")
+    )
+    parents = {
+        child: parent for parent in ast.walk(source) for child in ast.iter_child_nodes(parent)
+    }
+    for node in ast.walk(source):
+        if (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and isinstance(node.func.value, ast.Name)
+            and node.func.value.id == "voice"
+            and node.func.attr == "listen"
+        ):
+            assert isinstance(parents[node], ast.Await), "voice.listen must be awaited"
 
 
 async def guarded():

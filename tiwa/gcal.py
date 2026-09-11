@@ -1,4 +1,5 @@
-"""Google Calendar for Krich — reads free, writes only after Discord ✅.
+"""Google Calendar plan validation and API operations.
+Interactive writes require requester approval in discord_calendar.py.
 
 One-time auth: py -X utf8 gcal_auth.py  (browser consent -> data/gcal_token.json)
 """

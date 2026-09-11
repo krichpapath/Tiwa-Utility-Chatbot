@@ -430,7 +430,7 @@ async def leave(guild) -> str:
 #
 #   dj   — the voice channel is a SPEAKER for music and nothing else. Ears off,
 #          she does not talk out loud, and she does not decide to join or leave
-#          mid-conversation. _flush_music still brings her in when a song needs
+#          mid-conversation. Player.flush still brings her in when a song needs
 #          a channel, and `join` / `leave` typed by hand still work.
 #   full — ears, TTS and conversational join/leave as well.
 #
