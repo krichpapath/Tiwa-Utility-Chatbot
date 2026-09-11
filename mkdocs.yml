@@ -85,45 +85,16 @@ validation:
   anchors: warn
 
 nav:
-  - Start here:
-      - Introduction: index.md
-      - Before you begin: before-you-begin.md
-      - Environment setup: setup.md
-      - The 10-minute tour: tour.md
-  - Core concepts:
-      - The three passes: concepts/three-passes.md
-      - The swarm — Mini Tiwas: concepts/the-swarm.md
-      - Modes — where she runs: concepts/modes.md
-      - Memory — the knowledge graph: concepts/memory.md
-      - The guards: concepts/guards.md
-      - Actuators — what acts: concepts/tools.md
-      - Search and curiosity: concepts/search.md
-      - Her persona: concepts/persona.md
-      - Action state: concepts/action-state.md
-  - Surfaces:
-      - The Discord bot: surfaces/discord.md
-      - Music and the DJ: surfaces/music.md
-      - Voice out — she speaks: surfaces/voice-out.md
-      - Voice in — she listens: surfaces/voice-in.md
-      - Her eyes — images: surfaces/eyes.md
-      - Calendar: surfaces/calendar.md
-      - The control panel: surfaces/panel.md
-  - The toolchain:
-      - Model providers: toolchain/providers.md
-      - Audio and speech: toolchain/audio-speech.md
-      - Discord and voice transport: toolchain/discord-transport.md
-      - Dependency table: toolchain/dependencies.md
-  - Working on it:
-      - Common workflows: work/workflows.md
-      - Conventions and gotchas: work/conventions.md
-      - The bench suite: work/testing.md
-      - Your turn: work/your-turn.md
-      - First week checklist: work/first-week.md
-  - Reference:
-      - Decision log: reference/decisions.md
-      - Environment variables: reference/env.md
-      - Glossary: reference/glossary.md
-      - Audit findings: reference/findings.md
-      - Docs maintenance: reference/docs-maintenance.md
-      - Where to go next: reference/next.md
-      - Open questions: open-questions.md
+  - Start here: index.md
+  - Setup: setup.md
+  - Architecture: architecture.md
+  - Development: development.md
+  - Testing: testing.md
+  - Configuration: configuration.md
+  - Features:
+      - Music and search: music.md
+      - Voice: voice.md
+      - Calendar: calendar.md
+      - Memory: memory.md
+      - Dashboard: dashboard.md
+  - Operations: operations.md
