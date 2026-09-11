@@ -6,6 +6,7 @@ already runs in a thread. One code path beats two.
 Normalized return, so pipeline.py never learns which provider it talked to:
     {"content": str, "tool_calls": [{"id","name","args"}], "raw": <msg to append>}
 """
+
 import datetime
 import json
 import os
@@ -17,7 +18,7 @@ import httpx
 from ollama import Client
 
 
-_warned = set()   # shadowed keys already announced
+_warned = set()  # shadowed keys already announced
 _from_file = set()  # keys .env actually got to set
 
 
@@ -42,9 +43,11 @@ def load_env():
             # key announces itself twice.
             if k in os.environ and os.environ[k] != v and k not in _warned:
                 _warned.add(k)
-                print(f"[tiwa] {k} in .env is IGNORED — your system environment "
-                      f"already sets it, and that wins. Clear it there, or edit it "
-                      f"there instead of in .env.")
+                print(
+                    f"[tiwa] {k} in .env is IGNORED — your system environment "
+                    f"already sets it, and that wins. Clear it there, or edit it "
+                    f"there instead of in .env."
+                )
             if k not in os.environ:
                 _from_file.add(k)
             os.environ.setdefault(k, v)
@@ -73,8 +76,7 @@ MODE = os.environ.get("TIWA_MODE", "local")
 if MODE not in _MODES:
     # warn, don't die: a stale value used to brick every entrypoint including
     # the dashboard you would use to fix it.
-    print(f"[tiwa] TIWA_MODE={MODE!r} unknown — using 'local'. "
-          f"Pick one of: {', '.join(_MODES)}")
+    print(f"[tiwa] TIWA_MODE={MODE!r} unknown — using 'local'. Pick one of: {', '.join(_MODES)}")
     MODE = "local"
 PROVIDER, PERSONA_PROVIDER = _MODES[MODE]
 
@@ -110,7 +112,9 @@ OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 # runaway insurance, not budgeting: a looping bug should not bill all night.
 # 2M tokens/day is ~$0.30 at V4 Flash rates and far beyond normal chat.
 DAILY_TOKENS = int(os.environ.get("TIWA_DAILY_TOKENS", "2000000"))
-SPEND_FILE = Path(os.environ.get("TIWA_DATA_DIR") or Path(__file__).parents[1] / "data") / "spend.json"
+SPEND_FILE = (
+    Path(os.environ.get("TIWA_DATA_DIR") or Path(__file__).parents[1] / "data") / "spend.json"
+)
 SPEND_FILE = Path(os.environ.get("TIWA_SPEND_FILE") or SPEND_FILE)
 _spend_lock = threading.Lock()
 
@@ -130,9 +134,11 @@ def spend(add: int = 0) -> int:
             lock.seek(0)
             if os.name == "nt":
                 import msvcrt
+
                 msvcrt.locking(lock.fileno(), msvcrt.LK_LOCK, 1)
             else:
                 import fcntl
+
                 fcntl.flock(lock, fcntl.LOCK_EX)
             try:
                 return _spend(add)
@@ -234,13 +240,19 @@ def _openrouter_chat(model, messages, tools, fmt, options, think):
             why = r.text[:200]
         raise httpx.HTTPStatusError(
             f"{r.status_code} from OpenRouter: {why or r.reason_phrase}",
-            request=r.request, response=r)
+            request=r.request,
+            response=r,
+        )
     j = r.json()
     spend((j.get("usage") or {}).get("total_tokens", 0))
     msg = j["choices"][0]["message"]
     calls = [
         # OpenAI-style args are a JSON *string*; _arg_name expects dict-or-str
-        {"id": tc["id"], "name": tc["function"]["name"], "args": _loads(tc["function"]["arguments"])}
+        {
+            "id": tc["id"],
+            "name": tc["function"]["name"],
+            "args": _loads(tc["function"]["arguments"]),
+        }
         for tc in msg.get("tool_calls") or []
     ]
     return {"content": msg.get("content") or "", "tool_calls": calls, "raw": msg}
@@ -256,8 +268,7 @@ def _loads(s):
 LOG_PROMPTS = os.environ.get("TIWA_LOG_PROMPTS", "1") != "0"
 
 
-def chat(model=None, messages=None, tools=None, fmt=None, options=None, think=False,
-         provider=None):
+def chat(model=None, messages=None, tools=None, fmt=None, options=None, think=False, provider=None):
     """One call. `provider` overrides the mode default."""
     use_api = (provider or PROVIDER) == "openrouter"
     if use_api and DAILY_TOKENS and spend() >= DAILY_TOKENS:

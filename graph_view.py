@@ -8,6 +8,7 @@ offline. The control panel's Memory tab (dashboard.py) covers the same ground wi
 search and per-row delete and no network — use this only when you specifically want
 the force-directed picture of who is connected to whom.
 """
+
 import json
 import sys
 import webbrowser
@@ -25,7 +26,9 @@ edges = [
     for s, r, d, note in db.execute("SELECT src, rel, dst, note FROM relations")
 ]
 
-graph_data = json.dumps({"nodes": nodes, "edges": edges}, ensure_ascii=False).replace("<", "\\u003c")
+graph_data = json.dumps({"nodes": nodes, "edges": edges}, ensure_ascii=False).replace(
+    "<", "\\u003c"
+)
 html = f"""<!doctype html><meta charset="utf-8"><title>Tiwa graph</title>
 <script src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
 <div id="g" style="height:96vh"></div>

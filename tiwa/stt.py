@@ -1,4 +1,5 @@
 """Activated clips only. OpenRouter transcription is separate from chat tokens."""
+
 import base64
 import io
 import os
@@ -7,8 +8,12 @@ import wave
 import httpx
 import numpy as np
 
-MODELS = ("openai/gpt-transcribe", "qwen/qwen3-asr-1.7b",
-          "openai/whisper-large-v3-turbo", "fish-audio/transcribe-1")
+MODELS = (
+    "openai/gpt-transcribe",
+    "qwen/qwen3-asr-1.7b",
+    "openai/whisper-large-v3-turbo",
+    "fish-audio/transcribe-1",
+)
 
 
 def transcribe(audio, rate=48000):
@@ -32,8 +37,10 @@ def transcribe(audio, rate=48000):
     response = httpx.post(
         "https://openrouter.ai/api/v1/audio/transcriptions",
         headers={"Authorization": f"Bearer {key}"},
-        json={"model": model, "input_audio": {
-            "data": base64.b64encode(data.getvalue()).decode(), "format": "wav"}},
+        json={
+            "model": model,
+            "input_audio": {"data": base64.b64encode(data.getvalue()).decode(), "format": "wav"},
+        },
         timeout=30,
     )
     if response.is_error:

@@ -15,6 +15,7 @@ after she speaks, exactly as before.
 
     py -X utf8 -m tiwa.tools
 """
+
 import contextvars
 import dataclasses
 import os
@@ -94,6 +95,7 @@ sys.modules[__name__].__class__ = _TurnScoped
 
 # ---------------------------------------------------------------- the web
 
+
 def web_search(db, arg: str) -> str:
     """Search Tiwa's hands. Returns text — never raises, so a network flake
     arrives as a sentence the caller can recognise instead of eating the turn.
@@ -134,12 +136,18 @@ def web_search(db, arg: str) -> str:
         if len(fresh) == 5:
             break
     if not fresh:
-        return ("every result was one you already saw this turn — these keywords are "
-                "spent, search something different or answer with what you have")
-    return "\n".join(
-        f"{str(h.get('title', ''))[:180]} [{urlsplit(h['href']).netloc}] "
-        f"{h['href']}: {' '.join(str(h.get('body', '')).split())[:600]}" for h in fresh
-    ) or "no results"
+        return (
+            "every result was one you already saw this turn — these keywords are "
+            "spent, search something different or answer with what you have"
+        )
+    return (
+        "\n".join(
+            f"{str(h.get('title', ''))[:180]} [{urlsplit(h['href']).netloc}] "
+            f"{h['href']}: {' '.join(str(h.get('body', '')).split())[:600]}"
+            for h in fresh
+        )
+        or "no results"
+    )
 
 
 # ---------------------------------------------------------------- voice
@@ -149,6 +157,7 @@ def web_search(db, arg: str) -> str:
 # and it returns "" under TIWA_VOICE=dj — so under the default they are never
 # called at all. A tool cannot reach Discord objects either way, so both only
 # flag the Turn and let bot.py act after she has finished speaking.
+
 
 def join_voice(db, arg: str = "") -> None:
     if VOICE_DJ_ONLY:
@@ -168,6 +177,7 @@ def leave_voice(db, arg: str = "") -> None:
 # drains it after the reply, so a song never blocks her talking. DJ Tiwa
 # (minis.dj) is the only thing that calls these — it has already chosen the
 # action and the search terms by the time it gets here.
+
 
 def play_music(db, arg: str | dict) -> None:
     turn = current()
@@ -202,6 +212,7 @@ def skip_music(db, arg: str = "") -> None:
 # Turn.PENDING_CALENDAR holds plain-language change requests awaiting Krich's ✅.
 # Calendar Tiwa decides WHAT to propose; this only queues it, and the reaction is
 # still the write.
+
 
 def calendar_write(db, arg: str) -> None:
     current().PENDING_CALENDAR.append(arg)

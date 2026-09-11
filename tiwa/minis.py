@@ -12,6 +12,7 @@ DJ Tiwa can own nine tools inside itself and Main's list stays four long.
 
     py -X utf8 -m tiwa.minis
 """
+
 import asyncio
 import datetime
 import json
@@ -184,8 +185,7 @@ async def dispatch(db, author: str, text: str, recent: str = "") -> dict:
         model=llm.TOOL_MODEL if llm.PROVIDER == "openrouter" else MODEL,
         messages=[
             {"role": "system", "content": _SYSTEM.format(minis=lines)},
-            {"role": "user",
-             "content": f"today is {now:%Y-%m-%d}\n{prefix}{author}: {text}"},
+            {"role": "user", "content": f"today is {now:%Y-%m-%d}\n{prefix}{author}: {text}"},
         ],
         fmt=_schema(),
         options={"temperature": 0, "num_ctx": 2048},
@@ -298,9 +298,12 @@ _DJ_STEP = {
     "required": ["action", "terms", "selection", "count", "request"],
     "additionalProperties": False,
 }
-_DJ_FORMAT = {"type": "object", "properties": {
-    "steps": {"type": "array", "items": _DJ_STEP, "maxItems": 10}},
-    "required": ["steps"], "additionalProperties": False}
+_DJ_FORMAT = {
+    "type": "object",
+    "properties": {"steps": {"type": "array", "items": _DJ_STEP, "maxItems": 10}},
+    "required": ["steps"],
+    "additionalProperties": False,
+}
 
 
 @mini(
@@ -322,43 +325,77 @@ def dj(db, task: str) -> dict:
 
     original = task
     task = music._music_request(task)
+
     def explicit_fallback():
         # Only a direct present-tense play command; uncertainty about the title belongs to search.
         direct = re.match(r"^(?:ช่วย)?(?:เล่นเพลง|เปิดเพลง|play\s+)(.+)", task, re.IGNORECASE)
-        if not direct or any(w in task.casefold() for w in ('ไม่ต้อง', 'อย่า', "don't", 'do not', 'later', 'ทีหลัง', 'พรุ่งนี้', 'ไหม', '?', '"', '“')):
+        if not direct or any(
+            w in task.casefold()
+            for w in (
+                "ไม่ต้อง",
+                "อย่า",
+                "don't",
+                "do not",
+                "later",
+                "ทีหลัง",
+                "พรุ่งนี้",
+                "ไหม",
+                "?",
+                '"',
+                "“",
+            )
+        ):
             return None
         terms = direct[1].strip()
         if not terms:
             return None
         tools.DJ.append(("play", {"keywords": terms, "request": task, "count": 1}))
-        return {"action": "play", "terms": terms, "playing": music.NOW["title"], "queued": len(music.QUEUE)}
+        return {
+            "action": "play",
+            "terms": terms,
+            "playing": music.NOW["title"],
+            "queued": len(music.QUEUE),
+        }
+
     # Known Thai speech spellings: give both DJ passes the same source name.
-    for spoken, title in (("โซอีเตอร์", "Soul Eater"), ("โซลอีเตอร์", "Soul Eater"),
-                          # User-confirmed speech corrections, not guessed artists.
-                          ("VR ชาลีคึกสองฟอร์มิน", "We Are Charlie Kirk"),
-                          ("วีอาชาลีคึก", "We Are Charlie Kirk"),
-                          ("VR ชาลีคึก", "We Are Charlie Kirk"),
-                          ("สตีเว่นยูนิเวิร์ส", "Steven Universe"),
-                          ("มิลิมบัสคอมพานี", "Mili from Limbus Company"),
-                          ("ลิมบัสคอมพานี", "Limbus Company"),
-                          ("มีลิ", "Mili"), ("มิลิ", "Mili")):
+    for spoken, title in (
+        ("โซอีเตอร์", "Soul Eater"),
+        ("โซลอีเตอร์", "Soul Eater"),
+        # User-confirmed speech corrections, not guessed artists.
+        ("VR ชาลีคึกสองฟอร์มิน", "We Are Charlie Kirk"),
+        ("วีอาชาลีคึก", "We Are Charlie Kirk"),
+        ("VR ชาลีคึก", "We Are Charlie Kirk"),
+        ("สตีเว่นยูนิเวิร์ส", "Steven Universe"),
+        ("มิลิมบัสคอมพานี", "Mili from Limbus Company"),
+        ("ลิมบัสคอมพานี", "Limbus Company"),
+        ("มีลิ", "Mili"),
+        ("มิลิ", "Mili"),
+    ):
         task = task.replace(spoken, title)
 
     now = music.NOW["title"]
     # A source-only correction supplies constraints, not a song title. Resolve
     # real search candidates instead of letting the model invent a track.
-    if re.fullmatch(r"(?:.*(?:เพลงนี้|เปิดเพลง))?\s*Mili\s*(?:จาก|from)?\s*Limbus Company\s*(?:ต่างหาก|แทน|ให้หน่อย)?[.!?]*", task, re.IGNORECASE):
+    if re.fullmatch(
+        r"(?:.*(?:เพลงนี้|เปิดเพลง))?\s*Mili\s*(?:จาก|from)?\s*Limbus Company\s*(?:ต่างหาก|แทน|ให้หน่อย)?[.!?]*",
+        task,
+        re.IGNORECASE,
+    ):
         terms = "Mili Limbus Company"
         tools.DJ.extend([("stop", ""), ("play", {"keywords": terms, "request": original})])
         return {"action": "play", "terms": terms, "playing": now, "queued": len(music.QUEUE)}
     if task.strip().lower() in ("skip", "ข้ามเพลง"):
         tools.skip_music(db)
         return {"action": "skip", "terms": "", "playing": now, "queued": len(music.QUEUE)}
-    deck = json.dumps({"playing": now, "queued": [h["title"] for h in music.QUEUE]}, ensure_ascii=False)
+    deck = json.dumps(
+        {"playing": now, "queued": [h["title"] for h in music.QUEUE]}, ensure_ascii=False
+    )
     resp = llm.chat(
         model=llm.TOOL_MODEL if llm.PROVIDER == "openrouter" else MODEL,
-        messages=[{"role": "system", "content": _DJ_SYSTEM},
-                  {"role": "user", "content": f"{deck}\n\nThey want: {task}"}],
+        messages=[
+            {"role": "system", "content": _DJ_SYSTEM},
+            {"role": "user", "content": f"{deck}\n\nThey want: {task}"},
+        ],
         fmt=_DJ_FORMAT,
         options={"temperature": 0, "num_ctx": 2048},
     )
@@ -375,18 +412,24 @@ def dj(db, task: str) -> dict:
                     return {}
                 action, terms = step.get("action"), step.get("terms")
                 count, request = step.get("count"), step.get("request")
-                if (action not in ("play", "queue", "stop", "skip", "remove", "none")
-                        or not isinstance(terms, str) or not isinstance(request, str)
-                        or type(count) is not int or not 1 <= count <= 50):
+                if (
+                    action not in ("play", "queue", "stop", "skip", "remove", "none")
+                    or not isinstance(terms, str)
+                    or not isinstance(request, str)
+                    or type(count) is not int
+                    or not 1 <= count <= 50
+                ):
                     return {}
                 if action == "none":
                     continue
                 if action in ("play", "queue"):
                     if not terms.strip():
                         return {}
-                    query = {"keywords": terms.strip(),
-                             "request": original if len(steps) == 1 else request or original,
-                             "count": count}
+                    query = {
+                        "keywords": terms.strip(),
+                        "request": original if len(steps) == 1 else request or original,
+                        "count": count,
+                    }
                     jobs.append((action, query))
                 elif action in ("skip", "remove"):
                     jobs.append((action, {"target": terms.strip(), "count": count}))
@@ -397,18 +440,25 @@ def dj(db, task: str) -> dict:
                 if fallback:
                     return fallback
             tools.DJ.extend(jobs)
-            return {"action": next((a for a, _ in jobs if a in ("play", "queue")),
-                                   jobs[-1][0] if jobs else "none"),
-                    "terms": " | ".join(s["terms"] for s in steps),
-                    "playing": now, "queued": len(music.QUEUE)}
+            return {
+                "action": next(
+                    (a for a, _ in jobs if a in ("play", "queue")), jobs[-1][0] if jobs else "none"
+                ),
+                "terms": " | ".join(s["terms"] for s in steps),
+                "playing": now,
+                "queued": len(music.QUEUE),
+            }
         action, terms = out["action"], (out.get("terms") or "").strip()
     except (json.JSONDecodeError, KeyError, TypeError, AttributeError):
         return {}  # run() logs it; she asks instead of guessing
 
     # Keep the original request until search: evidence review runs after the
     # reply, in music.find, without extending the DJ's pre-reply timeout.
-    query = (terms if terms.startswith(("https://", "http://"))
-             else {"keywords": terms, "request": original})
+    query = (
+        terms
+        if terms.startswith(("https://", "http://"))
+        else {"keywords": terms, "request": original}
+    )
 
     # The tool functions still do the acting, so they still write to the Turn and
     # bot._flush_music still drains it unchanged. What changed is who decides.
@@ -435,8 +485,7 @@ def dj(db, task: str) -> dict:
     # facts only. play_music's return value is a paragraph of "do NOT name the
     # artist" — that is a prohibition, it belongs to pipeline._doing(), and it is
     # exactly what rule 2 exists to keep out of a mini's return.
-    return {"action": action, "terms": terms, "playing": now,
-            "queued": len(music.QUEUE)}
+    return {"action": action, "terms": terms, "playing": now, "queued": len(music.QUEUE)}
 
 
 # ---------------------------------------------------------------- Search Tiwa
@@ -485,11 +534,14 @@ when clarification is needed. Keep enough=false when budget ends without evidenc
 answer should match the question's language. No greetings or vague reactions."""
 
 _SEARCH_REVIEW_FORMAT = {
-    "type": "object", "properties": {
-        "enough": {"type": "boolean"}, "answer": {"type": "string"},
+    "type": "object",
+    "properties": {
+        "enough": {"type": "boolean"},
+        "answer": {"type": "string"},
         "sources": {"type": "array", "items": {"type": "integer"}, "maxItems": 3},
         "query": {"type": "string"},
-    }, "required": ["enough", "answer", "sources", "query"],
+    },
+    "required": ["enough", "answer", "sources", "query"],
     "additionalProperties": False,
 }
 
@@ -508,16 +560,24 @@ def search(db, task: str) -> dict:
     try:
         resp = llm.chat(
             model=llm.TOOL_MODEL if llm.PROVIDER == "openrouter" else MODEL,
-            messages=[{"role": "system", "content": _SEARCH_SYSTEM},
-                      {"role": "user", "content": f"today is {now:%Y-%m-%d}\n{task}"}],
-            fmt={"type": "object", "properties": {
-                "query": {"type": "string"}, "clarification": {"type": "string"}},
-                "required": ["query", "clarification"], "additionalProperties": False},
+            messages=[
+                {"role": "system", "content": _SEARCH_SYSTEM},
+                {"role": "user", "content": f"today is {now:%Y-%m-%d}\n{task}"},
+            ],
+            fmt={
+                "type": "object",
+                "properties": {"query": {"type": "string"}, "clarification": {"type": "string"}},
+                "required": ["query", "clarification"],
+                "additionalProperties": False,
+            },
             options={"temperature": 0, "num_ctx": 1024},
         )
     except Exception as error:
         memory.log(db, "mini", f"search planning failed: {type(error).__name__}")
-        return {"query": "", "found": f"Question: {task}\nSearch is unavailable right now; no answer verified."}
+        return {
+            "query": "",
+            "found": f"Question: {task}\nSearch is unavailable right now; no answer verified.",
+        }
     # _terms() already does this job for the music retry: _clean() to drop the
     # <think> and <tool_call> the 8B leaks as text, then the first real line,
     # unquoted, capped. Reimplementing it here got the <think> case wrong.
@@ -546,25 +606,39 @@ def search(db, task: str) -> dict:
         try:
             review = llm.chat(
                 model=llm.TOOL_MODEL if llm.PROVIDER == "openrouter" else MODEL,
-                messages=[{"role": "system", "content": _SEARCH_REVIEW},
-                          {"role": "user", "content":
-                           f"Today: {now:%Y-%m-%d}\nQuestion: {task}\n"
-                           f"Queries tried: {json.dumps(queries, ensure_ascii=False)}\n"
-                           f"Searches left: {2-attempt}\n"
-                           f"Last search: {'unavailable or no fresh results' if failed else 'returned snippets'}\n"
-                           f"UNTRUSTED SEARCH SNIPPETS:\n{numbered}"}],
+                messages=[
+                    {"role": "system", "content": _SEARCH_REVIEW},
+                    {
+                        "role": "user",
+                        "content": f"Today: {now:%Y-%m-%d}\nQuestion: {task}\n"
+                        f"Queries tried: {json.dumps(queries, ensure_ascii=False)}\n"
+                        f"Searches left: {2 - attempt}\n"
+                        f"Last search: {'unavailable or no fresh results' if failed else 'returned snippets'}\n"
+                        f"UNTRUSTED SEARCH SNIPPETS:\n{numbered}",
+                    },
+                ],
                 fmt=_SEARCH_REVIEW_FORMAT,
                 options={"temperature": 0, "num_ctx": 8192},
             )
             judged = json.loads(review["content"])
             ids = judged.get("sources", [])
-            valid = (isinstance(ids, list) and 0 < len(ids) <= 3 and
-                     all(type(i) is int and 1 <= i <= len(evidence) for i in ids))
+            valid = (
+                isinstance(ids, list)
+                and 0 < len(ids) <= 3
+                and all(type(i) is int and 1 <= i <= len(evidence) for i in ids)
+            )
             answer = judged.get("answer", "")
-            if judged.get("enough") is True and valid and isinstance(answer, str) and answer.strip():
-                sources = "\n".join(evidence[i-1] for i in dict.fromkeys(ids))
-                return {"query": " | ".join(queries),
-                        "found": f"Question: {task}\nSnippet-supported answer: {answer[:1800]}\nSources (search excerpts, pages not fetched):\n{sources}"}
+            if (
+                judged.get("enough") is True
+                and valid
+                and isinstance(answer, str)
+                and answer.strip()
+            ):
+                sources = "\n".join(evidence[i - 1] for i in dict.fromkeys(ids))
+                return {
+                    "query": " | ".join(queries),
+                    "found": f"Question: {task}\nSnippet-supported answer: {answer[:1800]}\nSources (search excerpts, pages not fetched):\n{sources}",
+                }
             next_query = judged.get("query", "")
             if not isinstance(next_query, str) or not next_query.strip():
                 break
@@ -572,8 +646,10 @@ def search(db, task: str) -> dict:
         except Exception as error:
             memory.log(db, "mini", f"search review failed: {type(error).__name__}")
             break
-    return {"query": " | ".join(queries),
-            "found": f"Question: {task}\nCould not establish a reliable answer from the search results. Do not guess; ask for missing identifying details if needed."}
+    return {
+        "query": " | ".join(queries),
+        "found": f"Question: {task}\nCould not establish a reliable answer from the search results. Do not guess; ask for missing identifying details if needed.",
+    }
 
 
 # ---------------------------------------------------------------- Calendar Tiwa
@@ -628,7 +704,17 @@ def calendar(db, task: str) -> dict:
     from . import gcal, tools  # lazy: gcal pulls in the google client
 
     # Explicit appointment creation always produces a real proposal, not a persona promise.
-    if any(term in task.casefold() for term in ("เขียนนัด", "เพิ่มนัด", "นัดให้", "add appointment", "add event", "schedule an appointment")):
+    if any(
+        term in task.casefold()
+        for term in (
+            "เขียนนัด",
+            "เพิ่มนัด",
+            "นัดให้",
+            "add appointment",
+            "add event",
+            "schedule an appointment",
+        )
+    ):
         tools.calendar_write(db, task)
         return {"action": "write", "events": "", "queued": task, "ask": "", "clash": ""}
     week = gcal.upcoming()
@@ -641,16 +727,25 @@ def calendar(db, task: str) -> dict:
     # asking someone to confirm something that cannot happen is its own bluff.
     if week.startswith("calendar unavailable"):
         memory.log(db, "mini", f"calendar({task!r}) -> {week[:90]}")
-        return {"action": "none", "queued": "", "ask": "", "clash": "",
-                "events": "you cannot reach the calendar at all right now — say so,"
-                          " and say nothing about what is or is not on it"}
+        return {
+            "action": "none",
+            "queued": "",
+            "ask": "",
+            "clash": "",
+            "events": "you cannot reach the calendar at all right now — say so,"
+            " and say nothing about what is or is not on it",
+        }
     now = datetime.datetime.now()
     resp = llm.chat(
         model=llm.TOOL_MODEL if llm.PROVIDER == "openrouter" else MODEL,
-        messages=[{"role": "system", "content": _CAL_SYSTEM},
-                  {"role": "user",
-                   "content": f"today is {now:%A %Y-%m-%d}\n\nnext 7 days:\n{week}"
-                              f"\n\nThey said: {task}"}],
+        messages=[
+            {"role": "system", "content": _CAL_SYSTEM},
+            {
+                "role": "user",
+                "content": f"today is {now:%A %Y-%m-%d}\n\nnext 7 days:\n{week}"
+                f"\n\nThey said: {task}",
+            },
+        ],
         fmt=_CAL_FORMAT,
         options={"temperature": 0, "num_ctx": 2048},
     )
@@ -666,8 +761,13 @@ def calendar(db, task: str) -> dict:
         action = "none"  # asking and acting in the same breath is the guess it replaces
     if action == "write" and request:
         tools.calendar_write(db, request)  # queues only; Krich's ✅ is the write
-    return {"action": action, "events": week[:600] if action == "read" else "",
-            "queued": request if action == "write" else "", "ask": ask, "clash": clash}
+    return {
+        "action": action,
+        "events": week[:600] if action == "read" else "",
+        "queued": request if action == "write" else "",
+        "ask": ask,
+        "clash": clash,
+    }
 
 
 if __name__ == "__main__":  # runnable check: the contract, offline
@@ -692,16 +792,23 @@ if __name__ == "__main__":  # runnable check: the contract, offline
     assert run(db, "boom", "x") == {}, "a crashing mini must degrade, not raise"
     assert run(db, "ghost", "x") == {}, "invented mini name must be a no-op"
 
-    assert _schema()["properties"]["dispatch"]["items"]["properties"]["mini"]["enum"] \
-        == ["boom", "demo"]
+    assert _schema()["properties"]["dispatch"]["items"]["properties"]["mini"]["enum"] == [
+        "boom",
+        "demo",
+    ]
     assert parse('{"dispatch":[{"mini":"demo","task":"lofi"}],"ask":null}') == {
-        "dispatch": [("demo", "lofi")], "ask": ""}
+        "dispatch": [("demo", "lofi")],
+        "ask": "",
+    }
     assert parse('{"dispatch":[{"mini":"ghost","task":"x"}],"ask":"which one?"}') == {
-        "dispatch": [], "ask": "which one?"}
+        "dispatch": [],
+        "ask": "which one?",
+    }
     assert parse("not json at all") == {"dispatch": [], "ask": ""}
     assert parse('{"dispatch":[],"ask":null}') == {"dispatch": [], "ask": ""}
 
     MINIS.clear()
-    assert asyncio.run(dispatch(db, "Krich", "hi")) == {"dispatch": [], "ask": ""}, \
+    assert asyncio.run(dispatch(db, "Krich", "hi")) == {"dispatch": [], "ask": ""}, (
         "empty registry must not make a model call"
+    )
     print("minis ok: contract holds, undeclared fields dropped, junk degrades to {}")

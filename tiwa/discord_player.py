@@ -2,6 +2,7 @@
 
 Search and decoding live in music.py. One Player owns the existing single deck.
 """
+
 import asyncio
 from functools import partial
 import discord
@@ -83,7 +84,6 @@ class Player:
 
         return True
 
-
     async def advance_after(self, channel, generation=None):
         """Advance to the queued song, if any."""
         async with self.lock:
@@ -92,12 +92,10 @@ class Player:
             music.NOW["title"] = None
             await self._advance(channel)
 
-
     async def _advance(self, channel):
         while music.QUEUE:
             if await self._start(channel, music.QUEUE.pop(0)):
                 return
-
 
     async def flush(self, channel, author=None):
         # Keep accepted searches alive beyond a voice callback's 90-second deadline.
@@ -107,7 +105,6 @@ class Player:
         task.add_done_callback(self.tasks.discard)
         await asyncio.wait({task}, timeout=1)
 
-
     async def _run(self, channel, author=None):
         async with self.lock:
             try:
@@ -115,10 +112,11 @@ class Player:
             except Exception as error:
                 print(f"[music] request failed: {type(error).__name__}: {error}")
                 try:
-                    await channel.send("Music request failed; the next queued request can still run.")
+                    await channel.send(
+                        "Music request failed; the next queued request can still run."
+                    )
                 except Exception:
                     pass  # disconnected text channel must not strand the deck lock
-
 
     async def _flush_locked(self, channel, author=None):
         """Drain everything she asked the DJ to do this turn. Runs after the reply,
@@ -126,8 +124,7 @@ class Player:
         jobs = list(tools.DJ)
         tools.DJ.clear()
         if tools.PENDING_MUSIC is not None:  # play/stop from the older tools
-            jobs.insert(0, ("stop" if tools.PENDING_MUSIC == "" else "play",
-                            tools.PENDING_MUSIC))
+            jobs.insert(0, ("stop" if tools.PENDING_MUSIC == "" else "play", tools.PENDING_MUSIC))
             tools.PENDING_MUSIC = None
         if not jobs:
             return
@@ -143,7 +140,9 @@ class Player:
                 await channel.send(result)
                 return
             self.voice_channels[channel.guild.id] = channel
-            await voice.listen(channel.guild, partial(self.on_heard, channel=channel), self.client.loop)
+            await voice.listen(
+                channel.guild, partial(self.on_heard, channel=channel), self.client.loop
+            )
             vc = channel.guild.voice_client
         if vc is None:
             await channel.send("i'm not in a voice channel")
@@ -168,9 +167,17 @@ class Player:
                     continue
                 current = music.NOW["title"] if action == "skip" else None
                 titles = ([current] if current else []) + [h["title"] for h in music.QUEUE]
-                indices = music.queue_targets(target, titles)[:count] if target else list(range(min(count, len(titles))))
+                indices = (
+                    music.queue_targets(target, titles)[:count]
+                    if target
+                    else list(range(min(count, len(titles))))
+                )
                 if not indices:
-                    await channel.send("No unique matching song found; queue unchanged." if target else "No songs to " + action + ".")
+                    await channel.send(
+                        "No unique matching song found; queue unchanged."
+                        if target
+                        else "No songs to " + action + "."
+                    )
                     continue
                 offset = int(bool(current))
                 removed = [titles[i] for i in indices]
@@ -180,7 +187,10 @@ class Player:
                     vc.stop()
                     music.NOW["title"] = None
                     await self._advance(channel)
-                await channel.send(("Skipped: " if action == "skip" else "Removed from queue: ") + ", ".join(removed)[:1800])
+                await channel.send(
+                    ("Skipped: " if action == "skip" else "Removed from queue: ")
+                    + ", ".join(removed)[:1800]
+                )
             elif action in ("queue", "play"):
                 try:
                     hits = await asyncio.to_thread(music.find_many, arg)
@@ -194,17 +204,17 @@ class Player:
                     music.QUEUE.append(hit)
                 if len(hits) > 1:
                     titles = "\n".join(f"• {h['title']}" for h in hits)
-                    await channel.send(f"Added {len(hits)} songs (up to 50 per request):\n{titles}"[:1950])
+                    await channel.send(
+                        f"Added {len(hits)} songs (up to 50 per request):\n{titles}"[:1950]
+                    )
                 elif hits and music.NOW["title"]:
                     await channel.send(f"Queued **{hits[0]['title']}** (#{len(music.QUEUE)})")
                 if not music.NOW["title"]:
                     await self._advance(channel)
 
-
     async def leave(self, guild) -> str:
         async with self.lock:
             return await self._leave_locked(guild)
-
 
     async def _leave_locked(self, guild) -> str:
         """Leave the call. Disconnecting kills playback, so the deck goes with it."""
@@ -216,7 +226,6 @@ class Player:
         music.NOW["title"] = None
         return await voice.leave(guild)
 
-
     async def flush_leave(self, channel, text):
         """She asked to leave. Runs last, after the reply and the music."""
         if not tools.PENDING_LEAVE:
@@ -225,5 +234,3 @@ class Player:
         if not voice.wants_now(text):
             return  # "ออกไปทีหลังนะ" is a plan, not an ask — same veto as joining
         await channel.send(await self.leave(channel.guild))
-
-

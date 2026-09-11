@@ -1,4 +1,5 @@
 """Tiwa Discord bot — entrypoint. The brain lives in tiwa/."""
+
 import asyncio
 import faulthandler
 import logging
@@ -53,8 +54,10 @@ async def _apologise(channel, e: Exception):
         # llm._openrouter_chat passes the provider's own words through — "User not
         # found." (revoked key) reads nothing like "Insufficient credits", and
         # that difference is the entire diagnosis. Repeat it verbatim.
-        why = f"{str(e).split(' for url')[0][:90]} — OPENROUTER_API_KEY is wrong, " \
-              "expired, or shadowed by a system environment variable"
+        why = (
+            f"{str(e).split(' for url')[0][:90]} — OPENROUTER_API_KEY is wrong, "
+            "expired, or shadowed by a system environment variable"
+        )
     elif "ConnectError" in why or "ConnectionError" in why:
         why = "cannot reach the model provider — network, or ollama not running"
     memory.log(db, "error", f"turn failed: {type(e).__name__}: {str(e)[:200]}")
@@ -65,6 +68,7 @@ async def _apologise(channel, e: Exception):
 def _later(channel):
     """How a mini that finished after she spoke reaches the chat: a second
     message, never an edit. She sends it herself — the facts stay inside."""
+
     async def send(line: str):
         history[channel.id].append({"role": "assistant", "content": line})
         await channel.send(line[:2000])
@@ -96,8 +100,9 @@ async def _heard(name: str, text: str, channel=None, activated=False, error=None
             continue  # heard, logged, not answered. No tokens spent.
         async with locks[ch.id]:
             try:
-                reply = await pipeline.respond(db, list(history[ch.id]), name, asked,
-                                               on_late=_later(ch))
+                reply = await pipeline.respond(
+                    db, list(history[ch.id]), name, asked, on_late=_later(ch)
+                )
             except Exception as e:
                 await _apologise(ch, e)
                 continue
@@ -106,9 +111,7 @@ async def _heard(name: str, text: str, channel=None, activated=False, error=None
             if reply:
                 history[ch.id].append({"role": "assistant", "content": reply})
                 ctx = memory.history_context(list(history[ch.id]))
-                asyncio.create_task(
-                    asyncio.to_thread(memory.extract, db, name, asked, reply, ctx)
-                )
+                asyncio.create_task(asyncio.to_thread(memory.extract, db, name, asked, reply, ctx))
                 await ch.send(reply[:2000])
                 try:
                     await voice.say(ch.guild, reply)
@@ -153,7 +156,10 @@ async def keep_listening():
         elif not vc.is_listening():
             # log the restart, not the attempt: a line saying "restarting" when
             # nothing restarted is what buried the log in the first place
-            if await voice.listen(ch.guild, partial(_heard, channel=ch), client.loop) == "listening":
+            if (
+                await voice.listen(ch.guild, partial(_heard, channel=ch), client.loop)
+                == "listening"
+            ):
                 memory.log(db, "voice", "listening had stopped — restarted")
 
 
@@ -209,9 +215,13 @@ async def on_raw_reaction_add(payload):
     if payload.message_id not in calendar.pending or str(payload.emoji) not in ("✅", "❌"):
         return
     _, channel_id, _ = calendar.pending[payload.message_id]
-    if payload.channel_id != channel_id or str(payload.user_id) != str(calendar.requesters.get(payload.message_id, calendar.owner_id)):
+    if payload.channel_id != channel_id or str(payload.user_id) != str(
+        calendar.requesters.get(payload.message_id, calendar.owner_id)
+    ):
         return
-    channel = client.get_channel(payload.channel_id) or await client.fetch_channel(payload.channel_id)
+    channel = client.get_channel(payload.channel_id) or await client.fetch_channel(
+        payload.channel_id
+    )
     await calendar.confirm(payload.message_id, payload.user_id, channel, str(payload.emoji) == "✅")
 
 
@@ -219,13 +229,16 @@ async def on_raw_reaction_add(payload):
 async def on_message(message: discord.Message):
     if message.author.bot:
         return
-    text = message.content.replace(f"<@{client.user.id}>", "").replace(f"<@!{client.user.id}>", "").strip()
+    text = (
+        message.content.replace(f"<@{client.user.id}>", "")
+        .replace(f"<@!{client.user.id}>", "")
+        .strip()
+    )
     if await calendar.text(message, text):
         return
     # content_type is None for some clients; treat that as not-an-image rather than
     # paying a vision call on a .zip
-    images = [a.url for a in message.attachments
-              if (a.content_type or "").startswith("image/")]
+    images = [a.url for a in message.attachments if (a.content_type or "").startswith("image/")]
     # a picture with no caption is the normal case — the chatlog needs to show
     # something happened, or "ดูสิ" three messages later resolves to nothing
     said = (text + " [image]").strip() if images else text
@@ -245,17 +258,25 @@ async def on_message(message: discord.Message):
         sink = getattr(vc, "sink", None)
         task = getattr(sink, "task", None)
         commands = getattr(sink, "commands", None)
-        state = ("off" if not vc or not vc.is_listening() else
-                 "worker stopped" if task and task.done() else "listening")
+        state = (
+            "off"
+            if not vc or not vc.is_listening()
+            else "worker stopped"
+            if task and task.done()
+            else "listening"
+        )
         await message.channel.send(
             f"Online. Voice: {state}. Waiting commands: {commands.qsize() if commands is not None else 0}. "
-            f"{getattr(sink, 'last_outcome', 'No voice request yet')}. No model call used.")
+            f"{getattr(sink, 'last_outcome', 'No voice request yet')}. No model call used."
+        )
         return
     if cmd in ("join", "join vc", "get in here", "เข้ามา", "เข้าห้อง"):
         result = await voice.join(message.author)
         if result.startswith("joined"):
             voice_channel[message.guild.id] = message.channel
-            result += " — " + await voice.listen(message.guild, partial(_heard, channel=message.channel), client.loop)
+            result += " — " + await voice.listen(
+                message.guild, partial(_heard, channel=message.channel), client.loop
+            )
         await message.channel.send(result)
         return
     if cmd in ("leave", "leave vc", "get out", "ออกไป", "ออกห้อง"):
@@ -266,9 +287,14 @@ async def on_message(message: discord.Message):
     async with locks[message.channel.id]:
         async with message.channel.typing():
             try:
-                reply = await pipeline.respond(db, list(history[message.channel.id]),
-                                               author, text, images,
-                                               on_late=_later(message.channel))
+                reply = await pipeline.respond(
+                    db,
+                    list(history[message.channel.id]),
+                    author,
+                    text,
+                    images,
+                    on_late=_later(message.channel),
+                )
             except Exception as e:
                 # She goes MUTE otherwise. discord.py logs the traceback to the
                 # console and the channel shows nothing at all — someone typed at
@@ -302,7 +328,9 @@ async def on_message(message: discord.Message):
                 result = await voice.join(message.author)
                 if result.startswith("joined"):
                     voice_channel[message.guild.id] = message.channel
-                    await voice.listen(message.guild, partial(_heard, channel=message.channel), client.loop)
+                    await voice.listen(
+                        message.guild, partial(_heard, channel=message.channel), client.loop
+                    )
                 else:
                     await message.channel.send(result)
         await player.flush(message.channel, message.author)

@@ -21,6 +21,7 @@ card and the two cannot co-reside — ollama would evict and reload a model on
 every image, so the cost is a load stall, not inference. Add a local path when
 the VRAM is there, not before.
 """
+
 import os
 import time
 from urllib.parse import urlsplit
@@ -75,8 +76,7 @@ def _msgs(urls: list, text: str) -> list:
             "role": "user",
             "content": [
                 {"type": "text", "text": said},
-                *({"type": "image_url", "image_url": {"url": u}}
-                  for u in urls[:MAX_IMAGES]),
+                *({"type": "image_url", "image_url": {"url": u}} for u in urls[:MAX_IMAGES]),
             ],
         },
     ]
@@ -112,8 +112,9 @@ def look(db, urls, text: str = "") -> str:
     desc = (resp["content"] or "").strip()[:MAX_CHARS]
     # logged as a tool row on purpose: the panel's tool_cell() already splits
     # `name('arg') -> result`, so the log tab renders this with no dashboard work
-    memory.log(db, "tool", f"look({_name(urls[0])!r}) -> {desc[:240]}",
-               (time.perf_counter() - t0) * 1000)
+    memory.log(
+        db, "tool", f"look({_name(urls[0])!r}) -> {desc[:240]}", (time.perf_counter() - t0) * 1000
+    )
     return desc
 
 

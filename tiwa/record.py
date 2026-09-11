@@ -25,6 +25,7 @@ There does not need to be one. `pipeline.say()` is shared by both paths and
 so a persona row is the same row either way. If that ever stops being true,
 forkbench fails first and this file is the second thing to fix.
 """
+
 import argparse
 import json
 import re
@@ -50,8 +51,7 @@ def _messages(request: str) -> list:
     if len(parts) < 3:
         return []
     # split() gives ['', role, body, role, body, ...]
-    return [{"role": r, "content": b.strip("\n")}
-            for r, b in zip(parts[1::2], parts[2::2])]
+    return [{"role": r, "content": b.strip("\n")} for r, b in zip(parts[1::2], parts[2::2])]
 
 
 def rows(db, keep_state: bool = True) -> list:
@@ -71,8 +71,7 @@ def rows(db, keep_state: bool = True) -> list:
     """
     out = []
     for _, _, _, _, _, _, request, response in db.execute(
-        "SELECT id, ts, provider, model, ms, tokens, request, response "
-        "FROM llm_log ORDER BY id"
+        "SELECT id, ts, provider, model, ms, tokens, request, response FROM llm_log ORDER BY id"
     ):
         msgs = _messages(request)
         if not msgs or msgs[0]["role"] != "system":
@@ -85,8 +84,7 @@ def rows(db, keep_state: bool = True) -> list:
         if not reply:
             continue  # an empty turn teaches her to say nothing
         if not keep_state:
-            msgs = [msgs[0]] + [m for m in msgs[1:]
-                                if not m["content"].startswith("[inner-state")]
+            msgs = [msgs[0]] + [m for m in msgs[1:] if not m["content"].startswith("[inner-state")]
         out.append({"messages": msgs + [{"role": "assistant", "content": reply}]})
     return out
 
@@ -116,8 +114,11 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--stats", action="store_true", help="show the log breakdown only")
     ap.add_argument("--out", default=str(OUT))
-    ap.add_argument("--drop-state", action="store_true",
-                    help="strip the per-turn [inner-state] block (see rows())")
+    ap.add_argument(
+        "--drop-state",
+        action="store_true",
+        help="strip the per-turn [inner-state] block (see rows())",
+    )
     args = ap.parse_args()
 
     db = memory.connect()
