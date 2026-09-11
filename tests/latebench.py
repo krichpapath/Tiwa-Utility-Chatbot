@@ -56,7 +56,7 @@ async def on_late(line):
 
 async def turn_of(text, author="Krich", handler=True):
     """Returns (reply, seconds, PENDING_MUSIC) — flags read inside the task, the
-    way bot._flush_music does."""
+    way bot.player.flush does."""
     t0 = time.perf_counter()
     reply = await pipeline.respond(db, HIST, author, text,
                                on_late=on_late if handler else None)
@@ -92,7 +92,7 @@ async def music_does_not_wait_for_the_router():
     late.clear()
     reply, took, pending = await turn_of("เปิดเพลงอะไรก็ได้")
     assert reply == "ok whatever"
-    assert pending == "bad apple", pending
+    assert pending == {"keywords": "bad apple", "request": "เปิดเพลงอะไรก็ได้"}, pending
     # DJ starts at t=0, BEFORE dispatch, because the classifier already said this
     # is a music ask for free. So the song overlaps the routing call instead of
     # queueing behind it: all three serially would be DISPATCH + MINI + PERSONA.
@@ -150,7 +150,7 @@ async def speech_cancels_actions_do_not():
     _, _, pending = await turn_of("เปิดเพลงอะไรก็ได้")  # moved on, and asked for a song
     await settle()
     assert not late, f"a stale search spoke after they changed the subject: {late}"
-    assert pending == "bad apple", "cancelling speech killed the song too"
+    assert pending == {"keywords": "bad apple", "request": "เปิดเพลงอะไรก็ได้"}, "cancelling speech killed the song too"
     rows = [t for _, k, t, _ in memory.read_log(db, 20) if k == "mini"]
     assert any("cancelled" in r for r in rows), rows[:3]
     print("cancel ok   — stale search dropped, the song they just asked for played")

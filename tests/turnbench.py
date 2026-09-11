@@ -92,7 +92,7 @@ def sequential():
 
 
 def writeable():
-    """bot._flush_music assigns `tools.PENDING_MUSIC = None` to drain the deck.
+    """bot.player.flush assigns `tools.PENDING_MUSIC = None` to drain the deck.
 
     A plain module __getattr__ would let that assignment create a real global
     that shadows the shim forever — silently, and only on the flush path. The

@@ -13,29 +13,29 @@ async def main():
     plan=gcal.validate_change(dict(action='add',title='Checkup',start='2026-09-17T13:00:00'))
     channel=Obj(id=567,send=AsyncMock())
     def propose():
-        bot.pending_confirms.clear()
-        bot.pending_confirms[12]=(plan,channel.id,time.monotonic()+600)
-        bot.proposal_users[12]=42
+        bot.calendar.pending.clear()
+        bot.calendar.pending[12]=(plan,channel.id,time.monotonic()+600)
+        bot.calendar.requesters[12]=42
     with patch.object(gcal,'confirmation_reply') as classify, patch.object(gcal,'apply_change',return_value='added: Checkup') as apply:
         for answer,decision in [('yes','approve'),('เอาเลย','approve'),('sounds good to me','approve'),('ไม่เอาแล้ว','decline'),('maybe','unclear')]:
             propose(); classify.return_value=decision; apply.reset_mock()
-            assert await bot._calendar_answer(channel,42,answer)
+            assert await bot.calendar.answer(channel,42,answer)
             assert apply.call_count == (decision=='approve')
         propose(); classify.reset_mock(); apply.reset_mock()
-        assert not await bot._calendar_answer(channel,99,'yes')
+        assert not await bot.calendar.answer(channel,99,'yes')
         classify.assert_not_called(); apply.assert_not_called()
         classify.return_value='revise'
         revised=dict(plan,start='2026-09-17T14:00:00',end='2026-09-17T15:00:00')
         with patch.object(gcal,'prepare_change',return_value=revised):
-            assert await bot._calendar_answer(channel,42,'yes but at two')
+            assert await bot.calendar.answer(channel,42,'yes but at two')
         apply.assert_not_called()
-        assert bot.pending_confirms[12][0]==revised
+        assert bot.calendar.pending[12][0]==revised
         classify.return_value='approve'
-        await bot._calendar_answer(channel,42,'that works')
+        await bot.calendar.answer(channel,42,'that works')
         apply.assert_called_once_with(revised)
         propose(); apply.reset_mock(); classify.side_effect=RuntimeError('offline')
-        await bot._calendar_answer(channel,42,'go ahead')
-        apply.assert_not_called(); assert 12 in bot.pending_confirms
+        await bot.calendar.answer(channel,42,'go ahead')
+        apply.assert_not_called(); assert 12 in bot.calendar.pending
     print('PASS conversational approval, refusal, uncertainty, revision then approval, wrong speaker, provider failure')
 asyncio.run(main())
 from tiwa import llm

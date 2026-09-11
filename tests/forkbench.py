@@ -53,7 +53,7 @@ HIST = [{"role": "user", "content": "Krich: hi"}]
 
 
 def run_turn(text, author="Krich"):
-    """Read the Turn flags INSIDE the task, the way bot._flush_music does.
+    """Read the Turn flags INSIDE the task, the way bot.player.flush does.
 
     asyncio.run() wraps the coroutine in a Task, which gets its own copy of the
     context — so tools.PENDING_MUSIC read after it returns is a different Turn.
@@ -114,7 +114,7 @@ def net_under_the_router():
     music.NOW["title"] = None
     _, pending, _ = run_turn("เปิดเพลงอะไรก็ได้")
     assert any("You are the DJ" in c for c in calls), "the music ask reached nobody"
-    assert pending == "bad apple", pending
+    assert pending == {"keywords": "bad apple", "request": "เปิดเพลงอะไรก็ได้"}, pending
     print("net ok      — router missed the music ask, the classifier caught it")
 
     # "he plays guitar" DOES reach DJ now, and that is the design: the hint is
@@ -178,7 +178,7 @@ def dj_has_the_last_word_before_she_speaks():
     # 2. DJ says play -> she is told WHAT, in the words the search actually got
     states.clear()
     _, pending, _ = run_turn("เปิดเพลงอะไรก็ได้")
-    assert pending == "bad apple", pending
+    assert pending == {"keywords": "bad apple", "request": "เปิดเพลงอะไรก็ได้"}, pending
     assert "play bad apple" in states[-1], \
         f"the state block is still vague about what is playing:\n{states[-1]}"
     assert "do NOT name a SONG TITLE" in states[-1], "the guard came off with it"

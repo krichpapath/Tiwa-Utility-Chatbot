@@ -15,6 +15,8 @@ from tiwa import memory
 import bot
 
 bot.db = memory.connect(":memory:")
+
+bot.player.db = bot.calendar.db = bot.db
 handler = bot.on_message
 result = {"status": "no human input received"}
 ready = False
@@ -26,7 +28,7 @@ async def on_ready():
     if ready:
         return
     ready = True
-    bot.OWNER_ID = str((await bot.client.application_info()).owner.id)
+    bot.calendar.owner_id = str((await bot.client.application_info()).owner.id)
     channel = await bot.client.fetch_channel(int(os.environ["TIWA_HOME_CHANNEL"]))
     await channel.send("[QA] Final human ingress check: owner may send @Tiwa QA hello here within four minutes. No voice/calendar actions.")
     print("READY for owner: @Tiwa QA hello", flush=True)
@@ -42,7 +44,7 @@ async def on_message(message):
 
 async def check_message(message, source):
     text = message.content.replace(f"<@{bot.client.user.id}>", "").replace(f"<@!{bot.client.user.id}>", "").strip()
-    if (message.author.bot or str(message.author.id) != bot.OWNER_ID
+    if (message.author.bot or str(message.author.id) != bot.calendar.owner_id
             or str(message.channel.id) != os.environ["TIWA_HOME_CHANNEL"]
             or bot.client.user not in message.mentions or text.lower() != "qa hello"):
         return False

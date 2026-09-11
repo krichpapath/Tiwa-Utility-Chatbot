@@ -56,6 +56,7 @@ async def main():
     # found while reading that log for a genuine music bug, where "Bad Apple
     # (video)" x5 sat in the middle of the evidence. Benches never touch it.
     bot.db = memory.connect(":memory:")
+    bot.player.db = bot.calendar.db = bot.db
 
     vc = FakeVC()
     channel = FakeChannel(vc)
@@ -72,7 +73,7 @@ async def main():
     async def run(*jobs):
         tools.DJ.clear()
         tools.DJ.extend(jobs)
-        await bot._flush_music(channel, None)
+        await bot.player.flush(channel, None)
 
     print("| step | now playing | queue | she said |")
     print("|---|---|---|---|")
@@ -129,7 +130,7 @@ async def main():
     for _ in range(3):
         tools.queue_music(None, "Mili")  # queue_music never touches the db
     assert tools.DJ == [("queue", "Mili")] * 3, tools.DJ
-    await bot._flush_music(channel, None)
+    await bot.player.flush(channel, None)
     await asyncio.sleep(0.05)
     await show("queue Mili x3")
     assert music.NOW["title"].startswith("Mili"), music.NOW

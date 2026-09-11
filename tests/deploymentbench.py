@@ -17,6 +17,8 @@ from tiwa import gcal, llm, memory, minis, pipeline, tools, voice
 import bot
 
 bot.db = memory.connect(":memory:")
+
+bot.player.db = bot.calendar.db = bot.db
 PLAN = dict(action="add", title="QA dentist", start="2026-09-10T15:00:00", end="2026-09-10T16:00:00")
 
 
@@ -34,19 +36,20 @@ class Channel:
 
 async def boundaries():
     ch = Channel()
-    bot.OWNER_ID = "7"
+    bot.calendar.owner_id = "7"
     bot.client = Obj(user=Obj(id=999), get_channel=lambda _: ch)
-    bot.pending_confirms.clear()
+    bot.player.client = bot.client
+    bot.calendar.pending.clear()
     tools.new_turn()
     tools.calendar_write(bot.db, "dentist tomorrow at three")
     with patch.object(gcal, "prepare_change", return_value=PLAN) as prepare:
-        await bot._flush_calendar_queue(ch)
-    assert prepare.call_count == 1 and "2026-09-10T15:00" in ch.sent[0]
-    mid = next(iter(bot.pending_confirms))
+        await bot.calendar.propose(ch)
+    assert prepare.call_count == 1 and "10/09/2026 15:00" in ch.sent[0]
+    mid = next(iter(bot.calendar.pending))
     reaction = Obj(message_id=mid, user_id=8, channel_id=42, emoji="✅")
     with patch.object(gcal, "apply_change", return_value="added") as apply:
         await bot.on_raw_reaction_add(reaction)
-        assert not apply.called and mid in bot.pending_confirms
+        assert not apply.called and mid in bot.calendar.pending
         reaction.user_id, reaction.channel_id = 7, 43
         await bot.on_raw_reaction_add(reaction)
         assert not apply.called
@@ -54,13 +57,13 @@ async def boundaries():
         await bot.on_raw_reaction_add(reaction)
         await bot.on_raw_reaction_add(reaction)
         apply.assert_called_once_with(PLAN)
-        bot.pending_confirms[mid] = (PLAN, 42, time.monotonic() - 1)
+        bot.calendar.pending[mid] = (PLAN, 42, time.monotonic() - 1)
         await bot.on_raw_reaction_add(reaction)
         assert apply.call_count == 1 and "expired" in ch.sent[-1]
     tools.play_music(bot.db, "lofi")
-    await bot._flush_music(ch, Obj())
+    await bot.player.flush(ch, Obj())
     assert "server voice channel" in ch.sent[-1]
-    assert "server voice channel" in await bot._hang_up(None)
+    assert "server voice channel" in await bot.player.leave(None)
     assert "not in a voice channel" in await voice.join(Obj())
     assert "not in a voice channel" in await voice.leave(None)
     other = Channel()
@@ -78,21 +81,21 @@ async def boundaries():
     with patch.dict(os.environ, {"TIWA_VOICE_REPLY": "1"}), \
          patch.object(bot.pipeline, "respond", return_value="Playing your song") as respond, \
          patch.object(memory, "extract"), patch.object(voice, "say"), \
-         patch.object(bot, "_flush_music") as music_flush, \
-         patch.object(bot, "_flush_calendar_queue") as calendar_flush, \
-         patch.object(bot, "_flush_leave") as leave_flush:
+         patch.object(bot.player, "flush") as music_flush, \
+         patch.object(bot.calendar, "propose") as calendar_flush, \
+         patch.object(bot.player, "flush_leave") as leave_flush:
         ch.sent.clear()
         await bot._heard("QA", "play a song", channel=ch, activated=True)
         assert "play a song" in ch.sent[0]
         assert ch.sent[1] == "Playing your song"
         assert respond.await_args.args[2:4] == ("QA", "play a song")
         music_flush.assert_awaited_once_with(ch)
-        calendar_flush.assert_awaited_once_with(ch)
+        calendar_flush.assert_awaited_once_with(ch, None)
         leave_flush.assert_awaited_once_with(ch, "play a song")
         await asyncio.sleep(0.05)  # let the mocked background extraction finish
     print("PASS activated voice posts transcript, answers, and flushes requested actions")
     bot.voice_channel.clear()
-    msg = Obj(author=Obj(bot=False, display_name="QA"), content="<@999> status",
+    msg = Obj(author=Obj(id=7, bot=False, display_name="QA"), content="<@999> status",
               attachments=[], guild=Obj(voice_client=None), mentions=[bot.client.user], channel=ch)
     with patch.object(bot.pipeline, "respond") as respond:
         await bot.on_message(msg)

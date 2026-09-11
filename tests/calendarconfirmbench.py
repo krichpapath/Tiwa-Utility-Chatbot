@@ -14,53 +14,53 @@ async def main():
     msg = Obj(channel=ch, author=Obj(id=42), reference=None)
     plan = dict(action='add', title='QA', start='2026-09-17T13:00:00')
     def pending(mid=1, expires=None):
-        bot.pending_confirms[mid] = (plan, ch.id, expires or time.monotonic()+600)
-    with patch.object(bot, 'OWNER_ID', '42'), patch.object(gcal, 'apply_change', return_value='added: QA') as apply:
-        bot.pending_confirms.clear()
+        bot.calendar.pending[mid] = (plan, ch.id, expires or time.monotonic()+600)
+    with patch.object(bot.calendar, 'owner_id', '42'), patch.object(gcal, 'apply_change', return_value='added: QA') as apply:
+        bot.calendar.pending.clear()
         pending()
         msg.author.id=99
-        await bot._calendar_text(msg, 'confirm')
+        await bot.calendar.text(msg, 'confirm')
         apply.assert_not_called()
-        assert 1 in bot.pending_confirms
+        assert 1 in bot.calendar.pending
         msg.author.id=42
-        await bot._calendar_text(msg, 'Confirm สิ')
+        await bot.calendar.text(msg, 'Confirm สิ')
         apply.assert_called_once_with(plan)
-        await bot._calendar_text(msg, 'confirm')
+        await bot.calendar.text(msg, 'confirm')
         assert apply.call_count == 1
-        pending(); await bot._calendar_text(msg, 'cancel')
-        assert not bot.pending_confirms
+        pending(); await bot.calendar.text(msg, 'cancel')
+        assert not bot.calendar.pending
         pending(expires=time.monotonic()-1)
-        await bot._calendar_text(msg, 'confirm')
+        await bot.calendar.text(msg, 'confirm')
         assert apply.call_count == 1
         pending(); pending(2)
-        await bot._calendar_text(msg, 'confirm')
-        assert len(bot.pending_confirms)==2
+        await bot.calendar.text(msg, 'confirm')
+        assert len(bot.calendar.pending)==2
         msg.reference=Obj(message_id=2)
-        await bot._calendar_text(msg, 'confirm')
-        assert 1 in bot.pending_confirms and 2 not in bot.pending_confirms
+        await bot.calendar.text(msg, 'confirm')
+        assert 1 in bot.calendar.pending and 2 not in bot.calendar.pending
         assert apply.call_count == 2
         pending(3)
-        bot.pending_confirms.pop(1, None)
+        bot.calendar.pending.pop(1, None)
         await bot._heard('Owner display name', 'confirm', channel=ch, activated=True, user_id=99)
-        assert 3 in bot.pending_confirms and apply.call_count == 2
+        assert 3 in bot.calendar.pending and apply.call_count == 2
         await bot._heard('Owner display name', 'เหตุที่ว่าคอนเฟิร์ม', channel=ch, activated=True, user_id=42)
-        assert 3 not in bot.pending_confirms and apply.call_count == 3
+        assert 3 not in bot.calendar.pending and apply.call_count == 3
         pending()
         apply.side_effect=RuntimeError('offline')
         msg.reference=Obj(message_id=1)
-        await bot._calendar_text(msg, 'confirm')
+        await bot.calendar.text(msg, 'confirm')
         assert 'failed' in ch.send.call_args.args[0]
-    bot.pending_confirms.clear()
+    bot.calendar.pending.clear()
     from tiwa import tools
     tools.new_turn()
     ch.send.return_value = Obj(id=555)
-    with patch.object(bot, 'OWNER_ID', '999'), patch.object(gcal, 'prepare_change', return_value=gcal.validate_change(plan)), patch.object(gcal, 'apply_change', return_value='added: QA') as apply:
+    with patch.object(bot.calendar, 'owner_id', '999'), patch.object(gcal, 'prepare_change', return_value=gcal.validate_change(plan)), patch.object(gcal, 'apply_change', return_value='added: QA') as apply:
         tools.PENDING_CALENDAR.extend(['request', 'same request'])
-        await bot._flush_calendar_queue(ch, 42)
-        assert len(bot.pending_confirms) == 1
+        await bot.calendar.propose(ch, 42)
+        assert len(bot.calendar.pending) == 1
         await bot._heard('Owner', 'ให้ที่วาคอนเฟิร์ม', channel=ch, activated=True, user_id=42)
         apply.assert_called_once()
-        assert not bot.pending_confirms
+        assert not bot.calendar.pending
         await bot._heard('Owner', 'เหตุที่ว่าคอนเฟิร์ม', channel=ch, activated=True, user_id=42)
         apply.assert_called_once()
     with patch.dict('os.environ', {'TIWA_CALENDAR_ID':'test-calendar'}), patch.object(gcal, '_service') as service:
@@ -73,11 +73,11 @@ async def main():
         assert ev.insert.call_args.kwargs['calendarId']=='test-calendar'
     print('PASS owner, text/Thai, cancel, expiry, duplicates, multiple proposals, error reporting, custom calendar reads/writes')
 for phrase in ('Confirm สิ', 'ยืนยันเลยครับ', 'confirm please', 'คอนเฟิร์ม', 'เหตุที่ว่าคอนเฟิร์ม', 'ให้ที่วาคอนเฟิร์ม', 'Hey Tiwa, confirm', 'Hey Tiwa ยืนยัน'):
-    assert bot._calendar_decision(phrase) is True
+    assert bot.calendar.decision(phrase) is True
 for phrase in ('cancel please', 'ยกเลิกเลย'):
-    assert bot._calendar_decision(phrase) is False
+    assert bot.calendar.decision(phrase) is False
 for phrase in ('do not confirm', 'confirm tomorrow', 'confirm?', 'ยืนยันไหม', 'เหตุที่ว่าไม่ต้องคอนเฟิร์ม', 'Hey Tiwa confirm tomorrow'):
-    assert bot._calendar_decision(phrase) is None
+    assert bot.calendar.decision(phrase) is None
 asyncio.run(main())
 from tiwa.listening import FOLLOWUPS
 from groupvoicebench import fixture, pcm

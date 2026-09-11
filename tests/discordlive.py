@@ -17,6 +17,8 @@ from tiwa import memory, pipeline, tools
 import bot
 
 bot.db = memory.connect(":memory:")
+
+bot.player.db = bot.calendar.db = bot.db
 ran = False
 results = []
 
@@ -27,7 +29,7 @@ async def on_ready():
     if ran:
         return
     ran = True
-    bot.OWNER_ID = str((await bot.client.application_info()).owner.id)
+    bot.calendar.owner_id = str((await bot.client.application_info()).owner.id)
     channel = await bot.client.fetch_channel(int(os.environ["TIWA_HOME_CHANNEL"]))
     try:
         await channel.send("[QA acceptance] Synthetic conversation tests starting. No calendar writes or voice calls.")

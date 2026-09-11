@@ -1,7 +1,7 @@
-"""Voice channel: join/leave (G5) and listening (G6).
+"""Discord voice transport, recovery, local STT helpers and spoken replies.
 
-G6 rule: transcribe EVERYTHING into a chatlog, run no model. Whisper is cheap,
-the LLM is not. Waking her on the wake word is G7.
+Active per-speaker wake detection/capture lives in listening.py.
+Model loading must stay off the Discord event loop.
 """
 import asyncio
 import difflib
@@ -408,94 +408,6 @@ async def leave(guild) -> str:
     except Exception as error:
         return f"couldn't leave voice: {type(error).__name__}"
     return "left"
-
-
-class Ears(voice_recv.AudioSink):
-    """Buffers each speaker separately, cuts on silence, hands text to `on_text`.
-
-    One stream per speaker is the point: she needs to know WHO said it, which is
-    what the per-user memory keys off.
-    """
-
-    def __init__(self, on_text, loop):
-        super().__init__()
-        self.on_text = on_text  # called (speaker_name, text) from the bot's loop
-        self.loop = loop
-        self.buf = {}  # name -> bytearray
-        self.last = {}  # name -> time of last packet
-        self.task = loop.create_task(self._watch())
-
-    def wants_opus(self) -> bool:
-        return False  # give us decoded PCM, not opus frames
-
-    def write(self, user, data):
-        if user is None:
-            return
-        name = getattr(user, "display_name", None) or str(user)
-        self.buf.setdefault(name, bytearray()).extend(data.pcm)
-        self.last[name] = time.monotonic()
-
-    async def _watch(self):
-        """Every 0.3s: whoever went quiet long enough gets their utterance cut.
-
-        Wrapped so nothing can end this task. If it dies she stops hearing
-        everyone, silently, until the bot restarts.
-        """
-        while True:
-            await asyncio.sleep(0.3)
-            try:
-                await self._sweep()
-            except asyncio.CancelledError:
-                raise  # leave() is allowed to stop us
-            except Exception:
-                print("[voice] listener hiccup, still listening:")
-                traceback.print_exc()
-
-    async def _sweep(self):
-        """One pass over the speakers; cut and transcribe whoever went quiet."""
-        now = time.monotonic()
-        for name in list(self.buf):
-            if not self.buf[name]:
-                continue
-            held = len(self.buf[name]) / (SAMPLE_RATE * 4)
-            quiet = now - self.last.get(name, 0) >= SILENCE_S
-            if not quiet and held < MAX_UTTERANCE_S:
-                continue  # still talking
-            pcm = bytes(self.buf.pop(name))
-            seconds = len(pcm) / (SAMPLE_RATE * 2 * 2)  # stereo, 2 bytes/sample
-            if seconds < MIN_UTTERANCE_S:
-                continue
-            audio = to_audio(pcm)
-            level = rms(audio)
-            if level < NOISE_FLOOR:
-                # gate 1: too quiet to be speech. Printed so you can tune it.
-                print(f"[voice] ignored {seconds:.1f}s from {name} "
-                      f"(level {level:.4f} < {NOISE_FLOOR})")
-                continue
-            # to_thread: whisper on CPU would otherwise block the bot
-            text = await asyncio.to_thread(transcribe, audio)  # gate 2: VAD
-            if VOICE_DEBUG:
-                dump(audio, SAMPLE_RATE, name, text)
-            if not text:
-                continue
-            if is_junk(text):  # gate 3: loops and stock hallucinations
-                print(f"[voice] ignored junk from {name} (level {level:.4f}): {text!r}")
-                continue
-            # her turn must never be able to kill our ears: a raise here used to
-            # end this task, and she would go deaf for the rest of the session
-            try:
-                await self.on_text(name, text)
-            except Exception:
-                print(f"[voice] turn failed for {name!r}, still listening:")
-                traceback.print_exc()
-
-    def cleanup(self):
-        # voice_recv's AudioSink.__del__ calls this, so it runs even when __init__
-        # died before its last line and there is no task to cancel. An exception
-        # in a destructor is only ever "Exception ignored" noise on stderr.
-        task = getattr(self, "task", None)
-        if task is not None:
-            task.cancel()
 
 
 # TIWA_VOICE decides how much of this file is live.

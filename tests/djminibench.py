@@ -60,7 +60,7 @@ def deck_reaches_the_decision():
 
 
 def actions():
-    """Each action writes to the Turn, so bot._flush_music drains it unchanged."""
+    """Each action writes to the Turn, so bot.player.flush drains it unchanged."""
     cases = [
         # action, terms          -> PENDING_MUSIC,  DJ list
         ("play", "bad apple", "bad apple", []),

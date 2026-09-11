@@ -15,22 +15,26 @@ import asyncio
 import sys
 import types
 from pathlib import Path
+from unittest.mock import AsyncMock
 
 sys.path.insert(0, str(Path(__file__).parents[1]))
 from tiwa import memory, music, tools  # noqa: E402
 
+from tiwa import gcal
 import bot  # noqa: E402  (imports discord, does not connect)
 
 # bot.db is the REAL data/tiwa.db and every turn logs to it. Benches never touch it.
 bot.db = memory.connect(":memory:")
+bot.player.db = bot.calendar.db = bot.db
 
 ME = types.SimpleNamespace(id=999, bot=True, display_name="Tiwa")
-bot.OWNER_ID = "7"
-bot.gcal.prepare_change = lambda text: text
-bot.gcal.describe_change = lambda text: text
+bot.calendar.owner_id = "7"
+gcal.prepare_change = lambda text: text
+gcal.describe_change = lambda text: text
 bot.client = types.SimpleNamespace(user=ME, loop=None,
                                    get_channel=lambda i: CHANNELS.get(i),
                                    fetch_channel=None)
+bot.player.client = bot.client
 CHANNELS = {}
 
 
@@ -95,7 +99,7 @@ bot.memory.extract = fake_extract
 def reset(cid=1, guild=None):
     bot.history.clear()
     bot.locks.clear()
-    bot.pending_confirms.clear()
+    bot.calendar.pending.clear()
     seen_calls.clear()
     extracted.clear()
     tools.new_turn()
@@ -196,14 +200,14 @@ def the_calendar_gate():
     it is one-shot, and her own reaction must not count."""
     ch = reset()
     applied = []
-    bot.gcal.apply_change = lambda text: applied.append(text) or f"added {text}"
+    gcal.apply_change = lambda text: applied.append(text) or f"added {text}"
 
     tools.PENDING_CALENDAR.append("add dentist tomorrow 15:00")
-    asyncio.run(bot._flush_calendar_queue(ch))
-    assert len(ch.sent) == 1 and "✅ to confirm" in ch.sent[0], ch.sent
+    asyncio.run(bot.calendar.propose(ch))
+    assert len(ch.sent) == 1 and "ให้บันทึกตามนี้เลยไหม" in ch.sent[0], ch.sent
     assert not applied, "the write happened without a reaction"
-    assert len(bot.pending_confirms) == 1, bot.pending_confirms
-    mid = next(iter(bot.pending_confirms))
+    assert len(bot.calendar.pending) == 1, bot.calendar.pending
+    mid = next(iter(bot.calendar.pending))
 
     def react(emoji, uid=7, message_id=None):
         return types.SimpleNamespace(message_id=message_id or mid, user_id=uid,
@@ -212,20 +216,20 @@ def the_calendar_gate():
     asyncio.run(bot.on_raw_reaction_add(react("✅", uid=ME.id)))
     assert not applied, "her OWN reaction confirmed the write"
     asyncio.run(bot.on_raw_reaction_add(react("🎉")))
-    assert not applied and bot.pending_confirms, "an unrelated emoji consumed the gate"
+    assert not applied and bot.calendar.pending, "an unrelated emoji consumed the gate"
     asyncio.run(bot.on_raw_reaction_add(react("✅", uid=8)))
-    assert not applied and bot.pending_confirms, "a stranger approved the owner's calendar"
+    assert not applied and bot.calendar.pending, "a stranger approved the owner's calendar"
 
     asyncio.run(bot.on_raw_reaction_add(react("✅")))
     assert applied == ["add dentist tomorrow 15:00"], applied
-    assert not bot.pending_confirms, "the gate is not one-shot"
+    assert not bot.calendar.pending, "the gate is not one-shot"
     asyncio.run(bot.on_raw_reaction_add(react("✅")))
     assert len(applied) == 1, "a second ✅ wrote the event twice"
 
     # ...and ❌ drops it without touching Google
     tools.PENDING_CALENDAR.append("cancel friday")
-    asyncio.run(bot._flush_calendar_queue(ch))
-    mid = next(iter(bot.pending_confirms))
+    asyncio.run(bot.calendar.propose(ch))
+    mid = next(iter(bot.calendar.pending))
     asyncio.run(bot.on_raw_reaction_add(react("❌", message_id=mid)))
     assert len(applied) == 1, "❌ still wrote the event"
     assert "dropped" in ch.sent[-1], ch.sent[-1]
@@ -272,7 +276,7 @@ def voice_commands_cost_nothing():
 
     bot.voice.join = fake_join
     bot.voice.leave = fake_leave
-    bot.voice.listen = lambda *a: "listening"
+    bot.voice.listen = AsyncMock(return_value="listening")
 
     for cmd in ("join", "เข้ามา", "JOIN "):
         asyncio.run(bot.on_message(msg(f"<@999> {cmd}", ch, mentions=[ME])))
@@ -299,7 +303,7 @@ def music_pulls_her_in():
         return "joined general"
 
     bot.voice.join = ok_join
-    bot.voice.listen = lambda *a: "listening"
+    bot.voice.listen = AsyncMock(return_value="listening")
 
     async def fake_find(channel, query):
         return {"title": f"{query} (video)", "url": "http://x", "query": query}
@@ -308,7 +312,7 @@ def music_pulls_her_in():
     music.source_for = lambda hit: object()
 
     tools.DJ.append(("play", "bad apple"))
-    asyncio.run(bot._flush_music(ch, author))
+    asyncio.run(bot.player.flush(ch, author))
     assert bot.voice_channel.get(1) is ch, "asking for music did not bring her in"
 
     # she is in the call but the join fails -> the reason reaches the channel
@@ -318,7 +322,7 @@ def music_pulls_her_in():
 
     bot.voice.join = bad_join
     tools.DJ.append(("play", "x"))
-    asyncio.run(bot._flush_music(ch, author))
+    asyncio.run(bot.player.flush(ch, author))
     assert "not in a voice channel" in ch.sent[-1], ch.sent
     print("music ok    — a song brings her into the call, and a failure is spoken")
 

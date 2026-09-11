@@ -71,8 +71,9 @@ def batches():
 
 async def deck():
     bot.db = memory.connect(":memory:")
+    bot.player.db = bot.calendar.db = bot.db
     bot.client.loop = asyncio.get_running_loop()
-    bot._music_lock = asyncio.Lock()
+    bot.player.lock = asyncio.Lock()
     music.NOW["title"] = None
     music.QUEUE.clear()
     sent, played = [], []
@@ -99,7 +100,7 @@ async def deck():
         return [dict(title=n, url="fixture") for n in names]
     async def submit(*jobs):
         tools.new_turn().DJ.extend(jobs)
-        await bot._flush_music(channel)
+        await bot.player.flush(channel)
     with patch.object(music, "find_many", side_effect=find_many), \
          patch.object(music, "source_for", side_effect=lambda hit: Obj(title=hit["title"], cleanup=lambda: None)), \
          patch.object(music, "VOLUME", 1.0):
@@ -127,14 +128,14 @@ async def deck():
                           dict(title="Still available", id="available00", deferred=True)]
         with patch.object(music, "find", side_effect=[LookupError("deleted"),
                    dict(title="Still available", id="available00", url="fresh")]) as resolve:
-            await bot._next(channel)
+            await bot.player.advance_after(channel)
             assert music.NOW["title"] == "Still available" and resolve.call_count == 2
         print("PASS unavailable queued track skipped; next track resolves fresh and plays")
         await submit(("stop", ""))
         music.QUEUE[:] = [dict(title="Blocked", id="blocked0000", deferred=True),
                           dict(title="Do not retry", id="retry000000", deferred=True)]
         with patch.object(music, "find", side_effect=LookupError("YouTube is rate-limiting this machine")) as resolve:
-            await bot._next(channel)
+            await bot.player.advance_after(channel)
         assert resolve.call_count == 1 and not music.QUEUE and not music.NOW["title"]
         print("PASS playback rate limit clears pending songs without retry storm")
         started, release = threading.Event(), threading.Event()
@@ -152,7 +153,7 @@ async def deck():
             except asyncio.CancelledError:
                 pass
             release.set()
-            await asyncio.gather(*list(bot._music_tasks))
+            await asyncio.gather(*list(bot.player.tasks))
         assert music.NOW["title"] == "Slow request"
         await submit(("play", "Following speaker"))
         assert music.QUEUE[0]["title"] == "Following speaker"

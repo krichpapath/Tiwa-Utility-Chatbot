@@ -32,6 +32,8 @@ from tiwa import memory  # noqa: E402
 import bot  # noqa: E402  (imports discord, does not connect)
 
 bot.db = memory.connect(":memory:")
+
+bot.player.db = bot.calendar.db = bot.db
 sent = []
 
 

@@ -15,7 +15,7 @@ ROOT = Path(__file__).resolve().parents[1]
 CHECKS = """test_memory memoryrecallbench namebench relationshipbench djbench discordbench panelbench turnbench minibench
 djminibench forkbench latebench searchminibench calminibench growthbench
 recordbench tastebench calbench searchbench routerbench wakebench dumpbench
-noisebench outagebench eyebench deploymentbench searchqualitybench activationbench recordingsbench dashboardbench groupvoicebench calendarproofbench calendareditbench daverecoverybench listenstartupbench musicartistbench musicqueuebench""".split()
+noisebench outagebench eyebench deploymentbench searchqualitybench activationbench recordingsbench dashboardbench groupvoicebench calendarproofbench calendareditbench daverecoverybench listenstartupbench musicartistbench musicintentbench musicqueuebench calendarconfirmbench calendarconversationbench""".split()
 
 
 def main():
@@ -26,7 +26,7 @@ def main():
         started = time.monotonic()
         with tempfile.TemporaryDirectory(prefix="tiwa-qa-") as scratch:
             env = dict(os.environ, TIWA_DATA_DIR=scratch, TIWA_LOG_PROMPTS="0",
-                       GRADIO_ANALYTICS_ENABLED="False")
+                       GRADIO_ANALYTICS_ENABLED="False", TIWA_LISTEN="0", TIWA_VOICE="dj")
             try:
                 run = subprocess.run([sys.executable, "-X", "utf8", str(ROOT / "tests" / f"{name}.py")],
                                      cwd=ROOT, env=env, capture_output=True, timeout=120)

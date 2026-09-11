@@ -140,6 +140,7 @@ def she_speaks_first():
         # rule 1 working, not a second reply. Only the main call is timed.
         if "just this second found out" in state:
             return "oh — which tuesday?"
+        assert "which tuesday did you mean?" in state
         await asyncio.sleep(0.25)
         order.append("reply")
         return "ok whatever"
@@ -174,7 +175,7 @@ def she_speaks_first():
             pipeline._cancel_pending("Krich")
 
     asyncio.run(go())
-    assert order == ["reply", "follow-up"], f"she answered before she spoke: {order}"
+    assert order == ["reply"], f"calendar should be included before the reply, not sent twice: {order}"
     print("order ok    — the reply always lands before the follow-up")
 
 
