@@ -12,10 +12,10 @@ import tempfile
 import time
 
 ROOT = Path(__file__).resolve().parents[1]
-CHECKS = """test_memory djbench discordbench panelbench turnbench minibench
+CHECKS = """test_memory memoryrecallbench namebench relationshipbench djbench discordbench panelbench turnbench minibench
 djminibench forkbench latebench searchminibench calminibench growthbench
 recordbench tastebench calbench searchbench routerbench wakebench dumpbench
-noisebench outagebench eyebench deploymentbench searchqualitybench""".split()
+noisebench outagebench eyebench deploymentbench searchqualitybench activationbench recordingsbench dashboardbench groupvoicebench calendarproofbench calendareditbench daverecoverybench listenstartupbench musicartistbench musicqueuebench""".split()
 
 
 def main():

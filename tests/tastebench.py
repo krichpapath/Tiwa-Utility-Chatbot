@@ -147,7 +147,7 @@ def a_pattern_must_say_what_recurs():
     asyncio.run(pipeline._tastes(db))
     got = list(db.execute("SELECT s.name, rel, d.name, r.note FROM relations r "
                           "JOIN entities s ON s.id=r.src JOIN entities d ON d.id=r.dst"))
-    assert got == [("Tycoon", "likes", "Mili",
+    assert got == [("Tycoon", "often requests", "Mili",
                     "asked for them four times this week")], got
     print("note ok     — empty object, empty note and self-reference all refused; "
           "a named pattern lands with its evidence")

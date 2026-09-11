@@ -36,6 +36,22 @@ class YDL:
 
 
 def music_checks():
+    assert music._rank('The Tender Box Spectacular Spider-Man (Main Title)',
+                       song('spider', 'The Spectacular Spider-Man', 'The Tender Box - Topic')) >= 0
+    db = memory.connect(":memory:")
+    for request in ("ที่ว่าไม่ใช่เพลงนี้ มีลิจากลิมบัสคอมพานีต่างหาก",
+                    "เอ้ย พี่ว่าหยุดเพลงนี้แล้วเปิดเพลงมิลิมบัสคอมพานีแทน"):
+        tools.new_turn()
+        with patch.object(llm, "chat", side_effect=AssertionError("source correction needs no invented title")):
+            result = minis.dj(db, request)
+        assert result["action"] == "play" and result["terms"] == "Mili Limbus Company"
+    tools.new_turn()
+    assert music._rank("Hound Dog R★O★C★K★S", song("rocks", "Hound Dog - Rocks (Naruto Opening)")) >= 0
+    assert music._rank("Hound Dog Rocks", song("rocks", "Hound Dog R★O★C★K★S")) >= 0
+    assert music._rank("Hound Dog R★O★C★K★S", song("wrong", "Rocks", "Other artist")) < 0
+    assert music._rank("Hound Dog Rocks", song("tuned", "Hound Dog - Rocks (432Hz)")) < 0
+    assert music._rank("Steven Universe songs", song("su", "Steven Universe - Love Like You (Official Audio)")) >= 0
+    assert music._rank("Steven Universe songs", song("wrong", "Other Cartoon Theme")) < 0
     assert music._rank("Warframe Red Line", song("red", "Warframe Gauss: Redline Official Music Video")) >= 0
     cover = song("cover", "Mili Hero cover")
     wrong = song("wrong", "Hero", "Other artist")
@@ -130,14 +146,78 @@ def mood_choice():
                  {"content": json.dumps(dict(title="Aruarian Dance", artist="Nujabes"))}]
     with patch.object(llm, "chat", side_effect=responses) as chat:
         result = minis.dj(memory.connect(":memory:"), "play something chill")
-        assert result["terms"] == tools.PENDING_MUSIC == "Nujabes Aruarian Dance"
-        assert chat.call_count == 2
+        assert result["terms"] == "study music"
+        assert tools.PENDING_MUSIC == {"keywords": "study music", "request": "play something chill"}
+        assert chat.call_count == 1
     tools.new_turn()
     with patch.object(llm, "chat", return_value={"content": json.dumps(dict(action="none", terms="", selection="mood"))}) as chat:
         minis.dj(memory.connect(":memory:"), "I enjoy chill music")
         assert chat.call_count == 1 and tools.PENDING_MUSIC is None
-    print("mood: concrete artist/title reaches deck; a stated taste never invokes picker")
+    for selection in ("named", "mood"):
+        request = "เหตุที่ว่า เปิดเพลง Say Fun Fair ที่ราคามิฟูบุกิ"
+        tools.new_turn()
+        with patch.object(llm, "chat", return_value={"content": json.dumps(dict(action="play", terms="bad spelling", selection=selection))}):
+            minis.dj(memory.connect(":memory:"), request)
+        assert tools.PENDING_MUSIC == {"keywords": "bad spelling", "request": request}
+    tools.new_turn()
+    url = "https://www.youtube.com/watch?v=abcdefghijk"
+    with patch.object(llm, "chat", return_value={"content": json.dumps(dict(action="play", terms=url, selection="named"))}):
+        minis.dj(memory.connect(":memory:"), "play " + url)
+    assert tools.PENDING_MUSIC == url
+    print("named/mood: original request reaches evidence search; explicit URLs preserved")
 
+
+@patch.object(music, "_music_queries", return_value=[])
+def discovery_checks(_plan):
+    correct = song("abcdefghijk", "ビビデバ / 星街すいせい(official)", "Suisei Channel")
+    wrong = song("12345678901", "Suisei", "Yoh Kamiyama")
+    YDL.infos = {correct["url"]: correct}
+    request = {"request": "เล่นเพลงของสุยเซโฮโลไลฟ์ให้หน่อย",
+               "keywords": "Yoh Kamiyama Suisei Hololive"}
+    reviews = [{"content": json.dumps(dict(index=-1, query="星街すいせい official music"))},
+               {"content": json.dumps(dict(index=1, query=""))}]
+    with patch("yt_dlp.YoutubeDL", YDL), patch.object(music, "_search", side_effect=[[wrong], [correct]]) as search, patch.object(llm, "chat", side_effect=reviews) as chat:
+        assert music.find(request)["id"] == correct["id"]
+        assert search.call_count == 2
+        assert request["request"] in chat.call_args.kwargs["messages"][1]["content"]
+        assert "json" in chat.call_args.kwargs["messages"][0]["content"].lower()
+    # A reviewer that gives up or repeats itself still gets the next phonetic hypothesis.
+    _plan.return_value = ["wrong hypothesis", "Suisei official"]
+    with patch("yt_dlp.YoutubeDL", YDL), patch.object(music, "_search", side_effect=[[wrong], [correct]]) as search, patch.object(llm, "chat", side_effect=[
+        {"content": '{"index":-1,"query":""}'},
+        {"content": '{"index":1,"query":""}'}]):
+        assert music.find(request)["id"] == correct["id"]
+        assert search.call_count == 2
+    _plan.return_value = []
+    for response in ("null", '{"index":99,"query":""}', '{"index":-1,"query":"Yoh Kamiyama Suisei Hololive"}'):
+        with patch.object(music, "_search", return_value=[wrong]) as search, patch.object(llm, "chat", return_value={"content": response}):
+            try:
+                music.find(request)
+                raise AssertionError("invalid/unverified selection accepted")
+            except LookupError:
+                pass
+            assert search.call_count == 1
+    with patch.object(music, "_search", return_value=[wrong]) as search, patch.object(llm, "chat", side_effect=[{"content": json.dumps(dict(index=-1, query=q))} for q in ("second", "third", "fourth")]):
+        try:
+            music.find(request)
+            raise AssertionError("budget ignored")
+        except LookupError:
+            pass
+        assert search.call_count == 3
+    YDL.infos[correct["url"]] = {**correct, "is_live": True}
+    with patch("yt_dlp.YoutubeDL", YDL):
+        try:
+            music.find(correct["url"])
+            raise AssertionError("live resolved video accepted")
+        except LookupError:
+            pass
+    print("discovery: wrong keywords refined, real candidate selected, invalid index/JSON, budget and resolved-live guards pass")
+
+for malformed in ('null', '{"queries":"not a list"}', '{"queries":[null,42]}'):
+    with patch.object(llm, "chat", return_value={"content": malformed}):
+        assert music._music_queries("fixture", "fixture") == []
+
+discovery_checks()
 
 music_checks()
 web_checks()

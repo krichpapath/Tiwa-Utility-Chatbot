@@ -49,13 +49,13 @@ def deck_reaches_the_decision():
     tools.new_turn()
     minis.run(db, "dj", "one more after this")
     prompt = sent["messages"][1]["content"]
-    assert "Bad Apple (video)" in prompt and "1 song(s) queued" in prompt, prompt
+    assert "Bad Apple (video)" in prompt and "Rick Roll (video)" in prompt, prompt
 
     music.QUEUE.clear()
     music.NOW["title"] = None
     tools.new_turn()
     minis.run(db, "dj", "something chill")
-    assert "Nothing is playing" in sent["messages"][1]["content"]
+    assert '"playing": null' in sent["messages"][1]["content"]
     print("deck ok     — what is on reaches the decision as a fact, not a tool call")
 
 
@@ -75,6 +75,10 @@ def actions():
     print(f"\n{'action':7} | {'terms':12} | {'PENDING_MUSIC':14} | DJ")
     print(f"{'-'*7}-+-{'-'*12}-+-{'-'*14}-+-{'-'*24}")
     for action, terms, want_music, want_dj in cases:
+        if want_music:
+            want_music = {"keywords": want_music, "request": "..."}
+        want_dj = [(a, {"keywords": q, "request": "..."} if a == "queue" else q)
+                   for a, q in want_dj]
         reply.update(action=action, terms=terms)
         tools.new_turn()
         out = minis.run(db, "dj", "...")

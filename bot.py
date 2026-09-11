@@ -3,6 +3,7 @@ import asyncio
 import faulthandler
 import logging
 import os
+import re
 import time
 from collections import defaultdict, deque
 from datetime import datetime
@@ -36,6 +37,7 @@ intents.message_content = True
 client = discord.Client(intents=intents, allowed_mentions=discord.AllowedMentions.none())
 
 HOME = os.environ.get("TIWA_HOME_CHANNEL")  # channel id for unprompted messages; unset = quiet
+proposal_users = {}  # proposal id -> requesting Discord account
 pending_confirms = {}  # confirm-message id -> plain-language calendar request
 OWNER_ID = os.environ.get("TIWA_OWNER_ID")  # defaults to Discord application owner at login
 
@@ -75,17 +77,26 @@ def _later(channel):
     return send
 
 
-async def _heard(name: str, text: str, channel=None):
-    """Everything said in voice becomes chatlog (G6). The model runs ONLY when
-    her name is in it (G7) — Whisper is cheap, the LLM is not."""
+async def _heard(name: str, text: str, channel=None, activated=False, error=None, user_id=None):
+    """Activated commands arrive after the local acoustic wake check.
+
+    Non-activated legacy test callbacks retain their existing wake check.
+    """
     channels = [channel] if channel is not None else list(voice_channel.values())
     if channel is None and len(channels) > 1:
         return  # an unscoped transcript must never leak across servers
     for ch in channels:
+        if error:
+            await ch.send(f"⚠️ {error}")
+            continue
+        if activated and await _calendar_answer(ch, user_id, text):
+            continue
         history[ch.id].append({"role": "user", "content": f"{name}: {text}"})
         memory.log(db, "voice", f"{name}: {text}")
-        asked = voice.wake(text)
+        asked = text if activated else voice.wake(text)
         await ch.send(f"🎙 **{name}:** {text}" + ("" if asked is None else "  ← for me"))
+        if activated and os.getenv("TIWA_VOICE_REPLY", "0") != "1":
+            continue  # transcription acceptance mode; no persona, tools, or TTS
         if asked is None:
             continue  # heard, logged, not answered. No tokens spent.
         async with locks[ch.id]:
@@ -95,6 +106,8 @@ async def _heard(name: str, text: str, channel=None):
             except Exception as e:
                 await _apologise(ch, e)
                 continue
+            if tools.PENDING_CALENDAR:
+                reply = ""  # the real proposal is the only confirmation prompt
             if reply:
                 history[ch.id].append({"role": "assistant", "content": reply})
                 ctx = memory.history_context(list(history[ch.id]))
@@ -108,11 +121,13 @@ async def _heard(name: str, text: str, channel=None):
                     memory.log(db, "error", f"speech failed: {type(e).__name__}")
                     await ch.send("⚠️ speech unavailable; text and queued actions still work")
             await _flush_music(ch)
-            await _flush_calendar_queue(ch)
+            await _flush_calendar_queue(ch, user_id)
             await _flush_leave(ch, asked)  # she can be told to leave out loud too
 
 
 _deck_gen = 0  # bumped by every deliberate play; see `after` below
+_music_lock = asyncio.Lock()  # ponytail: one lock for the existing single deck
+_music_tasks = set()
 
 
 async def _start(channel, hit):
@@ -120,7 +135,18 @@ async def _start(channel, hit):
     global _deck_gen
     vc = channel.guild.voice_client
     if vc is None:
-        return
+        return False
+    if hit.get("deferred"):
+        try:
+            resolved = await asyncio.to_thread(music.find, music.watch_url(hit["id"]))
+            if resolved["id"] != hit["id"]:
+                raise LookupError("resolved video identity changed")
+            hit = {**resolved, "query": music.watch_url(hit["id"])}
+        except Exception as error:
+            await channel.send(f"Skipped unavailable **{hit['title']}**: {error}")
+            if music._rate_limited(error):
+                music.QUEUE.clear()
+            return False
 
     # `vc.stop()` below makes discord.py fire the OUTGOING track's `after` — the
     # same callback a song reaching its end fires. So swapping tracks used to
@@ -143,10 +169,9 @@ async def _start(channel, hit):
             print(f"[music] playback error: {error!r}")
         if mine != _deck_gen:
             return  # replaced on purpose — the track that replaced us owns the deck
-        music.NOW["title"] = None
         # a finished song pulls the next one; scheduled onto the bot's loop
         # because `after` runs on discord's audio thread
-        asyncio.run_coroutine_threadsafe(_next(channel), loop)
+        asyncio.run_coroutine_threadsafe(_next(channel, mine), loop)
 
     src = None
     try:
@@ -163,33 +188,52 @@ async def _start(channel, hit):
             src.cleanup()
         music.NOW["title"] = None  # we already stopped whatever was on
         await channel.send(f"found it but couldn't play it: {e}")
-        return
+        return False
     music.NOW.update(title=hit["title"], query=hit.get("query", ""))
     memory.log(db, "music", f"playing {hit['title']}")
     print(f"[music] playing: {hit['title']}")
     await channel.send(f"▶ **{hit['title']}**")
 
+    return True
 
-async def _next(channel):
+
+async def _next(channel, generation=None):
     """Advance to the queued song, if any."""
-    if not music.QUEUE:
-        return
-    await _start(channel, music.QUEUE.pop(0))
+    async with _music_lock:
+        if generation is not None and generation != _deck_gen:
+            return
+        music.NOW["title"] = None
+        await _advance(channel)
 
 
-async def _find(channel, query):
-    print(f"[music] searching: {query!r}")
-    try:
-        hit = await asyncio.to_thread(music.find, query)
-        hit["query"] = query  # kept so a mid-song drop can re-resolve the url
-        return hit
-    except Exception as e:
-        print(f"[music] search failed: {type(e).__name__}: {e}")
-        await channel.send(f"couldn't find that: {e}")
-        return None
+async def _advance(channel):
+    while music.QUEUE:
+        if await _start(channel, music.QUEUE.pop(0)):
+            return
 
 
 async def _flush_music(channel, author=None):
+    # Keep accepted searches alive beyond a voice callback's 90-second deadline.
+    # Other speakers can submit their requests while the deck worker searches.
+    task = asyncio.create_task(_run_music(channel, author))
+    _music_tasks.add(task)
+    task.add_done_callback(_music_tasks.discard)
+    await asyncio.wait({task}, timeout=1)
+
+
+async def _run_music(channel, author=None):
+    async with _music_lock:
+        try:
+            await _flush_music_locked(channel, author)
+        except Exception as error:
+            print(f"[music] request failed: {type(error).__name__}: {error}")
+            try:
+                await channel.send("Music request failed; the next queued request can still run.")
+            except Exception:
+                pass  # disconnected text channel must not strand the deck lock
+
+
+async def _flush_music_locked(channel, author=None):
     """Drain everything she asked the DJ to do this turn. Runs after the reply,
     so music never blocks her talking."""
     jobs = list(tools.DJ)
@@ -212,7 +256,7 @@ async def _flush_music(channel, author=None):
             await channel.send(result)
             return
         voice_channel[channel.guild.id] = channel
-        voice.listen(channel.guild, partial(_heard, channel=channel), client.loop)
+        await voice.listen(channel.guild, partial(_heard, channel=channel), client.loop)
         vc = channel.guild.voice_client
     if vc is None:
         await channel.send("i'm not in a voice channel")
@@ -230,32 +274,58 @@ async def _flush_music(channel, author=None):
             # callback pops it and starts playing over the stop.
             _deck_gen += 1
             vc.stop()
-        elif action == "skip":
+        elif action in ("skip", "remove"):
+            target = arg.get("target", "") if isinstance(arg, dict) else arg
+            count = arg.get("count", 1) if isinstance(arg, dict) else 1
+            if not isinstance(target, str) or type(count) is not int or not 1 <= count <= 50:
+                await channel.send("Invalid queue edit; no songs changed.")
+                continue
+            current = music.NOW["title"] if action == "skip" else None
+            titles = ([current] if current else []) + [h["title"] for h in music.QUEUE]
+            indices = music.queue_targets(target, titles)[:count] if target else list(range(min(count, len(titles))))
+            if not indices:
+                await channel.send("No unique matching song found; queue unchanged." if target else "No songs to " + action + ".")
+                continue
+            offset = int(bool(current))
+            removed = [titles[i] for i in indices]
+            music.QUEUE[:] = [h for i, h in enumerate(music.QUEUE) if i + offset not in indices]
+            if current and 0 in indices:
+                _deck_gen += 1
+                vc.stop()
+                music.NOW["title"] = None
+                await _advance(channel)
+            await channel.send(("Skipped: " if action == "skip" else "Removed from queue: ") + ", ".join(removed)[:1800])
+        elif action in ("queue", "play"):
+            try:
+                hits = await asyncio.to_thread(music.find_many, arg)
+            except Exception as error:
+                await channel.send(f"couldn't find that: {error}")
+                continue  # a failed step must not discard later commands
+            for hit in hits:
+                hit.setdefault("query", arg)
+                if music.NOW["title"] and hit.get("id"):
+                    hit["deferred"] = True
+                music.QUEUE.append(hit)
+            if len(hits) > 1:
+                titles = "\n".join(f"• {h['title']}" for h in hits)
+                await channel.send(f"Added {len(hits)} songs (up to 50 per request):\n{titles}"[:1950])
+            elif hits and music.NOW["title"]:
+                await channel.send(f"Queued **{hits[0]['title']}** (#{len(music.QUEUE)})")
             if not music.NOW["title"]:
-                await channel.send("nothing playing")
-            else:
-                skipped = music.NOW["title"]
-                vc.stop()  # `after` pulls the next track by itself
-                await channel.send(f"⏭ skipped **{skipped}**")
-        elif action == "queue":
-            hit = await _find(channel, arg)
-            if hit:
-                if music.NOW["title"]:
-                    music.QUEUE.append(hit)
-                    await channel.send(f"➕ queued **{hit['title']}**"
-                                       f" (#{len(music.QUEUE)})")
-                else:
-                    await _start(channel, hit)
-        elif action == "play":
-            hit = await _find(channel, arg)
-            if hit:
-                await _start(channel, hit)
+                await _advance(channel)
 
 
 async def _hang_up(guild) -> str:
+    async with _music_lock:
+        return await _hang_up_locked(guild)
+
+
+async def _hang_up_locked(guild) -> str:
     """Leave the call. Disconnecting kills playback, so the deck goes with it."""
     if guild is None:
         return "voice commands need a server voice channel"
+    global _deck_gen
+    _deck_gen += 1
     voice_channel.pop(guild.id, None)
     music.QUEUE.clear()
     music.NOW["title"] = None
@@ -272,7 +342,7 @@ async def _flush_leave(channel, text):
     await channel.send(await _hang_up(channel.guild))
 
 
-async def _flush_calendar_queue(channel):
+async def _flush_calendar_queue(channel, user_id=None):
     """calendar_write only queues; every write is gated behind Krich's ✅ here."""
     while tools.PENDING_CALENDAR:
         text = tools.PENDING_CALENDAR.pop(0)
@@ -288,10 +358,26 @@ async def _flush_calendar_queue(channel):
         for mid, (_, _, expires) in list(pending_confirms.items()):
             if expires <= now:
                 pending_confirms.pop(mid, None)
-        m = await channel.send(f"📅 calendar change: **{gcal.describe_change(plan)}** — ✅ to confirm, ❌ to drop (owner only; expires in 10 minutes)")
+        duplicate = next((mid for mid, (old, cid, _) in pending_confirms.items()
+                          if cid == channel.id and old == plan and proposal_users.get(mid, OWNER_ID) == (user_id or OWNER_ID)), None)
+        if duplicate is not None:
+            await channel.send("นัดนี้รอยืนยันอยู่แล้ว — ตอบ ยืนยัน ได้เลย")
+            if user_id is not None:
+                from tiwa.listening import FOLLOWUPS
+                FOLLOWUPS[user_id] = time.monotonic() + 60
+            continue
+        m = await channel.send(f"📅 **{gcal.describe_change(plan)}**\nให้บันทึกตามนี้เลยไหม? ตอบได้ตามปกติ (รอฟังคำตอบ 1 นาที)")
+        # One latest proposal per requester in this channel.
+        for mid, (_, cid, _) in list(pending_confirms.items()):
+            if cid == channel.id and proposal_users.get(mid, OWNER_ID) == (user_id or OWNER_ID):
+                pending_confirms.pop(mid, None)
+                proposal_users.pop(mid, None)
         pending_confirms[m.id] = (plan, channel.id, now + 600)
-        await m.add_reaction("✅")
-        await m.add_reaction("❌")
+        proposal_users[m.id] = user_id or OWNER_ID
+        if user_id is not None:
+            from tiwa.listening import FOLLOWUPS
+            FOLLOWUPS[user_id] = time.monotonic() + 60
+
 
 
 @tasks.loop(seconds=30)
@@ -307,13 +393,20 @@ async def keep_listening():
     if not voice.LISTEN:
         return
     for gid, ch in list(voice_channel.items()):
+        recovered = await voice.recover_decryption(ch.guild)
+        if recovered:
+            memory.log(db, "voice", recovered)
+            try:
+                await ch.send(recovered)
+            except Exception:
+                pass  # keep the watchdog alive if the text channel is unavailable
         vc = ch.guild.voice_client
         if vc is None:
             voice_channel.pop(gid, None)
         elif not vc.is_listening():
             # log the restart, not the attempt: a line saying "restarting" when
             # nothing restarted is what buried the log in the first place
-            if voice.listen(ch.guild, partial(_heard, channel=ch), client.loop) == "listening":
+            if await voice.listen(ch.guild, partial(_heard, channel=ch), client.loop) == "listening":
                 memory.log(db, "voice", "listening had stopped — restarted")
 
 
@@ -365,29 +458,124 @@ async def on_ready():
         keep_listening.start()
 
 
-@client.event
-async def on_raw_reaction_add(payload):
-    pending = pending_confirms.get(payload.message_id)
-    if pending is None or str(payload.user_id) != str(OWNER_ID) or str(payload.emoji) not in ("✅", "❌"):
+async def _confirm_calendar(message_id, user_id, channel, approve):
+    pending = pending_confirms.get(message_id)
+    if pending is None:
+        await channel.send("No pending calendar proposal; it may already be handled or the bot restarted. Ask again.")
         return
-    text, channel_id, expires = pending
-    if payload.channel_id != channel_id:
+    plan, channel_id, expires = pending
+    if channel.id != channel_id:
         return
-    del pending_confirms[payload.message_id]  # one shot
-    channel = client.get_channel(payload.channel_id) or await client.fetch_channel(
-        payload.channel_id
-    )
+    if str(user_id) != str(proposal_users.get(message_id, OWNER_ID)):
+        await channel.send("Only the person who requested this appointment can confirm it.")
+        return
+    del pending_confirms[message_id]  # claim before awaiting: no duplicate writes
+    proposal_users.pop(message_id, None)
+    from tiwa.listening import FOLLOWUPS
+    FOLLOWUPS.pop(user_id, None)
     if time.monotonic() >= expires:
         await channel.send("calendar proposal expired; ask again")
         return
-    if str(payload.emoji) == "✅":
+    if not approve:
+        await channel.send("Calendar proposal dropped.")
+        return
+    try:
+        result = await asyncio.to_thread(gcal.apply_change, plan)
+    except Exception as e:
+        result = f"calendar change failed: {type(e).__name__}; check calendar before retrying"
+    memory.log(db, "calendar", result)
+    history[channel.id].append({"role": "assistant", "content": result})
+    await channel.send(result)
+
+
+def _calendar_decision(text):
+    # Whole utterance only. STT may retain a mangled wake prefix even after local activation.
+    text = re.sub(
+        r"^\s*(?:(?:hey|เฮ้ย?)\s*[,!]?\s*(?:tiwa|ทิวา|ที่ว่า|ที่วา)|เหตุที่ว่า|ให้ที่ว่า|ให้ที่วา|ที่ว่า|ทิวา)[\s,!.:—-]*",
+        "", text, flags=re.IGNORECASE)
+    match = re.fullmatch(
+        r"\s*(?:please\s+)?(confirm|cancel|ยืนยัน|คอนเฟิร์ม|ยกเลิก)"
+        r"(?:\s|สิ|เลย|นะ|ครับ|ค่ะ|คะ|จ้า|จ้ะ|ได้เลย|please|it|that|[.!])*", text.casefold())
+    if not match:
+        return None
+    return match[1] in ("confirm", "ยืนยัน", "คอนเฟิร์ม")
+
+
+async def _calendar_followup(channel, user_id, decision, mid=None):
+    if mid is None:
+        matches = [key for key, (_, cid, expires) in pending_confirms.items()
+                   if cid == channel.id and expires > time.monotonic()
+                   and str(proposal_users.get(key, OWNER_ID)) == str(user_id)]
+        if len(matches) != 1:
+            await channel.send("No single pending calendar proposal. Ask again if it expired or Tiwa restarted; if several are pending, reply to the one you want with confirm or cancel.")
+            return
+        mid = matches[0]
+    await _confirm_calendar(mid, user_id, channel, decision)
+
+
+async def _calendar_answer(channel, user_id, text, mid=None):
+    explicit = _calendar_decision(text)
+    candidates = [key for key, (_, cid, expires) in pending_confirms.items()
+                  if cid == channel.id and expires > time.monotonic()
+                  and str(proposal_users.get(key, OWNER_ID)) == str(user_id)]
+    if mid is None and len(candidates) == 1:
+        mid = candidates[0]
+    if mid not in candidates:
+        if explicit is not None:
+            await _calendar_followup(channel, user_id, explicit, mid)
+            return True
+        return False
+    pending = pending_confirms[mid]
+    if explicit is not None:
+        await _confirm_calendar(mid, user_id, channel, explicit)
+        return True
+    try:
+        decision = await asyncio.wait_for(asyncio.to_thread(gcal.confirmation_reply, pending[0], text), 15)
+    except Exception:
+        await channel.send("ยังไม่ได้บันทึกนะ ฟังคำตอบไม่ชัด ต้องการให้บันทึกนัดนี้ไหม?")
+        from tiwa.listening import FOLLOWUPS
+        FOLLOWUPS[user_id] = time.monotonic() + 60
+        return True
+    # A delayed answer must never approve a replacement proposal.
+    if pending_confirms.get(mid) is not pending:
+        return True
+    if decision in ("approve", "decline"):
+        await _confirm_calendar(mid, user_id, channel, decision == "approve")
+        return True
+    if decision == "unrelated":
+        return False
+    if decision == "revise":
         try:
-            result = await asyncio.to_thread(gcal.apply_change, text)
-        except Exception as e:
-            result = f"calendar change failed: {type(e).__name__}; check calendar before retrying"
-        await channel.send(result)
+            plan = await asyncio.to_thread(gcal.prepare_change,
+                f"Revise this UNSAVED proposal, preserving its action and all details except the requested correction. "
+                f"Proposal: {pending[0]}\nRequester correction: {text}")
+            if pending_confirms.get(mid) is not pending:
+                return True
+            pending_confirms[mid] = (plan, channel.id, time.monotonic() + 600)
+            await channel.send(f"📅 {gcal.describe_change(plan)}\nตามนี้ ให้บันทึกเลยไหม?")
+        except Exception:
+            await channel.send("ยังไม่ได้บันทึกนะ ต้องการเปลี่ยนรายละเอียดไหน?")
     else:
-        await channel.send("dropped.")
+        await channel.send(f"ยังไม่ได้บันทึกนะ — {gcal.describe_change(pending[0])}\nให้บันทึกตามนี้ไหม?")
+    from tiwa.listening import FOLLOWUPS
+    FOLLOWUPS[user_id] = time.monotonic() + 60
+    return True
+
+
+async def _calendar_text(message, text):
+    ref = getattr(message, "reference", None)
+    return await _calendar_answer(message.channel, message.author.id, text,
+                                  getattr(ref, "message_id", None))
+
+
+@client.event
+async def on_raw_reaction_add(payload):
+    if payload.message_id not in pending_confirms or str(payload.emoji) not in ("✅", "❌"):
+        return
+    if str(payload.user_id) != str(OWNER_ID):
+        return
+    channel = client.get_channel(payload.channel_id) or await client.fetch_channel(payload.channel_id)
+    await _confirm_calendar(payload.message_id, payload.user_id, channel, str(payload.emoji) == "✅")
 
 
 @client.event
@@ -395,6 +583,8 @@ async def on_message(message: discord.Message):
     if message.author.bot:
         return
     text = message.content.replace(f"<@{client.user.id}>", "").replace(f"<@!{client.user.id}>", "").strip()
+    if await _calendar_text(message, text):
+        return
     # content_type is None for some clients; treat that as not-an-image rather than
     # paying a vision call on a .zip
     images = [a.url for a in message.attachments
@@ -413,11 +603,22 @@ async def on_message(message: discord.Message):
         return
     # voice-channel commands: exact phrases only, so normal chat never triggers them
     cmd = text.lower().strip(" .!?")
+    if cmd in ("status", "ping"):
+        vc = message.guild.voice_client if message.guild else None
+        sink = getattr(vc, "sink", None)
+        task = getattr(sink, "task", None)
+        commands = getattr(sink, "commands", None)
+        state = ("off" if not vc or not vc.is_listening() else
+                 "worker stopped" if task and task.done() else "listening")
+        await message.channel.send(
+            f"Online. Voice: {state}. Waiting commands: {commands.qsize() if commands is not None else 0}. "
+            f"{getattr(sink, 'last_outcome', 'No voice request yet')}. No model call used.")
+        return
     if cmd in ("join", "join vc", "get in here", "เข้ามา", "เข้าห้อง"):
         result = await voice.join(message.author)
         if result.startswith("joined"):
             voice_channel[message.guild.id] = message.channel
-            result += " — " + voice.listen(message.guild, partial(_heard, channel=message.channel), client.loop)
+            result += " — " + await voice.listen(message.guild, partial(_heard, channel=message.channel), client.loop)
         await message.channel.send(result)
         return
     if cmd in ("leave", "leave vc", "get out", "ออกไป", "ออกห้อง"):
@@ -443,6 +644,8 @@ async def on_message(message: discord.Message):
         # Queued actions must run whatever she says. An empty reply used to
         # `return` here and silently swallow the song she had already queued —
         # you asked for Bad Apple and nothing happened.
+        if tools.PENDING_CALENDAR:
+            reply = ""
         if reply:
             history[message.channel.id].append({"role": "assistant", "content": reply})
             # post-turn memory write, off the reply path; prior lines let "he/she" resolve
@@ -462,11 +665,11 @@ async def on_message(message: discord.Message):
                 result = await voice.join(message.author)
                 if result.startswith("joined"):
                     voice_channel[message.guild.id] = message.channel
-                    voice.listen(message.guild, partial(_heard, channel=message.channel), client.loop)
+                    await voice.listen(message.guild, partial(_heard, channel=message.channel), client.loop)
                 else:
                     await message.channel.send(result)
         await _flush_music(message.channel, message.author)
-        await _flush_calendar_queue(message.channel)
+        await _flush_calendar_queue(message.channel, message.author.id)
         await _flush_leave(message.channel, text)  # last: hanging up stops the music
 
 

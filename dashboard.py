@@ -2,8 +2,7 @@
 
     py -X utf8 dashboard.py [--open]      ->  http://127.0.0.1:8787
 
-Gradio. Every table searches and sorts itself, so this file holds no filter
-widgets and no HTTP handler. The one stylesheet at the bottom exists because
+Gradio provides the controls; memory browsing adds person and text filters. The one stylesheet at the bottom exists because
 Gradio spaces every block equally, and equal spacing is no grouping at all.
 
 Localhost-only by design: it edits .env, wipes memory, and (on the chat tab)
@@ -14,6 +13,7 @@ import asyncio
 import csv
 import datetime
 import io
+import hashlib
 import json
 import re
 import socket
@@ -27,7 +27,7 @@ from pathlib import Path
 import gradio as gr
 import pandas as pd
 
-from tiwa import llm, memory, pipeline, tools
+from tiwa import llm, memory, pipeline, tools, recordings, recall
 
 
 ENV = Path(__file__).with_name(".env")
@@ -43,26 +43,23 @@ SETTINGS = [
          "mixed = tools and memory local, her replies from the API (best quality). "
          "api = nothing local at all, GPU free for games.",
          "local", ["local", "mixed", "api"]),
-        ("TIWA_PERSONA_API_MODEL", "Her voice (API)",
-         "The OpenRouter model that writes her actual replies in mixed/api mode. "
-         "This is the one worth shopping around for — it decides how she sounds.",
+        ("TIWA_PERSONA_API_MODEL", "Chat reply model",
+         "Writes Tiwa's text replies in API or Mixed mode. Change this to try a different conversational model. This does not select her speaking voice.",
          "deepseek/deepseek-v4-flash", None),
         ("TIWA_TOOL_MODEL", "Tool model (API)",
-         "Picks which tools to call (recall, play music, calendar) when tools run "
+         "Routes requests to the music, search and calendar minis when tools run "
          "on the API — that is api mode only. Unused in local and mixed.",
          "deepseek/deepseek-v4-flash", None),
         ("TIWA_EXTRACT_MODEL", "Memory model (API)",
-         "Decides what she keeps in memory after each turn, when that runs on the "
-         "API (api mode only).",
+         "Selects relevant memories before replies and extracts new memories afterward. "
+         "Used in API mode; local and mixed modes use the local memory model.",
          "deepseek/deepseek-v4-flash", None),
         ("TIWA_PERSONA_MODEL", "Force a reply model",
-         "Overrides her voice model on whichever path is active. Leave empty "
+         "Overrides her chat reply model on whichever path is active. Leave empty "
          "unless you are testing one specific model.",
-         "auto", None),
+         "", None),
         ("TIWA_DAILY_TOKENS", "Daily token ceiling",
-         "Runaway insurance, not a budget. Past this she falls back to local for "
-         "the rest of the day and says so in the console. 2,000,000 is about "
-         "$0.30 and far more than a day of chatting.",
+         "Daily chat-token limit. When reached, Tiwa attempts local inference; Ollama must be available. Audio transcription is billed separately. This is not a dollar spending limit.",
          "2000000", None),
     ]),
     ("Discord", [
@@ -70,7 +67,7 @@ SETTINGS = [
          "The one channel she may speak in unprompted — at most once every 3 "
          "hours, and only between 09:00 and 23:00. Empty = she never starts a "
          "conversation, she only answers.",
-         "off", None),
+         "", None),
     ]),
     ("Music", [
         ("TIWA_MUSIC_VOLUME", "Volume",
@@ -114,12 +111,35 @@ SETTINGS = [
          "en-GB-SoniaNeural.",
          "en-US-AvaNeural", None),
     ]),
-    ("Her ears — speech-to-text (off on purpose)", [
+    ("Voice chat — activation and transcription", [
         ("TIWA_LISTEN", "Listen in voice chat",
-         "1 = transcribe voice chat and answer lines that START with 'Hey Tiwa'. "
-         "Currently 0: Thai accuracy on CPU was too poor to be useful. Everything "
-         "below only matters when this is 1.",
+         "1 = detect Hey Tiwa locally, then upload only the activated command. "
+         "Requires a trained wake model. 0 = listening off. Restart after saving.",
          "0", ["0", "1"]),
+        ("TIWA_STT_MODEL", "Transcription model",
+         "OpenRouter model used after activation. GPT performed best on your two clips.",
+         "openai/gpt-transcribe", ["openai/gpt-transcribe", "qwen/qwen3-asr-1.7b",
+                                   "openai/whisper-large-v3-turbo", "fish-audio/transcribe-1"]),
+        ("TIWA_VOICE_REPLY", "Answer activated commands",
+         "0 = show transcript only. 1 = also let Tiwa answer and perform requested actions.",
+         "0", ["0", "1"]),
+        ("TIWA_VOICE", "Spoken replies",
+         "dj = spoken replies off; music still works. full = speak replies aloud.",
+         "dj", ["dj", "full"]),
+        ("TIWA_WAKE_MODEL", "Hey Tiwa detector file",
+         "Path to a custom openWakeWord ONNX model. Empty or missing keeps listening off.",
+         "", None),
+        ("TIWA_WAKE_THRESHOLD", "Activation sensitivity threshold",
+         "Higher rejects more false activations but may miss your voice. Range 0.01–1.",
+         "0.9", None),
+        ("TIWA_RECORD_MAX_S", "Maximum command length",
+         "Stop recording after this many seconds even if speech continues. Range 2–30.",
+         "20", None),
+        ("TIWA_SILENCE_S", "Silence before stopping",
+         "Seconds without detected speech before finishing an activated command. Range 0.3–5.",
+         "1.2", None),
+    ]),
+    ("Legacy local speech tests — not used by the wake listener", [
         ("TIWA_WHISPER_MODEL", "Speech model",
          "whisper-base is roughly realtime, English fine, Thai rough. "
          "whisper-small is ~3x slower but much better at Thai.",
@@ -128,7 +148,7 @@ SETTINGS = [
         ("TIWA_WHISPER_LANG", "Language",
          "Pin it if you always speak one language. Empty = auto-detect, which is "
          "slower and sometimes returns nothing at all.",
-         "auto", ["", "th", "en"]),
+         "", ["", "th", "en"]),
         ("TIWA_ONNX_THREADS", "CPU threads",
          "4 measured fastest on this machine — 2.3x faster than letting it "
          "choose. More threads is slower, not faster.",
@@ -138,10 +158,6 @@ SETTINGS = [
          "quiet speech 0.023, fan hum 0.021, room hiss 0.002. Raise it if she "
          "hears ghosts, lower it if she misses you.",
          "0.02", None),
-        ("TIWA_SILENCE_S", "Pause before cutting",
-         "Seconds of quiet that end a sentence. Lower feels snappier but chops "
-         "sentences in half, and Whisper is much worse on fragments.",
-         "1.2", None),
         ("TIWA_WAKE_FUZZ", "Wake match (latin)",
          "How close a heard word must be to 'Tiwa', 0-1. Lower wakes her more "
          "often, including on the wrong word.",
@@ -175,6 +191,7 @@ KIND_WORDS = {
     "music": "playback",
     "voice": "something heard in voice chat",
     "reflect": "an idle-time conclusion about someone",
+    "recall": "Memory Mini selection or fallback",
 }
 
 
@@ -203,7 +220,9 @@ def write_env(updates: dict):
             lines.append(f"{k}={v}")
         else:
             lines[hit] = f"{k}={v}"
-    ENV.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    temporary = ENV.with_suffix('.tmp')
+    temporary.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    temporary.replace(ENV)
 
 
 # ---------------------------------------------------------------- helpers
@@ -229,7 +248,13 @@ def port_open(host="127.0.0.1", port=11434) -> bool:
 
 
 def which_pass(req: str) -> str:
-    """Which of her three passes made this call — the whole point of the page."""
+    """Identify current minis and historical passes in the same model log."""
+    if "You are Memory Mini" in req:
+        return "recalling"
+    if "You decide which of" in req:
+        return "dispatching"
+    if "memory noticing a pattern" in req:
+        return "noticing tastes"
     if "inner thoughts" in req:
         return "thinking"
     if "memory judgment" in req:
@@ -300,7 +325,8 @@ def passes_html() -> str:
     """One turn, left to right. The three passes are the shape of the whole product,
     and 'which pass is slow' is the question this panel exists to answer."""
     by = _passes()
-    steps = [("thinking", "picks tools, writes her a private brief"),
+    steps = [("dispatching", "routes work to minis, alongside recall"),
+             ("recalling", "selects relevant memories, alongside dispatch"),
              ("her reply", "the words you actually see"),
              ("remembering", "decides what to keep, after she answers")]
     out = []
@@ -309,9 +335,6 @@ def passes_html() -> str:
         took = f"{statistics.median(ms) / 1000:.1f}s" if ms else "—"
         out.append(f"<div class='pass'><b>{name}</b><span>{what}</span>"
                    f"<em>{took}<i>median</i></em><em>{len(ms)}<i>calls</i></em></div>")
-        if i < 2:
-            out.append("<svg class='flow' viewBox='0 0 34 8' aria-hidden='true'>"
-                       "<path d='M0 4h26M22 1l4 3-4 3'/></svg>")
     extra = [(k, v) for k, v in by.items()
              if k not in {n for n, _ in steps} and k != "other"]
     tail = ("<p class='sub aside'>also on the clock: " + " · ".join(
@@ -344,7 +367,7 @@ def health_html() -> str:
         ((DATA / "gcal_token.json").exists(), True, "Calendar",
          "run <code>py -X utf8 gcal_auth.py</code> once to grant access"),
         (env.get("TIWA_LISTEN", "0") != "0", True, "Listening in voice",
-         "speech-to-text; off on purpose, Thai accuracy on CPU is poor"),
+         "saved setting; requires a trained Hey Tiwa detector and a bot restart"),
     ]
     return "<div class='health'>" + "".join(
         f"<div class='hrow {'ok' if ok else 'soft' if soft else 'bad'}'>"
@@ -432,22 +455,158 @@ def open_call(evt: gr.SelectData):
 
 def facts_df() -> pd.DataFrame:
     return pd.DataFrame(
-        [(rid, False, s, rel, o, note or "", ago(ts))
-         for rid, s, rel, o, note, ts in DB.execute(
-             "SELECT r.rowid, s.name, r.rel, d.name, r.note, r.updated_at"
+        [(rid, False, s, rel, o, note or "", ago(ts) if ts else "Unknown", category, evidence, source, ts)
+         for rid, s, rel, o, note, ts, category, evidence, source in DB.execute(
+             "SELECT r.rowid, s.name, r.rel, d.name, r.note, r.updated_at, r.category, r.evidence, r.source"
              " FROM relations r JOIN entities s ON s.id = r.src"
              " JOIN entities d ON d.id = r.dst ORDER BY r.updated_at DESC")],
-        columns=["#", "forget", "who", "what", "about", "note", "updated"])
+        columns=["#", "forget", "who", "what", "about", "note", "updated", "category", "evidence", "source", "timestamp"])
 
 
 def episodes_df() -> pd.DataFrame:
     # text != '': blank rows are reflection watermarks, not events (memory.reflect)
     return pd.DataFrame(
-        [(i, False, when(ts), u, t) for i, u, t, ts in DB.execute(
-            "SELECT id, user, text, ts FROM episodes WHERE text != ''"
+        [(i, False, when(ts) if ts else "Unknown", u, t, e, s, ts) for i, u, t, ts, e, s in DB.execute(
+            "SELECT id, user, text, ts, evidence, source FROM episodes WHERE text != ''"
             " ORDER BY ts DESC")],
-        columns=["#", "forget", "when", "with", "what"])
+        columns=["#", "forget", "when", "with", "what", "evidence", "source", "timestamp"])
 
+
+
+EVIDENCE_LABELS = {'legacy': 'Legacy · unverified', 'explicit': 'Stated', 'observed': 'Observed pattern',
+                   'stance': 'Tiwa stance', 'inferred': 'Inferred', 'reported': 'Reported by someone else'}
+MEMORY_HINT = 'Select a memory from the list to read its full details.'
+
+
+def history_df():
+    return pd.DataFrame([
+        (i, s, r, o, n or '', when(t) if t else 'Unknown', e, q, t)
+        for i, s, r, o, n, t, e, q in DB.execute('SELECT * FROM memory_history ORDER BY ended_at DESC, id DESC')
+    ], columns=['#', 'who', 'what', 'about', 'note', 'updated', 'evidence', 'source', 'timestamp'])
+
+
+def memory_frame(kind):
+    readers = {'Facts': facts_df, 'Conversations': episodes_df, 'History': history_df}
+    if kind not in readers:
+        raise gr.Error('Choose a valid memory type.')
+    return readers[kind]()
+
+
+def memory_browser(query="", person="Everyone", kind="Facts", category="All", evidence="All"):
+    df = memory_frame(kind)
+    who_column = 'with' if kind == 'Conversations' else 'who'
+    if person and person != "Everyone":
+        df = df[df[who_column] == person]
+    if category != 'All':
+        df = df[df['category'] == category] if 'category' in df else df.iloc[:0]
+    if evidence != 'All':
+        df = df[df['evidence'] == evidence] if 'evidence' in df else df.iloc[:0]
+    if query and query.strip():
+        mask = df.astype(str).apply(lambda col: col.str.contains(query.strip(), case=False, regex=False)).any(axis=1)
+        df = df[mask]
+    rows = []
+    for _, row in df.head(LIVE).iterrows():
+        text = row['what'] if kind == 'Conversations' else f"{row['what']} {row['about']}"
+        rows.append((int(row['#']), row[who_column], text[:160], row.get('category', '—'),
+                     EVIDENCE_LABELS.get(row.get('evidence', 'legacy'), row.get('evidence', 'legacy')),
+                     row['when' if kind == 'Conversations' else 'updated']))
+    status = (f"**{len(rows)} {'memory' if len(rows) == 1 else 'memories'}** · Select a row to read it in full."
+              if rows else "**No matching memories.** Try another search or clear the filters.")
+    if len(df) > LIVE:
+        status = f'**Showing {LIVE} of {len(df)} memories.** Narrow the search to find older records.'
+    if kind == 'History':
+        status += ' Superseded records are not current beliefs.'
+    return pd.DataFrame(rows, columns=["ID", "Person", "Memory", "Category", "Evidence", "Updated"]), status
+
+
+def memory_people(current="Everyone"):
+    names = set(facts_df()["who"]) | set(episodes_df()["with"]) | set(history_df()['who'])
+    return gr.Dropdown(choices=["Everyone"] + sorted(names), value=current if current in names else "Everyone", label='Person')
+
+
+def memory_signature(row):
+    stable = row.drop(labels=['forget', 'updated', 'when'], errors='ignore').to_dict()
+    return hashlib.sha256(json.dumps(stable, sort_keys=True, default=str).encode()).hexdigest()
+
+
+def clear_memory_selection():
+    return None, MEMORY_HINT, False
+
+
+def memory_detail(kind, evt: gr.SelectData):
+    ident = int(evt.row_value[0])
+    df = memory_frame(kind)
+    row = df[df["#"] == ident]
+    if row.empty:
+        return None, "This memory is no longer available.", False
+    r = row.iloc[0]
+    text = (f"{r['who']} — {r['what']} {r['about']}\n\n{r['note']}" if kind == "Facts"
+            else (f"Superseded · {r['updated']}\n{r['who']} {r['what']} {r['about']}\n\n{r['note']}"
+                  if kind == 'History' else f"{r['with']} · {r['when']}\n\n{r['what']}"))
+    text += (f"\n\nCategory: {r.get('category', 'Not recorded')}"
+             f"\nEvidence: {EVIDENCE_LABELS.get(r.get('evidence', 'legacy'), r.get('evidence', 'legacy'))}"
+             f"\n\nSource evidence:\n{r.get('source', '') or 'No source recorded. This is not verified evidence.'}")
+    if kind == 'Facts':
+        text += '\n\nDeleting this record also removes superseded history for the same person and subject.'
+    return (kind, ident, memory_signature(r)), text, False
+
+
+def forget_selected(selection, confirmed, query, person, kind, category="All", evidence="All"):
+    if not isinstance(selection, (list, tuple)) or len(selection) != 3 or not confirmed:
+        raise gr.Error("Select a memory and confirm deletion first.")
+    selected_kind, ident, signature = selection
+    df = memory_frame(selected_kind)
+    row = df[df['#'] == ident]
+    if selected_kind != kind or row.empty or memory_signature(row.iloc[0]) != signature:
+        raise gr.Error('This memory changed or is no longer selected. Refresh and select it again.')
+    if selected_kind == 'History':
+        DB.execute('DELETE FROM memory_history WHERE id=?', (ident,))
+        DB.commit()
+    else:
+        (memory.delete_relation if selected_kind == "Facts" else memory.delete_episode)(DB, ident)
+    table, status = memory_browser(query, person, kind, category, evidence)
+    return table, status, None, "Memory deleted. Select another row to read it.", False
+
+
+async def preview_recall(person, question, recent=''):
+    if not person or not person.strip() or not question or not question.strip():
+        raise gr.Error('Enter a speaker and a message to preview recall.')
+    before = DB.execute("SELECT COALESCE(MAX(id),0) FROM log WHERE kind='recall'").fetchone()[0]
+    block = await recall.retrieve(DB, person.strip(), question.strip(), recent or '')
+    size = len(block.encode('utf-8'))
+    count = max(0, len(block.splitlines()) - 1)
+    status = f'**{count}/{recall.MAX_RECORDS} records · {size}/{recall.CONTEXT_BYTES} bytes** sent as memory context.'
+    log = DB.execute("SELECT text FROM log WHERE kind='recall' AND id>? ORDER BY id DESC LIMIT 1", (before,)).fetchone()
+    if log and log[0].startswith('fallback:'):
+        status += ' Memory Mini was unavailable or timed out; only interaction preferences and exact relationship lookups are eligible.'
+    return block or 'No memory selected for this message.', status
+
+
+MODEL_NAMES = {
+    "openai/gpt-transcribe": "GPT Transcribe · OpenAI",
+    "qwen/qwen3-asr-1.7b": "Qwen3 ASR 1.7B · Qwen",
+    "openai/whisper-large-v3-turbo": "Whisper Large v3 Turbo · OpenAI",
+    "fish-audio/transcribe-1": "Transcribe 1 · Fish Audio",
+    "deepseek/deepseek-v4-flash": "DeepSeek V4 Flash",
+}
+
+
+# Public OpenRouter names verified 2026-09-09; custom IDs remain supported.
+CHAT_MODELS = {
+    "deepseek/deepseek-v4-flash": "DeepSeek V4 Flash",
+    "deepseek/deepseek-v4-pro": "DeepSeek V4 Pro",
+    "google/gemini-3.1-flash-lite": "Google Gemini 3.1 Flash Lite",
+    "openai/gpt-5.4-mini": "OpenAI GPT-5.4 Mini",
+    "anthropic/claude-sonnet-4.6": "Anthropic Claude Sonnet 4.6",
+    "qwen/qwen3.5-plus-20260420": "Qwen3.5 Plus",
+}
+MODEL_NAMES.update(CHAT_MODELS)
+
+
+def model_choices(options, current, default):
+    values = list(dict.fromkeys([*(options or []), default, current]))
+    return [(MODEL_NAMES.get(v, v.split("/")[-1].replace("-", " ").title()), v)
+            for v in values if v]
 
 def _ticked(df) -> list:
     """Row ids whose forget box is ticked. By id, never by row position — the table
@@ -503,16 +662,22 @@ def export_memory():
 def export_facts():
     return _dump("memory.csv",
                  [[r["subject"], r["relation"], r["object"], r["note"],
-                   r["updated_at"]]
+                   r["updated_at"], r['category'], r['evidence'], r['source']]
                   for r in memory.export_all(DB)["relations"]],
-                 ["subject", "relation", "object", "note", "updated_at"])
+                 ["subject", "relation", "object", "note", "updated_at", "category", "evidence", "source"])
 
 
 def export_episodes():
     return _dump("episodes.csv",
-                 [[when(e["ts"]), e["user"], e["text"]]
+                 [[when(e["ts"]), e["user"], e["text"], e['evidence'], e['source']]
                   for e in memory.export_all(DB)["episodes"]],
-                 ["when", "with", "what"])
+                 ["when", "with", "what", "evidence", "source"])
+
+
+def export_history():
+    rows = memory.export_all(DB)['history']
+    columns = ['id', 'subject', 'relation', 'object', 'note', 'ended_at', 'evidence', 'source']
+    return _dump('memory-history.csv', [[r[c] for c in columns] for r in rows], columns)
 
 
 def export_llm():
@@ -530,16 +695,31 @@ def export_log():
 KEYS = [k for _, rows in SETTINGS for k, *_ in rows]
 BLANKS = [None if opts is not None else "" for _, rows in SETTINGS
           for *_, opts in rows]
+DEFAULTS = [default or None for _, rows in SETTINGS for _, _, _, default, _ in rows]
 
 
 def save_settings(*vals):
-    write_env({k: str(v or "").strip() for k, v in zip(KEYS, vals)})
+    values = {k: str(v or "").strip() for k, v in zip(KEYS, vals)}
+    if any('\n' in v or '\r' in v for v in values.values()):
+        raise gr.Error("Each setting must be a single line")
+    for key, low, high in (("TIWA_SILENCE_S", .3, 5),
+                           ("TIWA_RECORD_MAX_S", 2, 30),
+                           ("TIWA_WAKE_THRESHOLD", .01, 1)):
+        if values.get(key):
+            try:
+                valid = low <= float(values[key]) <= high
+            except ValueError:
+                valid = False
+            if not valid:
+                raise gr.Error(f"{key} must be a number between {low} and {high}")
+    write_env(values)
     gr.Info("saved to .env — stop and start her before it takes effect")
+    return "**Saved. Restart Tiwa to apply these settings.** Recording samples does not require a restart."
 
 
 def reload_settings():
     env = read_env()
-    return [env.get(k) or b for k, b in zip(KEYS, BLANKS)]
+    return [env.get(k) or b for k, b in zip(KEYS, DEFAULTS)]
 
 
 def reset_settings(sure):
@@ -547,13 +727,47 @@ def reset_settings(sure):
         raise gr.Error("tick 'yes, really' first — every setting goes back to default")
     write_env(dict.fromkeys(EDITABLE, ""))
     gr.Info("back to defaults. Your secrets were not touched.")
-    return BLANKS
+    return DEFAULTS
 
 
 def secrets_md() -> str:
     env = read_env()
     return "| secret | |\n|---|---|\n" + "\n".join(
         f"| `{s}` | {'✅ set' if env.get(s) else '❌ missing'} |" for s in SECRETS)
+
+
+def sample_action(action, ident=None, audio=None, label='', kind='Hey Tiwa', notes='', confirm=False):
+    try:
+        if action == 'save':
+            ident = recordings.save(audio, label, kind, notes)
+        elif action == 'edit':
+            recordings.edit(ident, label, kind, notes)
+        elif action == 'delete':
+            if not confirm:
+                raise ValueError("Tick Delete this recording before deleting")
+            recordings.delete(ident)
+            ident = None
+        choices = recordings.listing()
+        return gr.Dropdown(choices=choices, value=ident), f"{len(choices)} recordings saved locally."
+    except (ValueError, OSError, RuntimeError) as error:
+        raise gr.Error(str(error)) from None
+
+
+def sample_load(ident):
+    if not ident:
+        return None, '', recordings.KINDS[0], '', False
+    try:
+        return (*recordings.load(ident), False)
+    except (ValueError, OSError, KeyError):
+        raise gr.Error("Recording unavailable. Refresh the library and select another sample.") from None
+
+
+def sample_trim(ident, start, end):
+    try:
+        ident = recordings.trim(ident, start, end)
+        return gr.Dropdown(choices=recordings.listing(), value=ident), "Trimmed copy saved. Original kept."
+    except (ValueError, OSError, TypeError):
+        raise gr.Error("Select a recording and valid start/end seconds; keep at least 0.3 seconds.") from None
 
 
 # ---------------------------------------------------------------- chat
@@ -616,18 +830,17 @@ def sec(title, note=""):
 
 
 with gr.Blocks(title="Tiwa — control panel", fill_width=True) as demo:
-    gr.Markdown("### ทิวา — control panel<span>this machine only · she reads these "
-                "settings when she starts</span>", elem_classes="hdr")
+    gr.HTML("<header class=brand><div class=brand-mark>ท</div><div><h1>Tiwa <span>ทิวา</span></h1><p>Your companion, your settings.</p></div><small>Local control panel</small></header>")
 
-    with gr.Tabs():
-        with gr.Tab("Now"):
+    with gr.Tabs(elem_id="main-nav"):
+        with gr.Tab("Overview"):
             live = gr.Checkbox(True, label="live — refreshes every 4s",
                                container=False, elem_classes="live")
             # what she runs on, what is broken, what she holds — no heading, because
             # the unlabelled block is the one that leads
             now = gr.HTML(now_html)
 
-            sec("one turn, three passes", "median over the last 400 model calls")
+            sec("routing, recall & replies", "median over the last 400 model calls")
             passes = gr.HTML(passes_html)
 
             with gr.Row(equal_height=False):
@@ -663,87 +876,160 @@ with gr.Blocks(title="Tiwa — control panel", fill_width=True) as demo:
                              save_history=True, editable=True)
 
         with gr.Tab("Settings"):
-            gr.Markdown("Leave a box empty to use the default. Nothing here changes "
-                        "a running bot — **stop and start her** after saving.",
-                        elem_classes="intro")
-            with gr.Row():
-                save_btn = gr.Button("save to .env", variant="primary")
-                reload_btn = gr.Button("reload from .env")
+            gr.Markdown("## Make Tiwa work your way\nStart with **Basics**. Set up listening in **Voice chat** when your wake detector is ready.", elem_classes="settings-lead")
+            settings_status = gr.Markdown("**Changes apply after restart.** Empty fields use the default shown below each setting.", elem_classes="settings-notice")
+            with gr.Row(elem_classes="settings-actions"):
+                save_btn = gr.Button("Save settings", variant="primary")
+                reload_btn = gr.Button("Discard unsaved changes")
             fields, env0 = {}, read_env()
-            for group, rows in SETTINGS:
-                with gr.Accordion(group, open=group.startswith("Where")):
-                    for key, label, help_, default, opts in rows:
-                        info = f"{help_}  ·  default: {default or '(empty)'}"
-                        cur = env0.get(key) or None
-                        fields[key] = (
-                            gr.Dropdown([(o or "(default)", o) for o in opts],
-                                        value=cur, label=label, info=info,
-                                        allow_custom_value=True)
-                            if opts is not None else
-                            gr.Textbox(cur, label=label, info=info,
-                                       placeholder=default))
+            sections = [
+                ("Basics", ["Where she thinks", "Discord"], "Choose where responses run and which Discord channel Tiwa uses. API mode keeps your GPU free for games."),
+                ("Voice chat", ["Voice chat — activation and transcription", "Her speaking voice"], "1. Collect samples in Wake recordings. 2. Train and select a Hey Tiwa detector. 3. Turn listening on. Start with transcript-only mode to check accuracy."),
+                ("Features", ["Music", "Memory", "Eyes"], "Control music, remembering, and image understanding. Leave tuning values at their defaults unless a feature needs adjustment."),
+                ("Advanced", ["Logging", "Legacy local speech tests — not used by the wake listener"], "Diagnostics and older local speech experiments. These legacy speech options do not change the new wake-word listener."),
+            ]
+            with gr.Tabs():
+                for title, groups, description in sections:
+                    with gr.Tab(title):
+                        gr.Markdown(description, elem_classes="intro")
+                        for group, rows in SETTINGS:
+                            if group not in groups:
+                                continue
+                            with gr.Group(elem_classes="settings-section"):
+                                gr.Markdown(f"### {group}")
+                                for start in range(0, len(rows), 2):
+                                    with gr.Row():
+                                        for key, label, help_, default, opts in rows[start:start+2]:
+                                            cur = env0.get(key) or None
+                                            info = f"{help_} Default: {default or '(none)'}."
+                                            choices = [("On" if o == "1" else "Off", o) for o in opts] if opts and set(opts) == {"0", "1"} else opts
+                                            if key == "TIWA_MODE":
+                                                choices = [("API — keep GPU free", "api"), ("Local — run on this PC", "local"), ("Mixed — local tools, API replies", "mixed")]
+                                            if key == "TIWA_VOICE":
+                                                choices = [("Off — music only", "dj"), ("On — speak replies", "full")]
+                                            if "MODEL" in key and (opts is not None or key.endswith("API_MODEL") or key in {"TIWA_TOOL_MODEL", "TIWA_EXTRACT_MODEL"}):
+                                                choices = model_choices(opts if opts is not None else list(CHAT_MODELS), cur, default)
+                                                opts = choices
+                                            fields[key] = (
+                                                gr.Dropdown(choices=choices, value=cur or default or None, label=label, info=info, allow_custom_value=not (opts and set(opts) == {"0", "1"}))
+                                                if opts is not None else gr.Textbox(cur or default, label=label, info=info))
             boxes = [fields[k] for k in KEYS]
-            save_btn.click(save_settings, boxes, None)
-            reload_btn.click(reload_settings, None, boxes)
-            with gr.Accordion("danger", open=False):
-                sure_reset = gr.Checkbox(False, label="yes, really")
-                gr.Button("reset every setting to its default", variant="stop").click(
-                    reset_settings, sure_reset, boxes)
-            sec("secrets", "edit .env by hand — values never leave this machine")
-            gr.Markdown(secrets_md)
+            save_btn.click(save_settings, boxes, settings_status)
+            reload_btn.click(reload_settings, None, boxes).then(lambda: "**Reloaded saved settings.** Unsaved edits discarded.", None, settings_status)
+            for field in boxes:
+                field.input(lambda: "**Unsaved changes.** Save, then restart Tiwa to apply.", None, settings_status, show_progress="hidden")
+            with gr.Accordion("Connections & troubleshooting", open=False):
+                gr.Markdown(secrets_md)
+                gr.Markdown("Missing a key? Add it to the local `.env` file. Keys are never displayed here.\n\nListening will remain off without a trained wake model. Recording samples does **not** train or enable the detector.")
+            with gr.Accordion("Reset settings", open=False):
+                sure_reset = gr.Checkbox(False, label="Reset all settings to defaults; keep API keys")
+                gr.Button("Reset to defaults", variant="stop").click(reset_settings, sure_reset, boxes).then(lambda: "**Defaults restored. Restart Tiwa to apply.**", None, settings_status)
+
+        with gr.Tab("Wake recordings") as tab_recordings:
+            gr.Markdown("## Teach Tiwa how you call her\nBuild a local library of **Hey Tiwa** samples. Record one phrase per clip, then listen back and label it.", elem_classes="settings-lead")
+            gr.Markdown("**Samples only — no training or cloud upload.** Include normal, quiet, and excited speech. Also record background conversation that should not wake her.", elem_classes="settings-notice")
+            with gr.Row(equal_height=False):
+                with gr.Column(scale=1, min_width=300):
+                    gr.Markdown("### 1. Record a sample")
+                    mic = gr.Audio(sources=["microphone", "upload"], type="numpy", label="Record Hey Tiwa (up to 60 seconds)", buttons=["download"])
+                    gr.Markdown("Use the microphone’s record button, say **Hey Tiwa**, then stop. Allow microphone access when your browser asks. You can also upload an existing clip.")
+                    gr.Markdown("No microphone found? Open this local panel in Chrome or Edge and check the browser's microphone permission.")
+                    sample_name = gr.Textbox(label="Recording name", placeholder="Krich — normal voice, take 1")
+                    sample_kind = gr.Radio(recordings.KINDS, value=recordings.KINDS[0], label="What is in this clip?")
+                    sample_notes = gr.Textbox(label="Notes (optional)", placeholder="Quiet room, headset microphone", lines=2)
+                    save_sample = gr.Button("Save recording", variant="primary")
+                with gr.Column(scale=1, min_width=300):
+                    gr.Markdown("### 2. Review your library")
+                    library = gr.Dropdown(choices=recordings.listing(), label="Saved recordings", info="Select a sample to play it or edit its details.")
+                    library_status = gr.Markdown(f"{len(recordings.listing())} recordings saved locally.")
+                    refresh_samples = gr.Button("Refresh library")
+                    playback = gr.Audio(label="Playback", interactive=False, type="filepath", buttons=["download"])
+                    edit_name = gr.Textbox(label="Recording name")
+                    edit_kind = gr.Radio(recordings.KINDS, label="Sample type")
+                    edit_notes = gr.Textbox(label="Notes", lines=2)
+                    update_sample = gr.Button("Save details")
+                    with gr.Accordion("Trim audio — keep a shorter copy", open=False):
+                        gr.Markdown("Remove silence or surrounding conversation. Your original stays in the library.")
+                        with gr.Row():
+                            trim_start = gr.Number(0, label="Start (seconds)")
+                            trim_end = gr.Number(label="End (seconds)")
+                        trim_sample = gr.Button("Save trimmed copy")
+                    with gr.Accordion("Delete selected recording", open=False):
+                        delete_confirm = gr.Checkbox(False, label="Delete this recording and its details permanently")
+                        delete_sample = gr.Button("Delete recording", variant="stop")
+            save_sample.click(lambda a, n, k, d: sample_action('save', audio=a, label=n, kind=k, notes=d), [mic, sample_name, sample_kind, sample_notes], [library, library_status])
+            update_sample.click(lambda i, n, k, d: sample_action('edit', ident=i, label=n, kind=k, notes=d), [library, edit_name, edit_kind, edit_notes], [library, library_status])
+            trim_sample.click(sample_trim, [library, trim_start, trim_end], [library, library_status])
+            delete_sample.click(lambda i, c: sample_action('delete', ident=i, confirm=c), [library, delete_confirm], [library, library_status])
+            refresh_samples.click(lambda: sample_action('refresh'), None, [library, library_status])
+            tab_recordings.select(lambda: sample_action('refresh'), None, [library, library_status])
+            library.change(sample_load, library, [playback, edit_name, edit_kind, edit_notes, delete_confirm])
 
         with gr.Tab("Memory") as tab_mem:
-            gr.Markdown("Everything she knows. Tick **forget** on any rows and press "
-                        "the button — the search box filters, it never deletes.",
-                        elem_classes="intro")
-            sec("who she knows about", "facts held per name")
-            people = gr.BarPlot(people_df, x="who", y="facts", sort="-y",
-                                x_label_angle=-40, x_title=None, y_title=None, **PLOT)
-            sec("every fact")
+            gr.Markdown("## Memory\nRead current beliefs, their evidence, and what changed. Tiwa recalls only the details relevant to each message.", elem_classes="settings-lead")
             with gr.Row():
-                forget_f = gr.Button("forget ticked facts", variant="stop")
-                dl_facts = gr.DownloadButton("facts (csv)")
-                dl_all = gr.DownloadButton("everything (json)")
-            facts = gr.Dataframe(facts_df, datatype=["number", "bool"] + ["str"] * 5,
-                                 static_columns=[0, 2, 3, 4, 5, 6], interactive=True,
-                                 # no add-row button: a row with no id is not a fact
-                                 row_count=(1, "fixed"),
-                                 show_search="filter", wrap=True, max_height=520,
-                                 show_label=False,
-                                 column_widths=["5%", "8%", "13%", "15%", "20%",
-                                                "27%", "12%"])
-            sec("episodes", "things that mattered enough to keep whole")
+                memory_query = gr.Textbox(label="Search memories", placeholder="Search a name, game, preference, or moment…", scale=3)
+                memory_person = memory_people()
+                memory_kind = gr.Radio([('Current memories', 'Facts'), ('Episodes', 'Conversations'), ('Superseded history', 'History')], value="Facts", label="Memory type", scale=2)
             with gr.Row():
-                forget_e = gr.Button("forget ticked episodes", variant="stop")
-                dl_eps = gr.DownloadButton("episodes (csv)")
-            episodes = gr.Dataframe(episodes_df, show_label=False, interactive=True,
-                                    datatype=["number", "bool"] + ["str"] * 3,
-                                    static_columns=[0, 2, 3, 4], row_count=(1, "fixed"),
-                                    show_search="filter",
-                                    wrap=True, max_height=420,
-                                    column_widths=["5%", "8%", "15%", "12%", "60%"])
-            forget_f.click(forget_facts, facts, facts)
-            forget_e.click(forget_episodes, episodes, episodes)
-            dl_facts.click(export_facts, None, dl_facts)
-            dl_all.click(export_memory, None, dl_all)
-            dl_eps.click(export_episodes, None, dl_eps)
-            with gr.Accordion("danger", open=False):
-                sure_mem = gr.Checkbox(False, label="yes, really")
+                memory_category = gr.Dropdown(['All', 'general', 'music', 'games', 'food', 'interaction'], value='All', label='Category', info='Categories are available for current memories.')
+                memory_evidence = gr.Dropdown([('All', 'All')] + [(label, value) for value, label in EVIDENCE_LABELS.items()], value='All', label='Evidence')
+            memory_status = gr.Markdown(memory_browser()[1])
+            selected_memory = gr.State(None)
+            with gr.Row(equal_height=False):
+                with gr.Column(scale=3, min_width=320):
+                    memory_table = gr.Dataframe(memory_browser()[0], interactive=False, wrap=True, show_label=False, max_height=580)
+                with gr.Column(scale=2, min_width=280):
+                    memory_text = gr.Textbox(value=MEMORY_HINT, label="Memory and evidence", lines=15, interactive=False)
+                    with gr.Accordion("Delete this memory", open=False):
+                        memory_confirm = gr.Checkbox(False, label="Permanently delete the selected memory")
+                        delete_memory = gr.Button("Delete selected memory", variant="stop")
+            memory_inputs = [memory_query, memory_person, memory_kind, memory_category, memory_evidence]
+            memory_kind.change(lambda k: gr.Dropdown(value='All', interactive=k == 'Facts'), memory_kind, memory_category)
+            for control in memory_inputs:
+                control.change(memory_browser, memory_inputs, [memory_table, memory_status]).then(
+                    clear_memory_selection,
+                    None, [selected_memory, memory_text, memory_confirm])
+            memory_table.select(memory_detail, memory_kind, [selected_memory, memory_text, memory_confirm])
+            delete_memory.click(forget_selected, [selected_memory, memory_confirm, *memory_inputs],
+                                [memory_table, memory_status, selected_memory, memory_text, memory_confirm])
+            with gr.Row():
+                refresh_memory = gr.Button("Refresh memories")
+                dl_all = gr.DownloadButton("Export all memories · JSON")
+            for trigger in (refresh_memory.click, tab_mem.select):
+                trigger(memory_people, memory_person, memory_person).then(memory_browser, memory_inputs, [memory_table, memory_status]).then(
+                    clear_memory_selection, None, [selected_memory, memory_text, memory_confirm])
+            with gr.Accordion('Preview what Tiwa would recall', open=False):
+                gr.Markdown(f'Runs Memory Mini with the configured model. It does not send a reply or save new memories; it may log the model call. '
+                            f'The returned memory block is limited to {recall.MAX_RECORDS} records / {recall.CONTEXT_BYTES:,} UTF-8 bytes.')
                 with gr.Row():
-                    gr.Button("forget every fact", variant="stop").click(
-                        lambda s: wipe("facts", s), sure_mem, None
-                    ).then(facts_df, None, facts)
-                    gr.Button("forget every episode", variant="stop").click(
-                        lambda s: wipe("episodes", s), sure_mem, None
-                    ).then(episodes_df, None, episodes)
-            tab_mem.select(lambda: (people_df(), facts_df(), episodes_df()), None,
-                           [people, facts, episodes], show_progress="hidden")
+                    recall_person = gr.Textbox(label='Speaker', placeholder='Krich', scale=1)
+                    recall_question = gr.Textbox(label='Message to Tiwa', placeholder='What do you think of Gojo Satoru?', scale=3)
+                recall_recent = gr.Textbox(label='Recent conversation (optional)', placeholder='Only needed to resolve references such as “him” or “that song”.', lines=2)
+                run_recall = gr.Button('Preview recall')
+                recall_status = gr.Markdown()
+                recall_text = gr.Textbox(label='Exact memory block', interactive=False, lines=8)
+                run_recall.click(preview_recall, [recall_person, recall_question, recall_recent], [recall_text, recall_status])
+            with gr.Accordion("Export & reset", open=False):
+                gr.Markdown("Download a backup before clearing memories. Clearing current memories also clears all superseded history. Deletion cannot be undone.")
+                with gr.Row():
+                    dl_facts = gr.DownloadButton("Export facts · CSV")
+                    dl_eps = gr.DownloadButton("Export episodes · CSV")
+                    dl_history = gr.DownloadButton('Export history · CSV')
+                sure_mem = gr.Checkbox(False, label="I understand this permanently clears the selected category")
+                for title, category in [("Clear current memories & history", "facts"), ("Clear all episodes", "episodes")]:
+                    gr.Button(title, variant="stop").click(lambda sure, c=category: wipe(c, sure), sure_mem, None).then(memory_browser, memory_inputs, [memory_table, memory_status]).then(
+                        lambda: (*clear_memory_selection(), False), None, [selected_memory, memory_text, memory_confirm, sure_mem])
+            dl_all.click(export_memory, None, dl_all)
+            dl_facts.click(export_facts, None, dl_facts)
+            dl_eps.click(export_episodes, None, dl_eps)
+            dl_history.click(export_history, None, dl_history)
 
         with gr.Tab("Model calls") as tab_llm:
             gr.Markdown(
-                "Every turn is up to three calls: **thinking** (picks tools, writes "
-                "her a private brief), **her reply** (the words you see), and "
-                "**remembering** (decides what to keep, runs after she answers). "
+                "**Dispatching** routes work while **recalling** selects relevant memory. "
+                "**Her reply** uses that context; **remembering** extracts new memories afterward. "
+                "Recall can skip a model call when no topical memories are available. "
                 "Click any row to read the exact prompt and the exact reply.",
                 elem_classes="intro")
             with gr.Row():
@@ -805,6 +1091,40 @@ with gr.Blocks(title="Tiwa — control panel", fill_width=True) as demo:
 # its own table as from the section above it and nothing reads as a group. The whole
 # point of this sheet is the rhythm: 34px above a heading, 6px below it.
 CSS = """
+/* Pastel red identity; dark ink remains legible on pale surfaces. */
+.gradio-container, .dark .gradio-container {
+ --body-background-fill:oklch(0.985 0.004 20); --background-fill-primary:white;
+ --background-fill-secondary:oklch(0.955 0.018 20); --block-background-fill:white;
+ --body-text-color:oklch(0.28 0.025 20); --body-text-color-subdued:oklch(0.43 0.025 20);
+ --input-background-fill:white; --input-text-color:oklch(0.28 0.025 20);
+ --input-placeholder-color:oklch(0.46 0.025 20); --border-color-primary:oklch(0.86 0.025 20);
+ --border-color-accent:oklch(0.58 0.15 20); --color-accent:oklch(0.49 0.16 20);
+ --button-primary-background-fill:oklch(0.9 0.06 20); --button-primary-text-color:oklch(0.3 0.09 20);
+ --button-primary-background-fill-hover:oklch(0.85 0.08 20);
+ --button-secondary-background-fill:white; --button-secondary-text-color:oklch(0.3 0.025 20);
+ --block-label-text-color:oklch(0.3 0.025 20); --block-info-text-color:oklch(0.43 0.025 20);
+ background:var(--body-background-fill)!important; color:var(--body-text-color)!important;
+ font-family:'Segoe UI',Tahoma,sans-serif!important;
+}
+.brand{display:flex;gap:16px;align-items:center;padding:24px 0 28px}
+.brand-mark{display:grid;place-items:center;width:52px;height:52px;border-radius:14px;background:oklch(0.9 0.06 20);color:oklch(0.3 0.09 20);font-size:30px}
+.brand h1{font-size:26px;margin:0;line-height:1.3}.brand h1 span{font-size:18px;font-weight:400;margin-left:8px}
+.brand p{margin:3px 0 0;font-size:14px}.brand small{margin-left:auto;color:var(--body-text-color-subdued)}
+#main-nav [role="tablist"]{background:oklch(0.955 0.018 20);padding:6px;gap:4px;border-radius:10px;margin-bottom:24px;flex-wrap:wrap;height:auto!important;min-height:54px;overflow:visible}
+#main-nav [role="tablist"] button{padding:12px 18px;font-size:15px;border-radius:7px;color:var(--body-text-color-subdued)}
+#main-nav [role="tablist"] button.selected{background:oklch(0.9 0.06 20);color:oklch(0.3 0.09 20);font-weight:650}
+button{min-height:42px} textarea,input{font-size:15px!important}
+.bad b{color:oklch(0.45 0.16 20)!important}
+@media(max-width:600px){.brand small{display:none}#main-nav [role="tablist"] button{padding:10px}.brand{padding-top:12px}}
+@media(prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+
+.settings-lead h2{font-size:26px;letter-spacing:-.02em;margin:12px 0 8px}
+.block.settings-notice{padding:10px 16px!important;border:1px solid var(--border-color-primary);background:var(--background-fill-secondary);border-radius:8px}
+.settings-notice p{margin:0!important}
+.settings-section{padding:20px!important;margin-top:12px!important;background:white!important;border:1px solid var(--border-color-primary)!important;border-radius:10px!important}
+.settings-section h3{font-size:18px;margin:0 0 12px}
+.settings-actions{margin:8px 0 18px!important}
+
 /* width:100% matters — the container is a flex item, and auto margins on a flex item
    swallow the free space before flex-grow ever runs, so it stays at content width.
    clamp, not a media query: gradio rewrites the selectors it is handed, and a
@@ -817,8 +1137,8 @@ CSS = """
 .hdr span,.sec span{display:block;font-size:13px;font-weight:400;
   color:var(--body-text-color-subdued);letter-spacing:0}
 .block.sec{margin:30px 0 -18px!important}
-.sec h5{margin:0;font-size:12px;font-weight:600;letter-spacing:.10em;
-  text-transform:uppercase;color:var(--body-text-color-subdued)}
+.sec h5{margin:0;font-size:18px;font-weight:600;letter-spacing:0;
+  text-transform:none;color:var(--body-text-color-subdued)}
 .sec span{margin-top:3px;text-transform:none;letter-spacing:0}
 .intro{max-width:74ch;margin-bottom:6px!important;color:var(--body-text-color-subdued)}
 .live{margin:-6px 0 -10px;display:flex;justify-content:flex-end}
@@ -915,10 +1235,17 @@ table td,.cell-wrap{font-variant-numeric:tabular-nums}
 }
 """
 
+def dashboard_theme():
+    theme = gr.themes.Base(primary_hue="red", neutral_hue="gray", spacing_size="md", radius_size="md")
+    tokens = theme.to_dict()["theme"]
+    theme.set(**{key: tokens[key.removesuffix("_dark")] for key in tokens
+                 if key.endswith("_dark") and key.removesuffix("_dark") in tokens})
+    return theme
+
+
 if __name__ == "__main__":
     print(f"control panel: http://127.0.0.1:{PORT}   (ctrl-c to stop)")
     demo.launch(server_name="127.0.0.1",  # localhost: it edits .env and wipes memory
                 server_port=PORT, share=False, inbrowser="--open" in sys.argv,
                 quiet=True, css=CSS,
-                theme=gr.themes.Ocean(primary_hue="violet", neutral_hue="slate",
-                                      spacing_size="lg", radius_size="lg"))
+                theme=dashboard_theme())

@@ -36,7 +36,7 @@ class Turn:
     """
 
     DJ: list = dataclasses.field(default_factory=list)
-    PENDING_MUSIC: "str | None" = None
+    PENDING_MUSIC: "str | dict | None" = None
     PENDING_CALENDAR: list = dataclasses.field(default_factory=list)
     PENDING_JOIN: bool = False
     PENDING_LEAVE: bool = False
@@ -169,7 +169,7 @@ def leave_voice(db, arg: str = "") -> None:
 # (minis.dj) is the only thing that calls these — it has already chosen the
 # action and the search terms by the time it gets here.
 
-def play_music(db, arg: str) -> None:
+def play_music(db, arg: str | dict) -> None:
     turn = current()
     if turn.PENDING_MUSIC:
         # Second play this turn. PENDING_MUSIC holds one string, so a plain
@@ -185,7 +185,7 @@ def stop_music(db, arg: str = "") -> None:
     current().PENDING_MUSIC = ""
 
 
-def queue_music(db, arg: str) -> None:
+def queue_music(db, arg: str | dict) -> None:
     current().DJ.append(("queue", arg))
 
 

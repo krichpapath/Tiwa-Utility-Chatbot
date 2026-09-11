@@ -69,7 +69,35 @@ async def boundaries():
     with patch.object(voice, "wake", return_value=None):
         await bot._heard("QA", "only this server hears this", channel=ch)
     assert not other.sent and "only this server" in ch.sent[-1]
+    import os
+    with patch.dict(os.environ, {"TIWA_VOICE_REPLY": "0"}), patch.object(bot.pipeline, "respond") as respond:
+        await bot._heard("QA", "play a song", channel=ch, activated=True)
+        assert "play a song" in ch.sent[-1] and not respond.called
+        await bot._heard("QA", "", channel=ch, activated=True, error="transcription unavailable")
+        assert "transcription unavailable" in ch.sent[-1] and not respond.called
+    with patch.dict(os.environ, {"TIWA_VOICE_REPLY": "1"}), \
+         patch.object(bot.pipeline, "respond", return_value="Playing your song") as respond, \
+         patch.object(memory, "extract"), patch.object(voice, "say"), \
+         patch.object(bot, "_flush_music") as music_flush, \
+         patch.object(bot, "_flush_calendar_queue") as calendar_flush, \
+         patch.object(bot, "_flush_leave") as leave_flush:
+        ch.sent.clear()
+        await bot._heard("QA", "play a song", channel=ch, activated=True)
+        assert "play a song" in ch.sent[0]
+        assert ch.sent[1] == "Playing your song"
+        assert respond.await_args.args[2:4] == ("QA", "play a song")
+        music_flush.assert_awaited_once_with(ch)
+        calendar_flush.assert_awaited_once_with(ch)
+        leave_flush.assert_awaited_once_with(ch, "play a song")
+        await asyncio.sleep(0.05)  # let the mocked background extraction finish
+    print("PASS activated voice posts transcript, answers, and flushes requested actions")
     bot.voice_channel.clear()
+    msg = Obj(author=Obj(bot=False, display_name="QA"), content="<@999> status",
+              attachments=[], guild=Obj(voice_client=None), mentions=[bot.client.user], channel=ch)
+    with patch.object(bot.pipeline, "respond") as respond:
+        await bot.on_message(msg)
+        assert "Online. Voice: off" in ch.sent[-1]
+        respond.assert_not_called()
     print("PASS owner gate, exact preview, one shot, wrong channel, expiry, DM voice/music")
 
 

@@ -61,12 +61,12 @@ async def main():
     channel = FakeChannel(vc)
     bot.client.loop = asyncio.get_running_loop()
 
-    async def fake_find(ch, query):
+    def fake_find(query):
         music.NOW["pending_title"] = f"{query.title()} (video)"
-        return {"title": f"{query.title()} (video)", "url": f"http://x/{query}",
-                "query": query}
+        return [{"title": f"{query.title()} (video)", "url": f"http://x/{query}",
+                 "query": query}]
 
-    bot._find = fake_find
+    music.find_many = fake_find
     music.source_for = lambda hit: object()
 
     async def run(*jobs):
@@ -105,29 +105,21 @@ async def main():
     await show("stop")
     assert music.NOW["title"] is None and not music.QUEUE
 
-    # THE 20:39:15 BUG: play something while a queue is waiting behind the
-    # current track. Stopping the outgoing song fires its `after`, which used to
-    # be indistinguishable from that song ending — so the queue advanced on top
-    # of the track we were starting, and two songs logged `playing` in the same
-    # second. She asked for Mili and got Limbus Company.
+    # Ordinary play appends; explicit stop/play replaces. Stale callbacks must
+    # never start queued songs over a replacement.
     await run(("play", "dvorak"))
     await run(("queue", "limbus"))
-    assert len(music.QUEUE) == 1
     played.clear()
-    await run(("play", "mili"))          # explicit swap, NOT a song ending
-    await asyncio.sleep(0.05)
-    await show("play over a full queue")
-    assert music.NOW["title"].startswith("Mili"), \
-        f"the queue stole the deck: {music.NOW['title']}"
-    assert len(played) == 1, f"started {len(played)} tracks at once: {played}"
-    assert len(music.QUEUE) == 1, "the deliberate swap ate a queued song"
-
-    # ...and the queue must still advance when the song really does end
+    await run(("play", "mili"))
+    assert music.NOW["title"].startswith("Dvorak") and len(music.QUEUE) == 2
+    assert not played, "another listener's request interrupted playback"
+    await run(("stop", ""), ("play", "mili"), ("queue", "limbus"))
+    await show("explicit replacement")
+    assert music.NOW["title"].startswith("Mili") and len(music.QUEUE) == 1
+    assert len(played) == 1, "stale callback stole the deck"
     vc.stop()
     await asyncio.sleep(0.05)
-    await show("mili ends on its own")
-    assert music.NOW["title"].startswith("Limbus"), music.NOW
-    assert not music.QUEUE
+    assert music.NOW["title"].startswith("Limbus") and not music.QUEUE
     await run(("stop", ""))
 
     # "เพิ่มเพลงMili ลงคิวหลายๆเพลง" — one queue_music call is one song, so several

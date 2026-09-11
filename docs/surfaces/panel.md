@@ -3,8 +3,13 @@
 ## What this is
 
 A local web page at <http://127.0.0.1:8787> for seeing and changing everything about her.
-`dashboard.py` — ~880 lines of [Gradio](https://gradio.app). Every table sorts, searches
-and filters itself in the browser, so the file holds no filter widgets and no HTTP handler.
+`dashboard.py` uses [Gradio](https://gradio.app). The Memory tab filters by person,
+category, evidence and literal search, with separate current, episode and superseded
+history views. Select a row for its full source quote. Deletion requires confirmation
+and rejects a selection whose record changed. Exports include evidence and history.
+The recall preview runs the real Memory Mini selector and shows the exact block and
+its six-record / 1,200-byte ceiling; it can spend model tokens and log diagnostics,
+but does not send a chat reply or write new memories.
 The one stylesheet at the bottom exists for spacing: Gradio gives every stacked block the
 same gap, which puts a heading as far from its own table as from the section above it, and
 equal spacing is no grouping at all. Sections here run **34 px above a heading, 10 px
@@ -19,7 +24,7 @@ py -X utf8 dashboard.py --open
 
 ## Why it's here
 
-Debugging a three-pass pipeline by reading console output does not scale. This is where
+Debugging routing, recall and replies by reading console output does not scale. This is where
 you answer "what did she actually send the model?" and "why does she think that?"
 
 It's also the answer to "there are 24 environment variables and I don't know what any of
@@ -42,21 +47,22 @@ flowchart LR
 ```
 
 <figcaption>Six tabs over one SQLite file and one <code>.env</code>. Five of them only
-read; <b>Chat</b> is the one that also spends.</figcaption>
+read; <b>Chat</b> and the Memory recall preview can spend model tokens.</figcaption>
 
 ## How it works here
 
 | Tab | What you get |
 |---|---|
-| **Now** | in reading order: what she runs on (mode, providers, tokens spent today), then what is broken (health of Discord token, OpenRouter key, Ollama, music decoder, calendar auth, listening — six across), then what she holds (six running totals), then **one turn, three passes** with the median latency and call count of each, then replies per hour and recent songs. Health sits second because it is why you opened the page. Refreshes itself every 4 s — untick **live** to stop it |
+| **Now** | in reading order: what she runs on (mode, providers, tokens spent today), then what is broken (health of Discord token, OpenRouter key, Ollama, music decoder, calendar auth, listening — six across), then what she holds (six running totals), then **routing, recall & replies** with the median latency and call count of each, then replies per hour and recent songs. Health sits second because it is why you opened the page. Refreshes itself every 4 s — untick **live** to stop it |
 | **Chat** | talk to her through the real pipeline, no Discord. Same brain, same database, same bill. See [chatting with her](#chatting-with-her) |
 | **Settings** | every knob grouped by subsystem in a collapsed accordion, each with an explanation and its default. Empty box = default. **Reload from .env** if you edited the file by hand; **reset every setting** behind a tick box |
-| **Memory** | facts held per name as a chart, then every fact, one row each, searchable. Tick **forget** on any rows and press the button; the delete goes by row id, so sorting or filtering the table first is safe |
-| **Model calls** | where the calls go and how long each pass takes, as two charts, then every model call labelled by pass — **thinking** / **her reply** / **remembering** / **seeing** / **reflecting** / **idle**. Click any row for the exact prompt and reply |
+| **Memory** | current memories, episodes and superseded history, with person/category/evidence/search filters. Select a row for source evidence and confirmed deletion. Preview scoped recall; export records with provenance |
+| **Model calls** | where the calls go and how long each pass takes, as two charts, then every model call labelled by pass — **dispatching** / **recalling** / **her reply** / **remembering** / **seeing** / **reflecting** / **idle**. Click any row for the exact prompt and reply |
 | **Activity log** | turns, tool calls, music, voice. See [reading the tool rows](#reading-the-tool-rows) |
 
-Filtering lives in the table, not in the page: every table has a search box that matches a
-column or the whole row, and the headers sort. That is why there are no filter chips.
+Memory filters run before the 400-row display limit. Refresh preserves the selected
+person; changing filters clears the detail and deletion confirmation. The overview
+and model-call labels distinguish dispatching, recalling, her reply and remembering.
 
 Exports on every tab: `memory.json`, `memory.csv`, `episodes.csv`, `llm.json`,
 `log.csv`. CSVs use a UTF-8 BOM so Excel opens Thai correctly.

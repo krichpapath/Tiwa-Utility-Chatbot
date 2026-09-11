@@ -36,6 +36,8 @@ memory.log(db, "tool", "web_search('ผลบอลเมื่อคืน') ->
 memory.log(db, "tool", "calendar_read('ignored') -> nothing next week", 210)
 memory.log_llm("ollama", "qwen3", 900, 0, "[system]\nYou are ทิวา's inner thoughts",
                "you remember Krich")
+memory.log_llm('ollama', 'qwen3', 900, 0, '[system]\nYou decide which of Tiwa minis should handle a message', '{}')
+memory.log_llm('ollama', 'qwen3', 350, 0, '[system]\nYou are Memory Mini, not Tiwa voice', '{"ids":[]}')
 memory.log_llm("openrouter", "deepseek", 700, 420,
                "[system]\n[inner-state — background", "เปิดให้ละ")
 memory.log_llm("openrouter", "deepseek", 500, 300,
@@ -88,8 +90,8 @@ check("recent music", "Bad Apple" in dashboard.music_df().to_string())
 
 # the three passes, drawn left to right with their real median latency
 passes = dashboard.passes_html()
-check("passes name all three", all(p in passes
-                                  for p in ("thinking", "her reply", "remembering")))
+check("passes name current routing and recall", all(p in passes
+                                  for p in ("dispatching", "recalling", "her reply", "remembering")))
 check("passes show a median", "MEDIAN" in passes.upper() and "0.9s" in passes)
 check("passes count the calls", ">1<" in passes)
 check("passes list the off-turn ones", "reflecting 1" in passes)

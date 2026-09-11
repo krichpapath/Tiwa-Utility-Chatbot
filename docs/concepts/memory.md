@@ -1,5 +1,70 @@
 # Memory — the knowledge graph
 
+## September 2026: scoped recall is now the conversation path
+
+Family-name questions now follow the incoming relationship and its naming edges:
+`Tycoon father of ทิวา` + `Tycoon real name Gateaux`. The Thai question
+“เหตุที่ว่าพ่อของหนูชื่ออะไร” recalls both links as one 293-byte block. This exact
+lookup survives a selector failure and is prioritized before optional profiles.
+Direct answers for these supported family-name queries are rendered from the stored
+links, preserving source attribution and notes; conflicting links ask for clarification.
+They do not ask the persona to invent a name or biography. English and Thai father,
+mother, brother and sister labels are supported; this is not arbitrary graph reasoning.
+Other persona replies receive recalled facts separately from the “do not recite”
+inner-state block. See `tests/relationshipbench.py` for the reported regression.
+
+Explicit naming claims are retained as links, not entity merges. When Krich says
+“Tycoon user is actually name Gateaux remember that”, the extractor stores
+`Tycoon also known as Gateaux`, evidence `reported`, and Krich's source quote.
+A self-reported name becomes an interaction preference. Recall follows one
+unambiguous incoming name link and bundles it with related facts, preserving the
+claim's attribution. Multiple owners for one alias, or an alias with its own facts,
+disable bridging. No Discord account identity is verified by a chat claim.
+See `tests/namebench.py` and `qa-results/memory/name-link.json`: retrieval passes,
+but the current speaking model does not consistently use or qualify linked facts.
+
+`pipeline.respond()` now runs `tiwa/recall.py` beside dispatch. Code finds a bounded
+set of candidates; Memory Mini returns only existing record IDs. The persona gets
+one block, capped at **six records and 1,200 UTF-8 bytes**, including its instructions.
+The mini's candidate pool is capped at 24 records / 6,000 bytes. These are byte
+limits, not token estimates; Thai is not treated as English characters divided by four.
+
+Queries filter topic and opinion owner. Recent chat only supplies a topic for an
+unresolved reference. Music tastes do not accompany Gojo questions; episodes need
+a topical match. Up to two interaction preferences can accompany a turn. Greetings
+with only those preferences do not need a model call. Invalid output, provider errors
+or a three-second selection deadline retain the small interaction profile and any
+exact family-name lookup. Neither path dumps the rest of the graph.
+
+The old `lookup`, `turn_context` and `mentioned` helpers remain for compatibility and
+inspection. **Their broad output is no longer added to live conversation prompts.**
+The historical sections below describe that earlier implementation.
+
+New facts store category, evidence kind and a verbatim source quote. Existing rows
+are migrated additively as `legacy`; they are not automatically declared verified.
+Repeated music requests now produce `often requests` observations, not `likes`.
+Superseded preferences are retained in `memory_history`, and only offered for historical
+queries. Fact deletion also removes corresponding history; fact wipe clears it all.
+JSON exports include the evidence and history. New extracted episodes require a
+source quote; existing episodes retain their original representation.
+
+Run `.venv/Scripts/python.exe -X utf8 tests/memoryrecallbench.py` for offline checks;
+add `--live` for synthetic conversations with the configured provider and an auxiliary
+reply-consistency judge. That judge is not a guarantee of model behavior. The live
+report is written to `qa-results/memory/live.json` as the probes run, including failures.
+See `qa-results/memory/README.md` for results and the distinction between recall
+correctness and occasional embellishment by the speaking model.
+
+This first version keeps SQLite and adds no dependencies. It does **not** yet implement
+Discord account-ID migration, private/group access controls, semantic embeddings,
+automatic legacy cleanup, or a full time/aspect ontology. Name resolution still has
+the legacy fuzzy-write limitations. Untagged legacy tastes get a bounded candidate
+pool for the mini to classify; a very large legacy pool can miss older relevant facts.
+Whole overlong records are omitted rather than truncating away their qualifiers.
+The mini timeout stops waiting; an already running provider request may finish later.
+
+See [the research proposal](memory-redesign-research.md) for the larger design.
+
 ## What this is
 
 Her memory is a small SQLite knowledge graph, not a chat log. Facts are triples —

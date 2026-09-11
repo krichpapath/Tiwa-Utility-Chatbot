@@ -1,5 +1,48 @@
 # Music and the DJ
 
+## Current queue behaviour (2026-09-09)
+
+Ordinary **play** and **queue** requests both append to the shared deck. If it is
+idle, the first song starts. A new listener never interrupts another listener's
+song merely by saying "play". Say "stop this and play X instead" to clear the
+queue and replace it. Skip advances immediately; natural endings advance once.
+
+| Say | Result |
+|---|---|
+| Hey Tiwa, play TheFatRat's playlist | Search and queue up to five distinct songs by that artist |
+| Play ten songs by TheFatRat | Request ten songs; report the actual number found |
+| Play Unity then Monody by TheFatRat | Two ordered song requests |
+| หยุดเพลงนี้ แล้วเปิด Unity แล้วใส่ Monody ต่อคิว | Stop, play Unity, queue Monody |
+| Play a YouTube playlist URL | Preserve playlist order, skipping unavailable/live/overlong entries; up to 50 entries |
+| Several people request songs together | Serialize requests into the same FIFO queue |
+| Skip / ข้ามเพลง | Skip exactly one current song; repeat to advance one by one |
+| Skip 3 songs | Skip current plus the next two, without briefly playing the discarded songs |
+| Skip Monody / ข้ามเพลง Monody | Skip only Monody if current; otherwise remove its next queued occurrence |
+| Remove Monody and Unity / ลบ Monody กับ Unity ออกจากคิว | Remove those songs from the queue, preserving current playback and other songs |
+| Remove the next 3 songs from the queue | Remove the first three waiting songs |
+
+Named edits match normalized titles against the actual deck when the command
+executes. Missing or ambiguous titles change nothing. A named edit defaults to
+one matching occurrence; an explicit count removes that many copies, up to 50.
+
+Artist batches use real search candidates, not invented song lists. Obvious
+audio/video reuploads are deduplicated. Queued tracks resolve their audio URLs at
+playback time; unavailable tracks are reported and skipped. YouTube rate limiting
+stops attempts and clears the pending song queue rather than hammering the service.
+The current limits are ten music steps per turn and fifty songs per step. Large
+playlists are limited to their first fifty entries; this is not an unlimited import.
+
+Search runs in a tracked background task after the reply. The voice callback can
+finish while search continues, so other speakers can submit requests. A shared
+lock preserves step order and protects playback from stale end-of-song callbacks.
+The deck is still for one server voice session, and is not persisted across restarts.
+
+Offline acceptance: `tests/musicqueuebench.py`, `tests/djbench.py`,
+`tests/searchqualitybench.py`, `tests/groupvoicebench.py`, and
+`tests/deploymentbench.py`. Real provider checks covered a five-song TheFatRat
+selection and English/Thai multi-step plans. Discord group playback still needs
+a human VC check after restarting the bot.
+
 ## What this is
 
 She searches YouTube, streams the audio into a Discord voice channel, and keeps talking
@@ -64,9 +107,9 @@ QUEUE = []
 
 | Action | Behaviour |
 |---|---|
-| `play` | search, then start immediately (stops anything playing) |
+| `play` | search, append; start only when idle |
 | `queue` | search, append — or start it if nothing is playing |
-| `skip` | `vc.stop()`; the `after` callback pulls the next track |
+| `skip` | stop the current song and advance once under the deck lock |
 | `stop` | clear queue, clear deck, stop |
 
 Auto-advance works through Discord's `after` callback, which runs on the **audio
