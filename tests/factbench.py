@@ -6,20 +6,20 @@ confabulation caught in the Steven trace.
 
     py -X utf8 tests\\factbench.py [ollama|openrouter]
 """
+
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parents[1]))
 from tiwa import llm, memory  # noqa: E402
-from tiwa.memory import TIWA  # noqa: E402
 
 PROBES = [
     {
         "name": "steven visit (the real one)",
         "user": "Steven is coming over tonight",
         "reply": "oh shit, for real? haven't seen that guy in a minute. tell him to "
-                 "bring his guitar this time, last time he showed up empty-handed and "
-                 "i was robbed of a performance.",
+        "bring his guitar this time, last time he showed up empty-handed and "
+        "i was robbed of a performance.",
         "forbidden": ["empty", "robbed", "performance", "brings", "bring"],
         "required": [],
     },
@@ -27,7 +27,7 @@ PROBES = [
         "name": "new job",
         "user": "I got a new job at Agoda",
         "reply": "finally escaping that hellhole you called an office. about time, "
-                 "you were miserable there for like three years.",
+        "you were miserable there for like three years.",
         "forbidden": ["hellhole", "miserable", "three years"],
         "required": ["agoda"],
     },
@@ -35,7 +35,7 @@ PROBES = [
         "name": "mom visiting",
         "user": "my mom is visiting this weekend",
         "reply": "oh god. is she still mad about the tattoo? you're gonna have to "
-                 "hide it again lol",
+        "hide it again lol",
         "forbidden": ["tattoo", "mad", "angry"],
         "required": [],
     },

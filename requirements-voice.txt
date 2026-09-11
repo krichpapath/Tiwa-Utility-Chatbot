@@ -1,0 +1,4 @@
+# Optional local wake detection. Needs a separately trained Hey Tiwa model.
+openwakeword==0.6.0
+# Used only by scripts/trainwake.py to export a local classifier.
+onnx==1.22.0

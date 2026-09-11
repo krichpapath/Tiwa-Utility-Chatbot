@@ -1,247 +1,44 @@
-"""Tiwa control panel — status, settings, memory, model calls, activity log.
+"""Tiwa control panel — watch her, talk to her, change any knob.
 
     py -X utf8 dashboard.py [--open]      ->  http://127.0.0.1:8787
 
-Localhost-only by design: it edits .env and deletes memory, so it must never be
-reachable off this machine. Secret VALUES are never rendered — only set/missing.
+Gradio provides the controls; memory browsing adds person and text filters. The stylesheet in assets/dashboard.css exists because
+Gradio spaces every block equally, and equal spacing is no grouping at all.
+
+Localhost-only by design: it edits .env, wipes memory, and (on the chat tab)
+spends your API key, so it must never be reachable off this machine. Secret
+VALUES are never rendered — only set/missing.
 """
+
+import asyncio
 import csv
 import datetime
-import html
 import io
+import hashlib
 import json
 import re
 import socket
+import statistics
 import sys
-import webbrowser
-from http.server import BaseHTTPRequestHandler, HTTPServer
+import tempfile
+import time
+from collections import Counter
 from pathlib import Path
-from urllib.parse import parse_qs, quote, urlparse
 
-from tiwa import llm, memory
+import gradio as gr
+import pandas as pd
+
+from tiwa import llm, memory, pipeline, tools, recordings, recall
+
 
 ENV = Path(__file__).with_name(".env")
 DATA = Path(__file__).with_name("data")
 PORT = 8787
-VIEWS = ("status", "settings", "memory", "llm", "log")
 
 # Every editable knob, with the plain-English answer to "what is this and what
 # happens if I leave it alone". (key, label, help, default, options|None)
-SETTINGS = [
-    ("Where she thinks", [
-        ("TIWA_MODE", "Mode",
-         "local = everything on your GPU, ollama must be running, no cost. "
-         "mixed = tools and memory local, her replies from the API (best quality). "
-         "api = nothing local at all, GPU free for games.",
-         "local", ["local", "mixed", "api"]),
-        ("TIWA_PERSONA_API_MODEL", "Her voice (API)",
-         "The OpenRouter model that writes her actual replies in mixed/api mode. "
-         "This is the one worth shopping around for — it decides how she sounds.",
-         "deepseek/deepseek-v4-flash", None),
-        ("TIWA_TOOL_MODEL", "Tool model (API)",
-         "Picks which tools to call (recall, play music, calendar) when tools run "
-         "on the API — that is api mode only. Unused in local and mixed.",
-         "deepseek/deepseek-v4-flash", None),
-        ("TIWA_EXTRACT_MODEL", "Memory model (API)",
-         "Decides what she keeps in memory after each turn, when that runs on the "
-         "API (api mode only).",
-         "deepseek/deepseek-v4-flash", None),
-        ("TIWA_PERSONA_MODEL", "Force a reply model",
-         "Overrides her voice model on whichever path is active. Leave empty "
-         "unless you are testing one specific model.",
-         "auto", None),
-        ("TIWA_DAILY_TOKENS", "Daily token ceiling",
-         "Runaway insurance, not a budget. Past this she falls back to local for "
-         "the rest of the day and says so in the console. 2,000,000 is about "
-         "$0.30 and far more than a day of chatting.",
-         "2000000", None),
-    ]),
-    ("Discord", [
-        ("TIWA_HOME_CHANNEL", "Home channel id",
-         "The one channel she may speak in unprompted — at most once every 3 "
-         "hours, and only between 09:00 and 23:00. Empty = she never starts a "
-         "conversation, she only answers.",
-         "off", None),
-    ]),
-    ("Music", [
-        ("TIWA_MUSIC_VOLUME", "Volume",
-         "1.0 is however loud YouTube handed it over. Set 0.4-0.6 so you can "
-         "still hear her talk while a song is playing.",
-         "1.0", None),
-        ("TIWA_MAX_TRACK_MIN", "Longest track (minutes)",
-         "YouTube's top hit for a mood like 'hype gaming EDM' is a 2-3 hour mix, "
-         "which outlives the whole conversation and starves the queue. Anything "
-         "longer than this is skipped in favour of the next result. Raise it if "
-         "you actually want long mixes.",
-         "12", None),
-    ]),
-    ("Memory", [
-        ("TIWA_EXTRACT_THINK", "Think before remembering",
-         "Turns the model's reasoning on for the memory write pass — the only "
-         "pass nobody waits on, since it runs after her reply is already sent. "
-         "Measured and NOT recommended: no accuracy gain either provider, and "
-         "on the local 8B it was 15x slower and leaked JSON into an entity name "
-         "(tests/extractbench.py --think).",
-         "0", ["0", "1"]),
-    ]),
-    ("Eyes", [
-        ("TIWA_VISION", "See images",
-         "1 = she looks at any image posted with her name and reacts to it. "
-         "0 = images are ignored completely and she says she cannot see them. "
-         "Costs nothing on messages with no picture — no image, no call.",
-         "1", ["1", "0"]),
-        ("TIWA_VISION_MODEL", "Vision model",
-         "Always an API model, even in local mode: her 8B and a local vision "
-         "model do not fit in 8 GB together, so ollama would swap on every "
-         "image. About $0.00015 a look at the default.",
-         "qwen/qwen3-vl-8b-instruct", None),
-    ]),
-    ("Her speaking voice", [
-        ("TIWA_TTS_TH", "Thai voice",
-         "edge-tts voice for Thai replies. Others: th-TH-NiwatNeural (male).",
-         "th-TH-PremwadeeNeural", None),
-        ("TIWA_TTS_EN", "English voice",
-         "edge-tts voice for English replies. Others: en-US-JennyNeural, "
-         "en-GB-SoniaNeural.",
-         "en-US-AvaNeural", None),
-    ]),
-    ("Her ears — speech-to-text (off on purpose)", [
-        ("TIWA_LISTEN", "Listen in voice chat",
-         "1 = transcribe voice chat and answer lines that START with 'Hey Tiwa'. "
-         "Currently 0: Thai accuracy on CPU was too poor to be useful. Everything "
-         "below only matters when this is 1.",
-         "0", ["0", "1"]),
-        ("TIWA_WHISPER_MODEL", "Speech model",
-         "whisper-base is roughly realtime, English fine, Thai rough. "
-         "whisper-small is ~3x slower but much better at Thai.",
-         "onnx-community/whisper-base",
-         ["onnx-community/whisper-base", "onnx-community/whisper-small"]),
-        ("TIWA_WHISPER_LANG", "Language",
-         "Pin it if you always speak one language. Empty = auto-detect, which is "
-         "slower and sometimes returns nothing at all.",
-         "auto", ["", "th", "en"]),
-        ("TIWA_ONNX_THREADS", "CPU threads",
-         "4 measured fastest on this machine — 2.3x faster than letting it "
-         "choose. More threads is slower, not faster.",
-         "4", None),
-        ("TIWA_NOISE_FLOOR", "Noise gate",
-         "Anything quieter than this is not speech. Measured here: speech 0.09, "
-         "quiet speech 0.023, fan hum 0.021, room hiss 0.002. Raise it if she "
-         "hears ghosts, lower it if she misses you.",
-         "0.02", None),
-        ("TIWA_SILENCE_S", "Pause before cutting",
-         "Seconds of quiet that end a sentence. Lower feels snappier but chops "
-         "sentences in half, and Whisper is much worse on fragments.",
-         "1.2", None),
-        ("TIWA_WAKE_FUZZ", "Wake match (latin)",
-         "How close a heard word must be to 'Tiwa', 0-1. Lower wakes her more "
-         "often, including on the wrong word.",
-         "0.72", None),
-        ("TIWA_WAKE_FUZZ_TH", "Wake match (Thai)",
-         "Same, for ทิวา. Thai is stricter because short Thai words collide easily.",
-         "0.8", None),
-        ("TIWA_VOICE_DEBUG", "Save what she heard",
-         "1 = write every heard clip to data/voice_debug/*.wav so you can listen "
-         "back and see why a transcript was nonsense.",
-         "0", ["0", "1"]),
-    ]),
-    ("Logging", [
-        ("TIWA_LOG_PROMPTS", "Record model calls",
-         "1 = every prompt and reply goes to the model-calls page. Turn it off "
-         "only if you want nothing on disk; the page goes empty.",
-         "1", ["1", "0"]),
-    ]),
-]
-EDITABLE = {k for _, rows in SETTINGS for k, *_ in rows}
-SECRETS = ("DISCORD_TOKEN", "OPENROUTER_API_KEY")
-WIPES = ("facts", "episodes", "llm", "log")  # what a reset button may delete
+from tiwa.dashboard_settings import SETTINGS, EDITABLE, SECRETS, MODE_WORDS, KIND_WORDS
 
-MODE_WORDS = {
-    "local": "everything on your GPU — ollama must be running, nothing is billed",
-    "mixed": "tools and memory on your GPU, her replies from OpenRouter",
-    "api": "nothing local — ollama can be closed, the GPU is free",
-}
-KIND_WORDS = {
-    "turn": "a full reply to someone",
-    "tool": "a tool she called",
-    "music": "playback",
-    "voice": "something heard in voice chat",
-    "reflect": "an idle-time conclusion about someone",
-}
-
-CSS = """*{box-sizing:border-box}
-:root{--bg:#0d0d12;--card:#16161f;--card2:#1c1c27;--line:#282836;--txt:#e9e9f2;
---dim:#8b8ba3;--acc:#7b6cf0;--ok:#3fd08a;--warn:#f5c451;--no:#ff6f6f}
-body{font:15px/1.55 ui-sans-serif,system-ui,"Segoe UI",sans-serif;margin:0;
-background:var(--bg);color:var(--txt)}
-.wrap{max-width:1080px;margin:0 auto;padding:0 18px 60px}
-header{position:sticky;top:0;z-index:9;background:rgba(13,13,18,.92);
-backdrop-filter:blur(8px);border-bottom:1px solid var(--line);padding:14px 0 0}
-h1{font-size:17px;font-weight:600;margin:0 0 2px;letter-spacing:.01em}
-.sub{color:var(--dim);font-size:13px;margin:0 0 10px}
-nav{display:flex;gap:4px;flex-wrap:wrap}
-nav a{padding:8px 15px;border-radius:9px 9px 0 0;color:var(--dim);
-text-decoration:none;font-size:14px;border:1px solid transparent;border-bottom:0}
-nav a:hover{color:var(--txt);background:var(--card)}
-nav a.on{background:var(--card);color:var(--txt);border-color:var(--line)}
-h2{font-size:13px;font-weight:600;color:var(--dim);margin:26px 0 10px;
-letter-spacing:.09em;text-transform:uppercase}
-h2 .r{float:right;text-transform:none;letter-spacing:0;font-weight:400}
-.card{background:var(--card);border:1px solid var(--line);border-radius:12px;
-padding:16px 18px;margin-bottom:14px}
-.grid{display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(168px,1fr))}
-.stat{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:13px 15px}
-.stat b{display:block;font-size:24px;font-weight:600;font-variant-numeric:tabular-nums}
-.stat span{color:var(--dim);font-size:12.5px}
-table{width:100%;border-collapse:collapse;font-size:14px}
-td,th{padding:8px 9px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}
-th{color:var(--dim);font-weight:500;font-size:12.5px;text-transform:uppercase;
-letter-spacing:.05em}
-tr:last-child td{border-bottom:0}
-tbody tr:hover{background:var(--card2)}
-.pill{display:inline-block;padding:2px 10px;border-radius:11px;font-size:12.5px;
-white-space:nowrap}
-.ok{background:#123626;color:var(--ok)}
-.no{background:#3a1a1a;color:var(--no)}.warn{background:#3a3018;color:var(--warn)}
-.mode{background:#2a2445;color:#b9abff}.tag{background:#22222e;color:var(--dim)}
-input,select{background:#101018;color:var(--txt);border:1px solid #30303f;
-border-radius:8px;padding:8px 10px;width:100%;font:inherit}
-input:focus,select:focus{outline:0;border-color:var(--acc)}
-button{background:var(--acc);color:#fff;border:0;border-radius:8px;padding:9px 18px;
-font:inherit;cursor:pointer}
-button:hover{filter:brightness(1.12)}
-button.ghost{background:#22222e;color:var(--dim)}
-button.danger{background:#3a1a1a;color:var(--no)}
-button.mini{padding:3px 11px;font-size:12.5px;background:#2a1c1c;color:#e59b9b}
-.set{display:grid;grid-template-columns:1fr 300px;gap:6px 22px;padding:14px 0;
-border-bottom:1px solid var(--line)}
-.set:last-of-type{border-bottom:0}
-.set .lab{font-weight:500}.set .help{color:var(--dim);font-size:13px;grid-column:1}
-.set .key{font:12px ui-monospace,monospace;color:#6b6b85}
-.set .ctl{grid-row:span 3;align-self:start}
-.def{color:var(--dim);font-size:12px;margin-top:5px}
-.bar{height:7px;background:#22222e;border-radius:4px;overflow:hidden;margin-top:8px}
-.bar i{display:block;height:100%;background:var(--acc)}
-form.inline{display:inline}
-.filters{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:12px}
-.filters input{width:230px}.filters select{width:auto}
-.chip{display:inline-block;padding:3px 11px;margin:0 5px 5px 0;border-radius:11px;
-background:#22222e;color:var(--dim);text-decoration:none;font-size:13px}
-.chip:hover,.chip.on{background:var(--acc);color:#fff}
-.ms{color:var(--dim);font-variant-numeric:tabular-nums;white-space:nowrap}
-.kind{color:#b9abff}
-.tool{color:#8fe3c4;font-weight:600;text-decoration:none}
-.tool:hover{text-decoration:underline}
-code{background:#101018;padding:1px 6px;border-radius:5px;font-size:13px}
-pre{background:#0a0a0f;padding:11px;border-radius:8px;overflow:auto;font-size:12.5px;
-white-space:pre-wrap;max-height:400px;color:#c6c6d8;margin:6px 0}
-details summary{cursor:pointer;color:#a99bf0}
-a.exp{color:var(--ok);text-decoration:none;margin-left:14px;font-size:13px}
-.empty{color:var(--dim);padding:20px 0;text-align:center}
-@media(max-width:700px){.set{grid-template-columns:1fr}.set .ctl{grid-row:auto}}"""
-
-
-# ---------------------------------------------------------------- env file
 
 def read_env() -> dict:
     out = {}
@@ -268,13 +65,12 @@ def write_env(updates: dict):
             lines.append(f"{k}={v}")
         else:
             lines[hit] = f"{k}={v}"
-    ENV.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    temporary = ENV.with_suffix(".tmp")
+    temporary.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    temporary.replace(ENV)
 
 
 # ---------------------------------------------------------------- helpers
-
-def esc(x):
-    return html.escape(str(x))
 
 
 def when(ts):
@@ -297,12 +93,14 @@ def port_open(host="127.0.0.1", port=11434) -> bool:
         return False
 
 
-def pill(good, yes, no, cls_no="no"):
-    return f"<span class='pill {'ok' if good else cls_no}'>{yes if good else no}</span>"
-
-
 def which_pass(req: str) -> str:
-    """Which of her three passes made this call — the whole point of the page."""
+    """Identify current minis and historical passes in the same model log."""
+    if "You are Memory Mini" in req:
+        return "recalling"
+    if "You decide which of" in req:
+        return "dispatching"
+    if "memory noticing a pattern" in req:
+        return "noticing tastes"
     if "inner thoughts" in req:
         return "thinking"
     if "memory judgment" in req:
@@ -318,410 +116,1277 @@ def which_pass(req: str) -> str:
     return "other"
 
 
-def qs(args, **over) -> str:
-    d = {k: v for k, v in {**args, **over}.items() if v}
-    return "?" + "&".join(f"{k}={quote(str(v))}" for k, v in d.items())
+DB = memory.connect()  # check_same_thread=False — Gradio answers on worker threads
+LIVE = 400  # ponytail: flat cap on the live tables. Paginate the day it bites.
 
 
-def wipe_button(what, label, count):
-    return (f"<form class=inline method=post onsubmit=\"return confirm("
-            f"'Delete {count} {what}? This cannot be undone.')\">"
-            f"<input type=hidden name=action value=wipe>"
-            f"<input type=hidden name=what value={what}>"
-            f"<button class=mini type=submit>{label}</button></form>")
+# ---------------------------------------------------------------- now
 
 
-# ---------------------------------------------------------------- views
+def now_html() -> str:
+    """The whole answer to "is she alright", in one screen and one reading order:
+    what she is running on, then what is broken, then what she has been doing.
 
-def view_status(db, env, args, flash):
-    ollama = port_open()
-    needs_ollama = "ollama" in (llm.PROVIDER, llm.PERSONA_PROVIDER)
-    try:
-        from tiwa import music
-        music_ok = music.ready()
-    except Exception as e:
-        music_ok = f"music UNAVAILABLE — {type(e).__name__}: {e}"
-
-    last = db.execute("SELECT MAX(ts) FROM log").fetchone()[0]
-    turns, avg_ms = db.execute(
-        "SELECT COUNT(*), AVG(ms) FROM log WHERE kind='turn' AND ts > ?",
-        (datetime.datetime.now().timestamp() - 86400,)).fetchone()
-    calls = db.execute("SELECT COUNT(*) FROM llm_log").fetchone()[0]
-    ents, rels, eps = (db.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0]
-                       for t in ("entities", "relations", "episodes"))
+    Health sits second because it is why you opened the page. It used to be last.
+    """
+    turns, avg_ms = DB.execute(
+        "SELECT COUNT(*), AVG(ms) FROM log WHERE kind='turn' AND ts > ?", (time.time() - 86400,)
+    ).fetchone()
+    rels, eps, ents, calls = (
+        DB.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0]
+        for t in ("relations", "episodes", "entities", "llm_log")
+    )
+    last = DB.execute("SELECT MAX(ts) FROM log").fetchone()[0]
     used, cap = llm.spend(), llm.DAILY_TOKENS
-
-    stats = "".join(
-        f"<div class=stat><b>{v}</b><span>{k}</span></div>" for k, v in [
-            ("replies (24h)", turns or 0),
-            ("avg reply time", f"{(avg_ms or 0) / 1000:.1f}s" if turns else "—"),
+    nums = "".join(
+        f"<div><b>{v}</b><span>{k}</span></div>"
+        for k, v in (
+            ("replies, last 24h", turns or 0),
+            ("average reply", f"{(avg_ms or 0) / 1000:.1f}s" if turns else "—"),
             ("facts she knows", rels),
             ("episodes", eps),
             ("people &amp; things", ents),
-            ("model calls logged", calls),
-        ])
+            ("model calls kept", calls),
+        )
+    )
+    return (
+        f"<div class='card'><div class='status'>"
+        f"<div class='mode'>"
+        f"<p class='lead'>Mode <b>{llm.MODE}</b> — {MODE_WORDS.get(llm.MODE, '')}</p>"
+        f"<p class='sub'>tools &amp; memory &rarr; <code>{llm.PROVIDER}</code>"
+        f"<i>·</i>her words &rarr; <code>{llm.PERSONA_PROVIDER}</code>"
+        f"<i>·</i>last activity {ago(last) if last else 'never'}</p></div>"
+        f"<div class='spend'><div class='meter-top'><span>API tokens today</span>"
+        f"<b>{used:,}</b><span>of {cap:,}</span></div>"
+        f"<div class='bar'><i style='transform:scaleX("
+        f"{min(1, used / cap) if cap else 0:.4f})'></i></div>"
+        f"<p class='sub'>past this she falls back to local for the rest of the day</p>"
+        f"</div></div>"
+        f"{health_html()}<div class='nums'>{nums}</div></div>"
+    )
 
-    health = [
-        ("Discord token", pill(bool(env.get("DISCORD_TOKEN")), "set", "missing"),
-         "in .env — without it the bot cannot log in"),
-        ("OpenRouter key", pill(bool(env.get("OPENROUTER_API_KEY")), "set", "missing",
-                                "warn" if llm.MODE == "local" else "no"),
-         "only needed in mixed/api mode"),
-        ("Ollama", pill(ollama, "running", "not running",
-                        "no" if needs_ollama else "warn"),
-         "127.0.0.1:11434 — " + ("required in this mode" if needs_ollama
-                                 else "not needed in api mode")),
-        ("Music decoder", pill(music_ok.startswith("music ready"), "ready",
-                               esc(music_ok)),
-         "PyAV, streams from YouTube — no ffmpeg involved"),
-        ("Calendar", pill((DATA / "gcal_token.json").exists(), "authorized",
-                          "not authorized", "warn"),
-         "run <code>py -X utf8 gcal_auth.py</code> once to grant access"),
-        ("Listening in voice", pill(env.get("TIWA_LISTEN", "0") != "0", "on", "off",
-                                    "tag"),
-         "speech-to-text; off by default, Thai accuracy on CPU is poor"),
+
+def _passes() -> dict:
+    """Calls and median latency per pass, over the model log's rolling window."""
+    by = {}
+    for _, _, _, _, ms, _, req, _ in memory.read_llm_log(DB, LIVE):
+        by.setdefault(which_pass(req or ""), []).append(ms or 0)
+    return by
+
+
+def passes_html() -> str:
+    """One turn, left to right. The three passes are the shape of the whole product,
+    and 'which pass is slow' is the question this panel exists to answer."""
+    by = _passes()
+    steps = [
+        ("dispatching", "routes work to minis, alongside recall"),
+        ("recalling", "selects relevant memories, alongside dispatch"),
+        ("her reply", "the words you actually see"),
+        ("remembering", "decides what to keep, after she answers"),
     ]
-    hrows = "".join(f"<tr><td>{n}</td><td>{p}</td><td class=ms>{d}</td></tr>"
-                    for n, p, d in health)
-
-    tracks = list(db.execute(
-        "SELECT ts, text FROM log WHERE kind='music' ORDER BY id DESC LIMIT 8"))
-    trows = "".join(
-        f"<tr><td class=ms>{when(ts)}</td><td>{esc(t)}</td></tr>" for ts, t in tracks
-    ) or "<tr><td class=empty colspan=2>no songs played yet</td></tr>"
-
-    pct = min(100, used * 100 // cap) if cap else 0
-    return f"""
-<h2>right now</h2>
-<div class=card>
-  <b>Mode: <span class='pill mode'>{llm.MODE}</span></b> — {MODE_WORDS.get(llm.MODE, '')}<br>
-  <span class=ms>tools &amp; memory &rarr; <code>{llm.PROVIDER}</code>
-  &nbsp;·&nbsp; her words &rarr; <code>{llm.PERSONA_PROVIDER}</code>
-  &nbsp;·&nbsp; last activity: {ago(last) if last else 'never'}</span>
-  <div style="margin-top:12px">API tokens today
-  <b class=ms>{used:,}</b> <span class=ms>of {cap:,} — past this she drops back
-  to local for the rest of the day</span>
-  <div class=bar><i style="width:{pct}%"></i></div></div>
-</div>
-<div class=grid>{stats}</div>
-<h2>health</h2><div class=card><table>{hrows}</table></div>
-<h2>recent music</h2><div class=card><table>{trows}</table></div>
-"""
-
-
-def view_settings(db, env, args, flash):
     out = []
-    for group, rows in SETTINGS:
-        body = []
-        for key, label, help_, default, opts in rows:
-            cur = env.get(key, "")
-            if opts is not None:
-                choices = list(opts)
-                if cur and cur not in choices:
-                    choices.append(cur)
-                ctl = (f"<select name={key}>" + "".join(
-                    f"<option value='{esc(o)}'{' selected' if cur == o else ''}>"
-                    f"{esc(o) or '(auto)'}</option>" for o in choices) + "</select>")
-            else:
-                ctl = f"<input name={key} value='{esc(cur)}' placeholder='{esc(default)}'>"
-            body.append(
-                f"<div class=set><div class=lab>{label}</div>"
-                f"<div class=ctl>{ctl}<div class=def>default: <code>{esc(default)}</code>"
-                f"{'' if cur else ' — in use'}</div></div>"
-                f"<div class=help>{help_}</div><div class=key>{key}</div></div>")
-        out.append(f"<h2>{group}</h2><div class=card>{''.join(body)}</div>")
-
-    secrets = "".join(
-        f"<tr><td>{s}</td><td>{pill(bool(env.get(s)), 'set', 'missing')}</td></tr>"
-        for s in SECRETS)
-    note = ("<span class='pill ok'>saved — restart her for it to take effect</span>"
-            if flash == "saved" else
-            "<span class='pill ok'>reset to defaults</span>" if flash == "reset" else "")
-    return (f"<h2>settings <span class=r>{note}</span></h2>"
-            f"<div class=card>Leave a box empty to use the default. Nothing here "
-            f"changes a running bot — <b>stop and start her</b> after saving.</div>"
-            f"<form method=post><input type=hidden name=action value=settings>"
-            f"{''.join(out)}"
-            f"<div style='margin-top:16px'>"
-            f"<button type=submit>save to .env</button></div></form>"
-            f"<form method=post style='margin-top:10px' "
-            f"onsubmit=\"return confirm('Clear every setting and go back to "
-            f"defaults? Your secrets are untouched.')\">"
-            f"<input type=hidden name=action value=reset_settings>"
-            f"<button class=ghost type=submit>reset all to defaults</button></form>"
-            f"<h2>secrets</h2><div class=card>Edit <code>.env</code> by hand. Values "
-            f"are never shown here and never leave this machine.<table>{secrets}"
-            f"</table></div>")
+    for i, (name, what) in enumerate(steps):
+        ms = by.get(name, [])
+        took = f"{statistics.median(ms) / 1000:.1f}s" if ms else "—"
+        out.append(
+            f"<div class='pass'><b>{name}</b><span>{what}</span>"
+            f"<em>{took}<i>median</i></em><em>{len(ms)}<i>calls</i></em></div>"
+        )
+    extra = [(k, v) for k, v in by.items() if k not in {n for n, _ in steps} and k != "other"]
+    tail = (
+        (
+            "<p class='sub aside'>also on the clock: "
+            + " · ".join(f"{k} {len(v)}" for k, v in sorted(extra))
+            + "</p>"
+        )
+        if extra
+        else ""
+    )
+    return f"<div class='card pad'><div class='passes'>{''.join(out)}</div>{tail}</div>"
 
 
-def view_memory(db, env, args, flash):
-    q = args.get("q", "").strip().lower()
-    rows = list(db.execute(
-        "SELECT r.rowid, s.name, r.rel, d.name, r.note, r.updated_at FROM relations r"
-        " JOIN entities s ON s.id=r.src JOIN entities d ON d.id=r.dst"
-        " ORDER BY r.updated_at DESC"))
-    hits = [r for r in rows
-            if not q or q in f"{r[1]} {r[2]} {r[3]} {r[4]}".lower()]
+def health_html() -> str:
+    """Six things that are either true or not. A markdown table made them a grid of
+    equal cells; they are a list, and the failing one has to be the loud one."""
+    env = read_env()
+    needs_ollama = "ollama" in (llm.PROVIDER, llm.PERSONA_PROVIDER)
+    try:
+        from tiwa import music
 
-    groups = {}
-    for rid, s, rel, o, note, ts in hits:
-        groups.setdefault(s, []).append((rid, rel, o, note, ts))
-    order = sorted(groups, key=lambda k: (-len(groups[k]), k.lower()))
-    chips = "".join(f"<a class=chip href='#s{i}'>{esc(s)} {len(groups[s])}</a>"
-                    for i, s in enumerate(order))
-    cards = "".join(
-        f"<div class=card id=s{i}><h3 style='margin:0 0 8px;font-size:15px'>{esc(s)}"
-        f"<span class=ms style='font-weight:400'> — {len(groups[s])} "
-        f"fact{'' if len(groups[s]) == 1 else 's'}</span></h3>"
-        "<table>" + "".join(
-            f"<tr><td class=kind style='width:150px'>{esc(rel)}</td><td>{esc(o)}"
-            + (f" <span class=ms>— {esc(note)}</span>" if note else "")
-            + f"</td><td class=ms style='width:110px'>{ago(ts)}</td><td style='width:80px'>"
-            f"<form class=inline method=post><input type=hidden name=action value=del_rel>"
-            f"<input type=hidden name=id value={rid}>"
-            f"<button class=mini type=submit>forget</button></form></td></tr>"
-            for rid, rel, o, note, ts in groups[s]) + "</table></div>"
-        for i, s in enumerate(order)) or "<div class='card empty'>nothing matches</div>"
-
-    # text != '': blank rows are reflection watermarks, not events (memory.reflect)
-    epq = list(db.execute(
-        "SELECT id, user, text, ts FROM episodes WHERE text != '' ORDER BY ts DESC"))
-    ephits = [e for e in epq if not q or q in f"{e[1]} {e[2]}".lower()]
-    eps = "".join(
-        f"<tr><td class=ms>{when(ts)}</td><td class=kind>{esc(u)}</td><td>{esc(t)}</td>"
-        f"<td style='width:80px'><form class=inline method=post>"
-        f"<input type=hidden name=action value=del_ep><input type=hidden name=id value={i}>"
-        f"<button class=mini type=submit>forget</button></form></td></tr>"
-        for i, u, t, ts in ephits
-    ) or "<tr><td class=empty colspan=4>nothing yet</td></tr>"
-
-    return (f"<h2>what she knows <span class=r>"
-            f"<a class=exp href='/export/memory.json'>export json</a>"
-            f"<a class=exp href='/export/memory.csv'>export csv</a></span></h2>"
-            f"<form class=filters method=get><input type=hidden name=view value=memory>"
-            f"<input name=q value='{esc(args.get('q', ''))}' "
-            f"placeholder='search names, facts, episodes…'>"
-            f"<button type=submit>filter</button>"
-            f"<a class=chip href='/?view=memory'>clear</a>"
-            f"<span class=ms>{len(hits)} of {len(rows)} facts · "
-            f"{len(ephits)} of {len(epq)} episodes</span></form>"
-            f"<div class=card>{chips or 'she knows nothing yet'}"
-            f"<div style='margin-top:10px'>{wipe_button('facts', 'forget every fact', len(rows))}"
-            f"</div></div>"
-            f"{cards}"
-            f"<h2>episodes — things that mattered <span class=r>"
-            f"<a class=exp href='/export/episodes.csv'>export csv</a></span></h2>"
-            f"<div class=card><table>{eps}</table>"
-            f"<div style='margin-top:10px'>{wipe_button('episodes', 'forget every episode', len(epq))}"
-            f"</div></div>")
-
-
-def view_llm(db, env, args, flash):
-    want, prov, q = (args.get("pass", ""), args.get("prov", ""),
-                     args.get("q", "").strip().lower())
-    all_rows = memory.read_llm_log(db, 400)
-    rows, kept = [], 0
-    for i, ts, p, model, ms, tok, req, resp in all_rows:
-        which = which_pass(req or "")
-        if (want and which != want) or (prov and p != prov):
-            continue
-        if q and q not in f"{req} {resp}".lower():
-            continue
-        kept += 1
-        if kept > 80:
-            continue
-        rows.append(
-            f"<tr><td class=ms>{when(ts)}</td>"
-            f"<td><span class='pill mode'>{which}</span></td>"
-            f"<td class=ms>{esc(p)}</td><td>{esc(model)}</td>"
-            f"<td class=ms>{ms}ms</td><td class=ms>{tok or ''}</td>"
-            f"<td><details><summary>{esc((resp or '')[:100]) or '(no text)'}</summary>"
-            f"<b>what she was asked</b><pre>{esc(req)}</pre>"
-            f"<b>what came back</b><pre>{esc(resp)}</pre></details></td></tr>")
-    body = "".join(rows) or "<tr><td class=empty colspan=7>nothing matches</td></tr>"
-
-    passes = "".join(
-        "<a class='chip%s' href='%s'>%s</a>"
-        % (" on" if want == p else "", qs(args, view="llm", **{"pass": p}), p or "all")
-        for p in ("", "thinking", "her reply", "remembering", "seeing", "reflecting", "idle"))
-    provs = "".join(
-        "<a class='chip%s' href='%s'>%s</a>"
-        % (" on" if prov == p else "", qs(args, view="llm", prov=p), p or "both")
-        for p in ("", "ollama", "openrouter"))
-    return (f"<h2>model calls <span class=r>"
-            f"<a class=exp href='/export/llm.json'>export json</a></span></h2>"
-            f"<div class=card>Every turn is up to three calls: "
-            f"<b>thinking</b> (picks tools, writes her a private brief), "
-            f"<b>her reply</b> (the words you see), and "
-            f"<b>remembering</b> (decides what to keep, runs after she answers). "
-            f"Click any row to read the exact prompt and reply.<br>"
-            f"<div style='margin-top:10px'>{passes}</div>{provs}"
-            f"<form class=filters method=get style='margin:10px 0 0'>"
-            f"<input type=hidden name=view value=llm>"
-            f"<input type=hidden name=pass value='{esc(want)}'>"
-            f"<input type=hidden name=prov value='{esc(prov)}'>"
-            f"<input name=q value='{esc(args.get('q', ''))}' placeholder='search prompts and replies…'>"
-            f"<button type=submit>filter</button>"
-            f"<a class=chip href='/?view=llm'>clear</a>"
-            f"<span class=ms>showing {min(kept, 80)} of {kept} matching "
-            f"({len(all_rows)} kept on disk)</span></form>"
-            f"<div style='margin-top:10px'>{wipe_button('llm', 'clear this log', len(all_rows))}</div>"
-            f"</div>"
-            f"<div class=card><table><tr><th>when</th><th>pass</th><th>where</th>"
-            f"<th>model</th><th>took</th><th>tokens</th>"
-            f"<th>reply — click to open</th></tr>{body}</table></div>")
+        decoder = music.ready()
+    except Exception as e:
+        decoder = f"music UNAVAILABLE — {type(e).__name__}: {e}"
+    # (ok, warn-not-error, what, why it matters)
+    rows = [
+        (
+            bool(env.get("DISCORD_TOKEN")),
+            False,
+            "Discord token",
+            "in .env — without it the bot cannot log in",
+        ),
+        (
+            bool(env.get("OPENROUTER_API_KEY")),
+            llm.MODE == "local",
+            "OpenRouter key",
+            "only needed in mixed/api mode",
+        ),
+        (
+            port_open(),
+            not needs_ollama,
+            "Ollama",
+            "127.0.0.1:11434 — "
+            + ("required in this mode" if needs_ollama else "not needed in api mode"),
+        ),
+        (
+            decoder == "music ready",
+            False,
+            "Music decoder",
+            "PyAV, streams from YouTube — no ffmpeg involved"
+            if decoder == "music ready"
+            else decoder,
+        ),
+        (
+            (DATA / "gcal_token.json").exists(),
+            True,
+            "Calendar",
+            "run <code>py -X utf8 gcal_auth.py</code> once to grant access",
+        ),
+        (
+            env.get("TIWA_LISTEN", "0") != "0",
+            True,
+            "Listening in voice",
+            "saved setting; requires a trained Hey Tiwa detector and a bot restart",
+        ),
+    ]
+    return (
+        "<div class='health'>"
+        + "".join(
+            f"<div class='hrow {'ok' if ok else 'soft' if soft else 'bad'}'>"
+            f"<span class='dot' role='img' aria-label="
+            f"'{'ok' if ok else 'warning' if soft else 'not working'}'></span>"
+            f"<b>{what}</b><span class='why'>{why}</span></div>"
+            for ok, soft, what, why in rows
+        )
+        + "</div>"
+    )
 
 
-def tool_cell(args, text):
-    """A tool row reads `name('arg') -> result`. Show those as three things.
+def activity_df() -> pd.DataFrame:
+    """Replies per hour over the last day: the shape of a normal day, so an
+    abnormal one shows up without reading a single log line."""
+    # the label carries the date because a 24h window can hold the same clock hour
+    # twice, and a bar chart with two "14:00" columns is a lie
+    hours = Counter(
+        f"{datetime.datetime.fromtimestamp(ts):%m-%d %H}:00"
+        for (ts,) in DB.execute(
+            "SELECT ts FROM log WHERE kind='turn' AND ts > ?", (time.time() - 86400,)
+        )
+    )
+    return pd.DataFrame(sorted(hours.items()), columns=["hour", "replies"])
 
-    Which tool she reached for and what she typed into it is the whole reason to
-    open this page — as one string it is unreadable, and the query is the part you
-    are usually hunting for.
-    """
+
+def music_df() -> pd.DataFrame:
+    return pd.DataFrame(
+        [
+            (when(ts), t)
+            for ts, t in DB.execute(
+                "SELECT ts, text FROM log WHERE kind='music' ORDER BY id DESC LIMIT 12"
+            )
+        ],
+        columns=["when", "what"],
+    )
+
+
+def pass_df() -> pd.DataFrame:
+    """How the model log divides up — one frame, two questions: how many calls each
+    pass costs, and how long each one takes."""
+    return pd.DataFrame(
+        [
+            (name, len(ms), round(statistics.median(ms) / 1000, 2))
+            for name, ms in sorted(_passes().items(), key=lambda kv: -len(kv[1]))
+        ],
+        columns=["pass", "calls", "median s"],
+    )
+
+
+def people_df() -> pd.DataFrame:
+    """Who she actually knows things about. A long tail of one-fact names usually
+    means the extraction pass is inventing people."""
+    return pd.DataFrame(
+        DB.execute(
+            "SELECT s.name, COUNT(*) FROM relations r"
+            " JOIN entities s ON s.id = r.src GROUP BY s.name"
+            " ORDER BY COUNT(*) DESC LIMIT 14"
+        ).fetchall(),
+        columns=["who", "facts"],
+    )
+
+
+# ---------------------------------------------------------------- tables
+
+
+def _tool_row(text: str) -> str:
+    """A tool line is `name('arg') -> result`. Space it out. Which tool she reached
+    for and what she typed into it is the whole reason to open this page, and as
+    one unbroken string it is unreadable."""
     head, sep, out = text.partition(") -> ")
     name, paren, arg = head.partition("(")
     if not sep or not paren:
-        return esc(text)  # some other shape — show it raw rather than mangling it
+        return text  # some other shape — show it raw rather than mangling it
     arg = arg.strip("'\"")
-    return (f"<a class=tool href='{qs(args, view='log', kind='tool', q=name)}'>"
-            f"{esc(name)}</a>"
-            + (f" <code>{esc(arg)}</code>" if arg and arg != "ignored" else "")
-            + f" <span class=ms>→ {esc(out)}</span>")
+    return "   ".join([name] + ([arg] if arg and arg != "ignored" else []) + ["→ " + out])
 
 
-def view_log(db, env, args, flash):
-    kind, q = args.get("kind", ""), args.get("q", "").strip().lower()
-    all_rows = memory.read_log(db, 3000)
-    kinds = sorted({k for _, k, _, _ in all_rows})
-    rows, kept = [], 0
-    for ts, k, text, ms in all_rows:
-        if (kind and k != kind) or (q and q not in text.lower()):
-            continue
-        kept += 1
-        if kept > 250:
-            continue
-        what = tool_cell(args, text) if k == "tool" else esc(text)
-        rows.append(f"<tr><td class=ms>{when(ts)}</td><td class=kind>{esc(k)}</td>"
-                    f"<td>{what}</td><td class=ms>{f'{ms}ms' if ms else ''}</td></tr>")
-    body = "".join(rows) or "<tr><td class=empty colspan=4>nothing matches</td></tr>"
-    chips = "".join(
-        "<a class='chip%s' href='%s'>%s</a>"
-        % (" on" if kind == k else "", qs(args, view="log", kind=k), k or "everything")
-        for k in [""] + kinds)
-    legend = " · ".join(f"<b>{k}</b> {v}" for k, v in KIND_WORDS.items() if k in kinds)
-    return (f"<h2>activity <span class=r>"
-            f"<a class=exp href='/export/log.csv'>export csv</a></span></h2>"
-            f"<div class=card>One line for everything she did. {legend}<br>"
-            f"<div style='margin-top:10px'>{chips}</div>"
-            f"<form class=filters method=get style='margin:10px 0 0'>"
-            f"<input type=hidden name=view value=log>"
-            f"<input type=hidden name=kind value='{esc(kind)}'>"
-            f"<input name=q value='{esc(args.get('q', ''))}' placeholder='search…'>"
-            f"<button type=submit>filter</button>"
-            f"<a class=chip href='/?view=log'>clear</a>"
-            f"<span class=ms>showing {min(kept, 250)} of {kept} matching</span></form>"
-            f"<div style='margin-top:10px'>{wipe_button('log', 'clear this log', len(all_rows))}</div>"
-            f"</div>"
-            f"<div class=card><table><tr><th>when</th><th>kind</th><th>what</th>"
-            f"<th>took</th></tr>{body}</table></div>")
+def log_df() -> pd.DataFrame:
+    return pd.DataFrame(
+        [
+            (when(ts), k, _tool_row(text) if k == "tool" else text, f"{ms}ms" if ms else "")
+            for ts, k, text, ms in memory.read_log(DB, LIVE)
+        ],
+        columns=["when", "kind", "what", "took"],
+    )
 
 
-VIEW_FN = {"status": view_status, "settings": view_settings, "memory": view_memory,
-           "llm": view_llm, "log": view_log}
+def llm_df() -> pd.DataFrame:
+    return pd.DataFrame(
+        [
+            (
+                i,
+                when(ts),
+                which_pass(req or ""),
+                prov,
+                model,
+                ms,
+                tok or 0,
+                " ".join((resp or "").split())[:160] or "(no text)",
+            )
+            for i, ts, prov, model, ms, tok, req, resp in memory.read_llm_log(DB, LIVE)
+        ],
+        columns=["#", "when", "pass", "where", "model", "ms", "tokens", "reply"],
+    )
 
 
-def page(view="status", args=None, flash="") -> str:
-    args = args or {}
-    env, db = read_env(), memory.connect()
-    nav = "".join(f"<a class='{'on' if v == view else ''}' href='/?view={v}'>{v}</a>"
-                  for v in VIEWS)
-    body = VIEW_FN[view](db, env, args, flash)
-    return f"""<!doctype html><meta charset=utf-8>
-<meta name=viewport content="width=device-width,initial-scale=1">
-<title>Tiwa — {view}</title><style>{CSS}</style>
-<header><div class=wrap><h1>ทิวา — control panel</h1>
-<p class=sub>this machine only · she reads these settings when she starts</p>
-<nav>{nav}</nav></div></header><div class=wrap>{body}</div>"""
+def open_call(evt: gr.SelectData):
+    """Click any row to read the exact prompt and the exact reply."""
+    row = DB.execute(
+        "SELECT request, response FROM llm_log WHERE id = ?", (int(evt.row_value[0]),)
+    ).fetchone()
+    return row if row else ("", "")
 
 
-class H(BaseHTTPRequestHandler):
-    def _send(self, body, ctype="text/html; charset=utf-8", fname=None):
-        self.send_response(200)
-        self.send_header("Content-Type", ctype)
-        if fname:
-            self.send_header("Content-Disposition", f'attachment; filename="{fname}"')
-        self.end_headers()
-        self.wfile.write(body if isinstance(body, bytes) else body.encode("utf-8"))
+def facts_df() -> pd.DataFrame:
+    return pd.DataFrame(
+        [
+            (
+                rid,
+                False,
+                s,
+                rel,
+                o,
+                note or "",
+                ago(ts) if ts else "Unknown",
+                category,
+                evidence,
+                source,
+                ts,
+            )
+            for rid, s, rel, o, note, ts, category, evidence, source in DB.execute(
+                "SELECT r.rowid, s.name, r.rel, d.name, r.note, r.updated_at, r.category, r.evidence, r.source"
+                " FROM relations r JOIN entities s ON s.id = r.src"
+                " JOIN entities d ON d.id = r.dst ORDER BY r.updated_at DESC"
+            )
+        ],
+        columns=[
+            "#",
+            "forget",
+            "who",
+            "what",
+            "about",
+            "note",
+            "updated",
+            "category",
+            "evidence",
+            "source",
+            "timestamp",
+        ],
+    )
 
-    def do_GET(self):
-        url = urlparse(self.path)
-        db = memory.connect()
-        if url.path.startswith("/export/"):
-            return self._export(db, url.path.rsplit("/", 1)[-1])
-        args = {k: v[0] for k, v in parse_qs(url.query).items()}
-        view = args.pop("view", "status")
-        self._send(page(view if view in VIEWS else "status", args))
 
-    def _export(self, db, what):
-        if what == "memory.json":
-            return self._send(json.dumps(memory.export_all(db), ensure_ascii=False,
-                                         indent=2), "application/json", what)
-        if what == "llm.json":
-            cols = ("id", "ts", "provider", "model", "ms", "tokens", "request",
-                    "response")
-            data = [dict(zip(cols, r)) for r in memory.read_llm_log(db, 400)]
-            return self._send(json.dumps(data, ensure_ascii=False, indent=2),
-                              "application/json", what)
+def episodes_df() -> pd.DataFrame:
+    # text != '': blank rows are reflection watermarks, not events (memory.reflect)
+    return pd.DataFrame(
+        [
+            (i, False, when(ts) if ts else "Unknown", u, t, e, s, ts)
+            for i, u, t, ts, e, s in DB.execute(
+                "SELECT id, user, text, ts, evidence, source FROM episodes WHERE text != ''"
+                " ORDER BY ts DESC"
+            )
+        ],
+        columns=["#", "forget", "when", "with", "what", "evidence", "source", "timestamp"],
+    )
+
+
+EVIDENCE_LABELS = {
+    "legacy": "Legacy · unverified",
+    "explicit": "Stated",
+    "observed": "Observed pattern",
+    "stance": "Tiwa stance",
+    "inferred": "Inferred",
+    "reported": "Reported by someone else",
+}
+MEMORY_HINT = "Select a memory from the list to read its full details."
+
+
+def history_df():
+    return pd.DataFrame(
+        [
+            (i, s, r, o, n or "", when(t) if t else "Unknown", e, q, t)
+            for i, s, r, o, n, t, e, q in DB.execute(
+                "SELECT * FROM memory_history ORDER BY ended_at DESC, id DESC"
+            )
+        ],
+        columns=["#", "who", "what", "about", "note", "updated", "evidence", "source", "timestamp"],
+    )
+
+
+def memory_frame(kind):
+    readers = {"Facts": facts_df, "Conversations": episodes_df, "History": history_df}
+    if kind not in readers:
+        raise gr.Error("Choose a valid memory type.")
+    return readers[kind]()
+
+
+def memory_browser(query="", person="Everyone", kind="Facts", category="All", evidence="All"):
+    df = memory_frame(kind)
+    who_column = "with" if kind == "Conversations" else "who"
+    if person and person != "Everyone":
+        df = df[df[who_column] == person]
+    if category != "All":
+        df = df[df["category"] == category] if "category" in df else df.iloc[:0]
+    if evidence != "All":
+        df = df[df["evidence"] == evidence] if "evidence" in df else df.iloc[:0]
+    if query and query.strip():
+        mask = (
+            df.astype(str)
+            .apply(lambda col: col.str.contains(query.strip(), case=False, regex=False))
+            .any(axis=1)
+        )
+        df = df[mask]
+    rows = []
+    for _, row in df.head(LIVE).iterrows():
+        text = row["what"] if kind == "Conversations" else f"{row['what']} {row['about']}"
+        rows.append(
+            (
+                int(row["#"]),
+                row[who_column],
+                text[:160],
+                row.get("category", "—"),
+                EVIDENCE_LABELS.get(row.get("evidence", "legacy"), row.get("evidence", "legacy")),
+                row["when" if kind == "Conversations" else "updated"],
+            )
+        )
+    status = (
+        f"**{len(rows)} {'memory' if len(rows) == 1 else 'memories'}** · Select a row to read it in full."
+        if rows
+        else "**No matching memories.** Try another search or clear the filters."
+    )
+    if len(df) > LIVE:
+        status = (
+            f"**Showing {LIVE} of {len(df)} memories.** Narrow the search to find older records."
+        )
+    if kind == "History":
+        status += " Superseded records are not current beliefs."
+    return pd.DataFrame(
+        rows, columns=["ID", "Person", "Memory", "Category", "Evidence", "Updated"]
+    ), status
+
+
+def memory_people(current="Everyone"):
+    names = set(facts_df()["who"]) | set(episodes_df()["with"]) | set(history_df()["who"])
+    return gr.Dropdown(
+        choices=["Everyone"] + sorted(names),
+        value=current if current in names else "Everyone",
+        label="Person",
+    )
+
+
+def memory_signature(row):
+    stable = row.drop(labels=["forget", "updated", "when"], errors="ignore").to_dict()
+    return hashlib.sha256(json.dumps(stable, sort_keys=True, default=str).encode()).hexdigest()
+
+
+def clear_memory_selection():
+    return None, MEMORY_HINT, False
+
+
+def memory_detail(kind, evt: gr.SelectData):
+    ident = int(evt.row_value[0])
+    df = memory_frame(kind)
+    row = df[df["#"] == ident]
+    if row.empty:
+        return None, "This memory is no longer available.", False
+    r = row.iloc[0]
+    text = (
+        f"{r['who']} — {r['what']} {r['about']}\n\n{r['note']}"
+        if kind == "Facts"
+        else (
+            f"Superseded · {r['updated']}\n{r['who']} {r['what']} {r['about']}\n\n{r['note']}"
+            if kind == "History"
+            else f"{r['with']} · {r['when']}\n\n{r['what']}"
+        )
+    )
+    text += (
+        f"\n\nCategory: {r.get('category', 'Not recorded')}"
+        f"\nEvidence: {EVIDENCE_LABELS.get(r.get('evidence', 'legacy'), r.get('evidence', 'legacy'))}"
+        f"\n\nSource evidence:\n{r.get('source', '') or 'No source recorded. This is not verified evidence.'}"
+    )
+    if kind == "Facts":
+        text += "\n\nDeleting this record also removes superseded history for the same person and subject."
+    return (kind, ident, memory_signature(r)), text, False
+
+
+def forget_selected(selection, confirmed, query, person, kind, category="All", evidence="All"):
+    if not isinstance(selection, (list, tuple)) or len(selection) != 3 or not confirmed:
+        raise gr.Error("Select a memory and confirm deletion first.")
+    selected_kind, ident, signature = selection
+    df = memory_frame(selected_kind)
+    row = df[df["#"] == ident]
+    if selected_kind != kind or row.empty or memory_signature(row.iloc[0]) != signature:
+        raise gr.Error("This memory changed or is no longer selected. Refresh and select it again.")
+    if selected_kind == "History":
+        DB.execute("DELETE FROM memory_history WHERE id=?", (ident,))
+        DB.commit()
+    else:
+        (memory.delete_relation if selected_kind == "Facts" else memory.delete_episode)(DB, ident)
+    table, status = memory_browser(query, person, kind, category, evidence)
+    return table, status, None, "Memory deleted. Select another row to read it.", False
+
+
+async def preview_recall(person, question, recent=""):
+    if not person or not person.strip() or not question or not question.strip():
+        raise gr.Error("Enter a speaker and a message to preview recall.")
+    before = DB.execute("SELECT COALESCE(MAX(id),0) FROM log WHERE kind='recall'").fetchone()[0]
+    block = await recall.retrieve(DB, person.strip(), question.strip(), recent or "")
+    size = len(block.encode("utf-8"))
+    count = max(0, len(block.splitlines()) - 1)
+    status = f"**{count}/{recall.MAX_RECORDS} records · {size}/{recall.CONTEXT_BYTES} bytes** sent as memory context."
+    log = DB.execute(
+        "SELECT text FROM log WHERE kind='recall' AND id>? ORDER BY id DESC LIMIT 1", (before,)
+    ).fetchone()
+    if log and log[0].startswith("fallback:"):
+        status += " Memory Mini was unavailable or timed out; only interaction preferences and exact relationship lookups are eligible."
+    return block or "No memory selected for this message.", status
+
+
+MODEL_NAMES = {
+    "openai/gpt-transcribe": "GPT Transcribe · OpenAI",
+    "qwen/qwen3-asr-1.7b": "Qwen3 ASR 1.7B · Qwen",
+    "openai/whisper-large-v3-turbo": "Whisper Large v3 Turbo · OpenAI",
+    "fish-audio/transcribe-1": "Transcribe 1 · Fish Audio",
+    "deepseek/deepseek-v4-flash": "DeepSeek V4 Flash",
+}
+
+
+# Public OpenRouter names verified 2026-09-09; custom IDs remain supported.
+CHAT_MODELS = {
+    "deepseek/deepseek-v4-flash": "DeepSeek V4 Flash",
+    "deepseek/deepseek-v4-pro": "DeepSeek V4 Pro",
+    "google/gemini-3.1-flash-lite": "Google Gemini 3.1 Flash Lite",
+    "openai/gpt-5.4-mini": "OpenAI GPT-5.4 Mini",
+    "anthropic/claude-sonnet-4.6": "Anthropic Claude Sonnet 4.6",
+    "qwen/qwen3.5-plus-20260420": "Qwen3.5 Plus",
+}
+MODEL_NAMES.update(CHAT_MODELS)
+
+
+def model_choices(options, current, default):
+    values = list(dict.fromkeys([*(options or []), default, current]))
+    return [
+        (MODEL_NAMES.get(v, v.split("/")[-1].replace("-", " ").title()), v) for v in values if v
+    ]
+
+
+def _ticked(df) -> list:
+    """Row ids whose forget box is ticked. By id, never by row position — the table
+    sorts and filters itself in the browser, so position means nothing back here."""
+    return [int(r[0]) for r in df.itertuples(index=False) if str(r[1]).lower() in ("true", "1")]
+
+
+def forget_facts(df):
+    ids = _ticked(df)
+    for rid in ids:
+        memory.delete_relation(DB, rid)
+    gr.Info(f"forgot {len(ids)} fact(s)" if ids else "tick a forget box first")
+    return facts_df()
+
+
+def forget_episodes(df):
+    ids = _ticked(df)
+    for eid in ids:
+        memory.delete_episode(DB, eid)
+    gr.Info(f"forgot {len(ids)} episode(s)" if ids else "tick a forget box first")
+    return episodes_df()
+
+
+def wipe(what, sure):
+    if not sure:
+        raise gr.Error("tick 'yes, really' first — this cannot be undone")
+    memory.wipe(DB, what)  # whitelisted table names live in memory._WIPEABLE
+    gr.Info(f"{what}: all gone")
+
+
+# ---------------------------------------------------------------- exports
+
+
+def _dump(name, rows, header=None) -> str:
+    out = Path(tempfile.gettempdir()) / name
+    if name.endswith(".json"):
+        out.write_text(json.dumps(rows, ensure_ascii=False, indent=2), encoding="utf-8")
+    else:
         buf = io.StringIO()
         w = csv.writer(buf)
-        if what == "memory.csv":
-            w.writerow(["subject", "relation", "object", "note", "updated_at"])
-            w.writerows([r["subject"], r["relation"], r["object"], r["note"],
-                         r["updated_at"]] for r in memory.export_all(db)["relations"])
-        elif what == "episodes.csv":
-            w.writerow(["when", "with", "what"])
-            w.writerows([when(e["ts"]), e["user"], e["text"]]
-                        for e in memory.export_all(db)["episodes"])
-        else:
-            w.writerow(["ts", "kind", "text", "ms"])
-            w.writerows(memory.read_log(db, 5000))
+        w.writerow(header)
+        w.writerows(rows)
         # utf-8-sig: Excel opens Thai as mojibake without the BOM
-        self._send(buf.getvalue().encode("utf-8-sig"), "text/csv", what)
+        out.write_bytes(buf.getvalue().encode("utf-8-sig"))
+    return str(out)
 
-    def do_POST(self):
-        n = int(self.headers.get("Content-Length", 0))
-        form = {k: v[0] for k, v in
-                parse_qs(self.rfile.read(n).decode("utf-8")).items()}
-        action = form.pop("action", "settings")
-        db = memory.connect()
-        if action == "del_rel":
-            memory.delete_relation(db, int(form["id"]))
-            return self._send(page("memory"))
-        if action == "del_ep":
-            memory.delete_episode(db, int(form["id"]))
-            return self._send(page("memory"))
-        if action == "wipe":
-            what = form.get("what", "")
-            if what in WIPES:
-                memory.wipe(db, what)
-            # anything else is a forged/stale form: delete nothing, show status
-            back = {"facts": "memory", "episodes": "memory", "llm": "llm",
-                    "log": "log"}.get(what, "status")
-            return self._send(page(back))
-        if action == "reset_settings":
-            write_env({k: "" for k in EDITABLE})
-            return self._send(page("settings", flash="reset"))
-        write_env({k: v.strip() for k, v in form.items()})
-        self._send(page("settings", flash="saved"))
 
-    def log_message(self, *a):
-        pass  # keep the console clean
+def export_memory():
+    return _dump("memory.json", memory.export_all(DB))
+
+
+def export_facts():
+    return _dump(
+        "memory.csv",
+        [
+            [
+                r["subject"],
+                r["relation"],
+                r["object"],
+                r["note"],
+                r["updated_at"],
+                r["category"],
+                r["evidence"],
+                r["source"],
+            ]
+            for r in memory.export_all(DB)["relations"]
+        ],
+        ["subject", "relation", "object", "note", "updated_at", "category", "evidence", "source"],
+    )
+
+
+def export_episodes():
+    return _dump(
+        "episodes.csv",
+        [
+            [when(e["ts"]), e["user"], e["text"], e["evidence"], e["source"]]
+            for e in memory.export_all(DB)["episodes"]
+        ],
+        ["when", "with", "what", "evidence", "source"],
+    )
+
+
+def export_history():
+    rows = memory.export_all(DB)["history"]
+    columns = ["id", "subject", "relation", "object", "note", "ended_at", "evidence", "source"]
+    return _dump("memory-history.csv", [[r[c] for c in columns] for r in rows], columns)
+
+
+def export_llm():
+    cols = ("id", "ts", "provider", "model", "ms", "tokens", "request", "response")
+    return _dump("llm.json", [dict(zip(cols, r)) for r in memory.read_llm_log(DB, LIVE)])
+
+
+def export_log():
+    return _dump("log.csv", memory.read_log(DB, 5000), ["ts", "kind", "text", "ms"])
+
+
+# ---------------------------------------------------------------- settings
+
+KEYS = [k for _, rows in SETTINGS for k, *_ in rows]
+BLANKS = [None if opts is not None else "" for _, rows in SETTINGS for *_, opts in rows]
+DEFAULTS = [default or None for _, rows in SETTINGS for _, _, _, default, _ in rows]
+
+
+def save_settings(*vals):
+    values = {k: str(v or "").strip() for k, v in zip(KEYS, vals)}
+    if any("\n" in v or "\r" in v for v in values.values()):
+        raise gr.Error("Each setting must be a single line")
+    for key, low, high in (
+        ("TIWA_SILENCE_S", 0.3, 5),
+        ("TIWA_RECORD_MAX_S", 2, 30),
+        ("TIWA_WAKE_THRESHOLD", 0.01, 1),
+    ):
+        if values.get(key):
+            try:
+                valid = low <= float(values[key]) <= high
+            except ValueError:
+                valid = False
+            if not valid:
+                raise gr.Error(f"{key} must be a number between {low} and {high}")
+    write_env(values)
+    gr.Info("saved to .env — stop and start her before it takes effect")
+    return "**Saved. Restart Tiwa to apply these settings.** Recording samples does not require a restart."
+
+
+def reload_settings():
+    env = read_env()
+    return [env.get(k) or b for k, b in zip(KEYS, DEFAULTS)]
+
+
+def reset_settings(sure):
+    if not sure:
+        raise gr.Error("tick 'yes, really' first — every setting goes back to default")
+    write_env(dict.fromkeys(EDITABLE, ""))
+    gr.Info("back to defaults. Your secrets were not touched.")
+    return DEFAULTS
+
+
+def secrets_md() -> str:
+    env = read_env()
+    return "| secret | |\n|---|---|\n" + "\n".join(
+        f"| `{s}` | {'✅ set' if env.get(s) else '❌ missing'} |" for s in SECRETS
+    )
+
+
+def sample_action(
+    action, ident=None, audio=None, label="", kind="Hey Tiwa", notes="", confirm=False
+):
+    try:
+        if action == "save":
+            ident = recordings.save(audio, label, kind, notes)
+        elif action == "edit":
+            recordings.edit(ident, label, kind, notes)
+        elif action == "delete":
+            if not confirm:
+                raise ValueError("Tick Delete this recording before deleting")
+            recordings.delete(ident)
+            ident = None
+        choices = recordings.listing()
+        return gr.Dropdown(
+            choices=choices, value=ident
+        ), f"{len(choices)} recordings saved locally."
+    except (ValueError, OSError, RuntimeError) as error:
+        raise gr.Error(str(error)) from None
+
+
+def sample_load(ident):
+    if not ident:
+        return None, "", recordings.KINDS[0], "", False
+    try:
+        return (*recordings.load(ident), False)
+    except (ValueError, OSError, KeyError):
+        raise gr.Error(
+            "Recording unavailable. Refresh the library and select another sample."
+        ) from None
+
+
+def sample_trim(ident, start, end):
+    try:
+        ident = recordings.trim(ident, start, end)
+        return gr.Dropdown(
+            choices=recordings.listing(), value=ident
+        ), "Trimmed copy saved. Original kept."
+    except (ValueError, OSError, TypeError):
+        raise gr.Error(
+            "Select a recording and valid start/end seconds; keep at least 0.3 seconds."
+        ) from None
+
+
+# ---------------------------------------------------------------- chat
+
+
+def _pending() -> str:
+    """She can ask for music, voice and calendar writes, and only the Discord bot
+    can carry those out. Drain them so they never leak into the bot's next turn,
+    and say so, rather than letting her look like she did it."""
+    jobs = [f"{act} {arg}".strip() for act, arg in tools.DJ]
+    tools.DJ.clear()
+    if tools.PENDING_MUSIC is not None:
+        jobs.insert(0, "stop music" if tools.PENDING_MUSIC == "" else f"play {tools.PENDING_MUSIC}")
+        tools.PENDING_MUSIC = None
+    jobs += [f"calendar: {c}" for c in tools.PENDING_CALENDAR]
+    tools.PENDING_CALENDAR.clear()
+    if tools.PENDING_JOIN or tools.PENDING_LEAVE:
+        jobs.append("join/leave voice")
+        tools.PENDING_JOIN = tools.PENDING_LEAVE = False
+    return f"\n\n*asked for: {'; '.join(jobs)} — only the Discord bot can do that*" if jobs else ""
+
+
+async def chat_fn(message, history, who, remember):
+    """One real turn — same brain, same database, same three passes as Discord."""
+    hist = [
+        {
+            "role": m["role"],
+            "content": f"{who}: {m['content']}" if m["role"] == "user" else m["content"],
+        }
+        for m in history
+    ]
+    hist.append({"role": "user", "content": f"{who}: {message}"})
+    late_lines = []
+
+    async def late(line):
+        late_lines.append(line)
+
+    try:
+        reply = await pipeline.respond(DB, hist, who, message, on_late=late)
+        pending = pipeline._pending.get(who)
+        if pending:
+            await asyncio.gather(pending, return_exceptions=True)
+    except Exception as error:
+        return f"⚠️ brain call failed: {type(error).__name__}; retry when provider is available"
+    if remember:
+        # a full model call, and nobody waits on it in Discord either — keep it off
+        # the event loop so the next message is not stuck behind it
+        await asyncio.to_thread(
+            memory.extract, DB, who, message, reply, memory.history_context(hist)
+        )
+    return "\n\n".join([reply, *late_lines]) + _pending()
+
+
+# ---------------------------------------------------------------- the page
+
+READONLY = dict(interactive=False, show_search="filter", wrap=True, max_height=560)
+PLOT = dict(height=250, container=False, elem_classes="plot")
+
+
+def sec(title, note=""):
+    """A section heading. Generous space above, tight space below — the heading has
+    to belong to what follows it, and Gradio's uniform 16px gap gives it to neither."""
+    return gr.Markdown(
+        f"##### {title}" + (f"<span>{note}</span>" if note else ""), elem_classes="sec"
+    )
+
+
+with gr.Blocks(title="Tiwa — control panel", fill_width=True) as demo:
+    gr.HTML(
+        "<header class=brand><div class=brand-mark>ท</div><div><h1>Tiwa <span>ทิวา</span></h1><p>Your companion, your settings.</p></div><small>Local control panel</small></header>"
+    )
+
+    with gr.Tabs(elem_id="main-nav"):
+        with gr.Tab("Overview"):
+            live = gr.Checkbox(
+                True, label="live — refreshes every 4s", container=False, elem_classes="live"
+            )
+            # what she runs on, what is broken, what she holds — no heading, because
+            # the unlabelled block is the one that leads
+            now = gr.HTML(now_html)
+
+            sec("routing, recall & replies", "median over the last 400 model calls")
+            passes = gr.HTML(passes_html)
+
+            with gr.Row(equal_height=False):
+                with gr.Column(scale=7):
+                    sec("her day", "replies per hour, last 24 hours")
+                    plot = gr.BarPlot(
+                        activity_df,
+                        x="hour",
+                        y="replies",
+                        sort="x",
+                        x_label_angle=-45,
+                        x_title=None,
+                        y_title=None,
+                        **PLOT,
+                    )
+                with gr.Column(scale=5):
+                    sec("recent music", "the last dozen she put on")
+                    music_tbl = gr.Dataframe(
+                        music_df,
+                        show_label=False,
+                        interactive=False,
+                        wrap=True,
+                        max_height=250,
+                        column_widths=["28%", "72%"],
+                    )
+            beat = gr.Timer(4)
+            beat.tick(
+                lambda: (now_html(), passes_html(), activity_df(), music_df()),
+                outputs=[now, passes, plot, music_tbl],
+                show_progress="hidden",
+            )
+            live.change(lambda on: gr.Timer(active=on), live, beat)
+
+        with gr.Tab("Chat"):
+            gr.Markdown(
+                "Talk to her here exactly as Discord does — same brain, same "
+                "memory, same bill. Music, voice and calendar writes are named "
+                "but not carried out: only the bot can do those.",
+                elem_classes="intro",
+            )
+            with gr.Row():
+                who = gr.Textbox(
+                    "Krich", label="who you are", info="she files what she learns under this name"
+                )
+                remember = gr.Checkbox(
+                    True,
+                    label="let her remember this",
+                    info="untick to talk without writing to memory",
+                )
+            gr.ChatInterface(
+                chat_fn, additional_inputs=[who, remember], save_history=True, editable=True
+            )
+
+        with gr.Tab("Settings"):
+            gr.Markdown(
+                "## Make Tiwa work your way\nStart with **Basics**. Set up listening in **Voice chat** when your wake detector is ready.",
+                elem_classes="settings-lead",
+            )
+            settings_status = gr.Markdown(
+                "**Changes apply after restart.** Empty fields use the default shown below each setting.",
+                elem_classes="settings-notice",
+            )
+            with gr.Row(elem_classes="settings-actions"):
+                save_btn = gr.Button("Save settings", variant="primary")
+                reload_btn = gr.Button("Discard unsaved changes")
+            fields, env0 = {}, read_env()
+            sections = [
+                (
+                    "Basics",
+                    ["Where she thinks", "Discord"],
+                    "Choose where responses run and which Discord channel Tiwa uses. API mode keeps your GPU free for games.",
+                ),
+                (
+                    "Voice chat",
+                    ["Voice chat — activation and transcription", "Her speaking voice"],
+                    "1. Collect samples in Wake recordings. 2. Train and select a Hey Tiwa detector. 3. Turn listening on. Start with transcript-only mode to check accuracy.",
+                ),
+                (
+                    "Features",
+                    ["Music", "Memory", "Eyes"],
+                    "Control music, remembering, and image understanding. Leave tuning values at their defaults unless a feature needs adjustment.",
+                ),
+                (
+                    "Advanced",
+                    ["Logging", "Legacy local speech tests — not used by the wake listener"],
+                    "Diagnostics and older local speech experiments. These legacy speech options do not change the new wake-word listener.",
+                ),
+            ]
+            with gr.Tabs():
+                for title, groups, description in sections:
+                    with gr.Tab(title):
+                        gr.Markdown(description, elem_classes="intro")
+                        for group, rows in SETTINGS:
+                            if group not in groups:
+                                continue
+                            with gr.Group(elem_classes="settings-section"):
+                                gr.Markdown(f"### {group}")
+                                for start in range(0, len(rows), 2):
+                                    with gr.Row():
+                                        for key, label, help_, default, opts in rows[
+                                            start : start + 2
+                                        ]:
+                                            cur = env0.get(key) or None
+                                            info = f"{help_} Default: {default or '(none)'}."
+                                            choices = (
+                                                [("On" if o == "1" else "Off", o) for o in opts]
+                                                if opts and set(opts) == {"0", "1"}
+                                                else opts
+                                            )
+                                            if key == "TIWA_MODE":
+                                                choices = [
+                                                    ("API — keep GPU free", "api"),
+                                                    ("Local — run on this PC", "local"),
+                                                    ("Mixed — local tools, API replies", "mixed"),
+                                                ]
+                                            if key == "TIWA_VOICE":
+                                                choices = [
+                                                    ("Off — music only", "dj"),
+                                                    ("On — speak replies", "full"),
+                                                ]
+                                            if "MODEL" in key and (
+                                                opts is not None
+                                                or key.endswith("API_MODEL")
+                                                or key in {"TIWA_TOOL_MODEL", "TIWA_EXTRACT_MODEL"}
+                                            ):
+                                                choices = model_choices(
+                                                    opts if opts is not None else list(CHAT_MODELS),
+                                                    cur,
+                                                    default,
+                                                )
+                                                opts = choices
+                                            fields[key] = (
+                                                gr.Dropdown(
+                                                    choices=choices,
+                                                    value=cur or default or None,
+                                                    label=label,
+                                                    info=info,
+                                                    allow_custom_value=not (
+                                                        opts and set(opts) == {"0", "1"}
+                                                    ),
+                                                )
+                                                if opts is not None
+                                                else gr.Textbox(
+                                                    cur or default, label=label, info=info
+                                                )
+                                            )
+            boxes = [fields[k] for k in KEYS]
+            save_btn.click(save_settings, boxes, settings_status)
+            reload_btn.click(reload_settings, None, boxes).then(
+                lambda: "**Reloaded saved settings.** Unsaved edits discarded.",
+                None,
+                settings_status,
+            )
+            for field in boxes:
+                field.input(
+                    lambda: "**Unsaved changes.** Save, then restart Tiwa to apply.",
+                    None,
+                    settings_status,
+                    show_progress="hidden",
+                )
+            with gr.Accordion("Connections & troubleshooting", open=False):
+                gr.Markdown(secrets_md)
+                gr.Markdown(
+                    "Missing a key? Add it to the local `.env` file. Keys are never displayed here.\n\nListening will remain off without a trained wake model. Recording samples does **not** train or enable the detector."
+                )
+            with gr.Accordion("Reset settings", open=False):
+                sure_reset = gr.Checkbox(
+                    False, label="Reset all settings to defaults; keep API keys"
+                )
+                gr.Button("Reset to defaults", variant="stop").click(
+                    reset_settings, sure_reset, boxes
+                ).then(
+                    lambda: "**Defaults restored. Restart Tiwa to apply.**", None, settings_status
+                )
+
+        with gr.Tab("Wake recordings") as tab_recordings:
+            gr.Markdown(
+                "## Teach Tiwa how you call her\nBuild a local library of **Hey Tiwa** samples. Record one phrase per clip, then listen back and label it.",
+                elem_classes="settings-lead",
+            )
+            gr.Markdown(
+                "**Samples only — no training or cloud upload.** Include normal, quiet, and excited speech. Also record background conversation that should not wake her.",
+                elem_classes="settings-notice",
+            )
+            with gr.Row(equal_height=False):
+                with gr.Column(scale=1, min_width=300):
+                    gr.Markdown("### 1. Record a sample")
+                    mic = gr.Audio(
+                        sources=["microphone", "upload"],
+                        type="numpy",
+                        label="Record Hey Tiwa (up to 60 seconds)",
+                        buttons=["download"],
+                    )
+                    gr.Markdown(
+                        "Use the microphone’s record button, say **Hey Tiwa**, then stop. Allow microphone access when your browser asks. You can also upload an existing clip."
+                    )
+                    gr.Markdown(
+                        "No microphone found? Open this local panel in Chrome or Edge and check the browser's microphone permission."
+                    )
+                    sample_name = gr.Textbox(
+                        label="Recording name", placeholder="Krich — normal voice, take 1"
+                    )
+                    sample_kind = gr.Radio(
+                        recordings.KINDS, value=recordings.KINDS[0], label="What is in this clip?"
+                    )
+                    sample_notes = gr.Textbox(
+                        label="Notes (optional)",
+                        placeholder="Quiet room, headset microphone",
+                        lines=2,
+                    )
+                    save_sample = gr.Button("Save recording", variant="primary")
+                with gr.Column(scale=1, min_width=300):
+                    gr.Markdown("### 2. Review your library")
+                    library = gr.Dropdown(
+                        choices=recordings.listing(),
+                        label="Saved recordings",
+                        info="Select a sample to play it or edit its details.",
+                    )
+                    library_status = gr.Markdown(
+                        f"{len(recordings.listing())} recordings saved locally."
+                    )
+                    refresh_samples = gr.Button("Refresh library")
+                    playback = gr.Audio(
+                        label="Playback", interactive=False, type="filepath", buttons=["download"]
+                    )
+                    edit_name = gr.Textbox(label="Recording name")
+                    edit_kind = gr.Radio(recordings.KINDS, label="Sample type")
+                    edit_notes = gr.Textbox(label="Notes", lines=2)
+                    update_sample = gr.Button("Save details")
+                    with gr.Accordion("Trim audio — keep a shorter copy", open=False):
+                        gr.Markdown(
+                            "Remove silence or surrounding conversation. Your original stays in the library."
+                        )
+                        with gr.Row():
+                            trim_start = gr.Number(0, label="Start (seconds)")
+                            trim_end = gr.Number(label="End (seconds)")
+                        trim_sample = gr.Button("Save trimmed copy")
+                    with gr.Accordion("Delete selected recording", open=False):
+                        delete_confirm = gr.Checkbox(
+                            False, label="Delete this recording and its details permanently"
+                        )
+                        delete_sample = gr.Button("Delete recording", variant="stop")
+            save_sample.click(
+                lambda a, n, k, d: sample_action("save", audio=a, label=n, kind=k, notes=d),
+                [mic, sample_name, sample_kind, sample_notes],
+                [library, library_status],
+            )
+            update_sample.click(
+                lambda i, n, k, d: sample_action("edit", ident=i, label=n, kind=k, notes=d),
+                [library, edit_name, edit_kind, edit_notes],
+                [library, library_status],
+            )
+            trim_sample.click(
+                sample_trim, [library, trim_start, trim_end], [library, library_status]
+            )
+            delete_sample.click(
+                lambda i, c: sample_action("delete", ident=i, confirm=c),
+                [library, delete_confirm],
+                [library, library_status],
+            )
+            refresh_samples.click(lambda: sample_action("refresh"), None, [library, library_status])
+            tab_recordings.select(lambda: sample_action("refresh"), None, [library, library_status])
+            library.change(
+                sample_load, library, [playback, edit_name, edit_kind, edit_notes, delete_confirm]
+            )
+
+        with gr.Tab("Memory") as tab_mem:
+            gr.Markdown(
+                "## Memory\nRead current beliefs, their evidence, and what changed. Tiwa recalls only the details relevant to each message.",
+                elem_classes="settings-lead",
+            )
+            with gr.Row():
+                memory_query = gr.Textbox(
+                    label="Search memories",
+                    placeholder="Search a name, game, preference, or moment…",
+                    scale=3,
+                )
+                memory_person = memory_people()
+                memory_kind = gr.Radio(
+                    [
+                        ("Current memories", "Facts"),
+                        ("Episodes", "Conversations"),
+                        ("Superseded history", "History"),
+                    ],
+                    value="Facts",
+                    label="Memory type",
+                    scale=2,
+                )
+            with gr.Row():
+                memory_category = gr.Dropdown(
+                    ["All", "general", "music", "games", "food", "interaction"],
+                    value="All",
+                    label="Category",
+                    info="Categories are available for current memories.",
+                )
+                memory_evidence = gr.Dropdown(
+                    [("All", "All")] + [(label, value) for value, label in EVIDENCE_LABELS.items()],
+                    value="All",
+                    label="Evidence",
+                )
+            memory_status = gr.Markdown(memory_browser()[1])
+            selected_memory = gr.State(None)
+            with gr.Row(equal_height=False):
+                with gr.Column(scale=3, min_width=320):
+                    memory_table = gr.Dataframe(
+                        memory_browser()[0],
+                        interactive=False,
+                        wrap=True,
+                        show_label=False,
+                        max_height=580,
+                    )
+                with gr.Column(scale=2, min_width=280):
+                    memory_text = gr.Textbox(
+                        value=MEMORY_HINT, label="Memory and evidence", lines=15, interactive=False
+                    )
+                    with gr.Accordion("Delete this memory", open=False):
+                        memory_confirm = gr.Checkbox(
+                            False, label="Permanently delete the selected memory"
+                        )
+                        delete_memory = gr.Button("Delete selected memory", variant="stop")
+            memory_inputs = [
+                memory_query,
+                memory_person,
+                memory_kind,
+                memory_category,
+                memory_evidence,
+            ]
+            memory_kind.change(
+                lambda k: gr.Dropdown(value="All", interactive=k == "Facts"),
+                memory_kind,
+                memory_category,
+            )
+            for control in memory_inputs:
+                control.change(memory_browser, memory_inputs, [memory_table, memory_status]).then(
+                    clear_memory_selection, None, [selected_memory, memory_text, memory_confirm]
+                )
+            memory_table.select(
+                memory_detail, memory_kind, [selected_memory, memory_text, memory_confirm]
+            )
+            delete_memory.click(
+                forget_selected,
+                [selected_memory, memory_confirm, *memory_inputs],
+                [memory_table, memory_status, selected_memory, memory_text, memory_confirm],
+            )
+            with gr.Row():
+                refresh_memory = gr.Button("Refresh memories")
+                dl_all = gr.DownloadButton("Export all memories · JSON")
+            for trigger in (refresh_memory.click, tab_mem.select):
+                trigger(memory_people, memory_person, memory_person).then(
+                    memory_browser, memory_inputs, [memory_table, memory_status]
+                ).then(clear_memory_selection, None, [selected_memory, memory_text, memory_confirm])
+            with gr.Accordion("Preview what Tiwa would recall", open=False):
+                gr.Markdown(
+                    f"Runs Memory Mini with the configured model. It does not send a reply or save new memories; it may log the model call. "
+                    f"The returned memory block is limited to {recall.MAX_RECORDS} records / {recall.CONTEXT_BYTES:,} UTF-8 bytes."
+                )
+                with gr.Row():
+                    recall_person = gr.Textbox(label="Speaker", placeholder="Krich", scale=1)
+                    recall_question = gr.Textbox(
+                        label="Message to Tiwa",
+                        placeholder="What do you think of Gojo Satoru?",
+                        scale=3,
+                    )
+                recall_recent = gr.Textbox(
+                    label="Recent conversation (optional)",
+                    placeholder="Only needed to resolve references such as “him” or “that song”.",
+                    lines=2,
+                )
+                run_recall = gr.Button("Preview recall")
+                recall_status = gr.Markdown()
+                recall_text = gr.Textbox(label="Exact memory block", interactive=False, lines=8)
+                run_recall.click(
+                    preview_recall,
+                    [recall_person, recall_question, recall_recent],
+                    [recall_text, recall_status],
+                )
+            with gr.Accordion("Export & reset", open=False):
+                gr.Markdown(
+                    "Download a backup before clearing memories. Clearing current memories also clears all superseded history. Deletion cannot be undone."
+                )
+                with gr.Row():
+                    dl_facts = gr.DownloadButton("Export facts · CSV")
+                    dl_eps = gr.DownloadButton("Export episodes · CSV")
+                    dl_history = gr.DownloadButton("Export history · CSV")
+                sure_mem = gr.Checkbox(
+                    False, label="I understand this permanently clears the selected category"
+                )
+                for title, category in [
+                    ("Clear current memories & history", "facts"),
+                    ("Clear all episodes", "episodes"),
+                ]:
+                    gr.Button(title, variant="stop").click(
+                        lambda sure, c=category: wipe(c, sure), sure_mem, None
+                    ).then(memory_browser, memory_inputs, [memory_table, memory_status]).then(
+                        lambda: (*clear_memory_selection(), False),
+                        None,
+                        [selected_memory, memory_text, memory_confirm, sure_mem],
+                    )
+            dl_all.click(export_memory, None, dl_all)
+            dl_facts.click(export_facts, None, dl_facts)
+            dl_eps.click(export_episodes, None, dl_eps)
+            dl_history.click(export_history, None, dl_history)
+
+        with gr.Tab("Model calls") as tab_llm:
+            gr.Markdown(
+                "**Dispatching** routes work while **recalling** selects relevant memory. "
+                "**Her reply** uses that context; **remembering** extracts new memories afterward. "
+                "Recall can skip a model call when no topical memories are available. "
+                "Click any row to read the exact prompt and the exact reply.",
+                elem_classes="intro",
+            )
+            with gr.Row():
+                with gr.Column():
+                    sec("where the calls go")
+                    by_pass = gr.BarPlot(
+                        pass_df, x="pass", y="calls", sort="-y", x_title=None, y_title=None, **PLOT
+                    )
+                with gr.Column():
+                    sec("how long each one takes", "median seconds")
+                    by_time = gr.BarPlot(
+                        pass_df,
+                        x="pass",
+                        y="median s",
+                        sort="-y",
+                        x_title=None,
+                        y_title=None,
+                        **PLOT,
+                    )
+            sec("every call", "newest first")
+            with gr.Row():
+                refresh_llm = gr.Button("refresh")
+                dl_llm = gr.DownloadButton("model calls (json)")
+            calls = gr.Dataframe(
+                llm_df,
+                show_label=False,
+                pinned_columns=1,
+                column_widths=["4%", "10%", "9%", "8%", "17%", "6%", "6%", "40%"],
+                **READONLY,
+            )
+            sec("one call, in full", "click a row above")
+            with gr.Row():
+                asked = gr.Textbox(
+                    label="what she was asked", lines=16, max_lines=16, interactive=False
+                )
+                came = gr.Textbox(label="what came back", lines=16, max_lines=16, interactive=False)
+            calls.select(open_call, None, [asked, came])
+            refresh_llm.click(
+                lambda: (llm_df(), pass_df(), pass_df()), None, [calls, by_pass, by_time]
+            )
+            dl_llm.click(export_llm, None, dl_llm)
+            with gr.Accordion("danger", open=False):
+                sure_llm = gr.Checkbox(False, label="yes, really")
+                gr.Button("clear the model log", variant="stop").click(
+                    lambda s: wipe("llm", s), sure_llm, None
+                ).then(lambda: (llm_df(), pass_df(), pass_df()), None, [calls, by_pass, by_time])
+            tab_llm.select(
+                lambda: (llm_df(), pass_df(), pass_df()),
+                None,
+                [calls, by_pass, by_time],
+                show_progress="hidden",
+            )
+
+        with gr.Tab("Activity log") as tab_log:
+            gr.Markdown(
+                "One line for everything she did. "
+                + " · ".join(f"**{k}** {v}" for k, v in KIND_WORDS.items()),
+                elem_classes="intro",
+            )
+            with gr.Row():
+                refresh_log = gr.Button("refresh")
+                dl_log = gr.DownloadButton("activity (csv)")
+            activity = gr.Dataframe(
+                log_df, show_label=False, column_widths=["12%", "9%", "72%", "7%"], **READONLY
+            )
+            refresh_log.click(log_df, None, activity)
+            dl_log.click(export_log, None, dl_log)
+            with gr.Accordion("danger", open=False):
+                sure_log = gr.Checkbox(False, label="yes, really")
+                gr.Button("clear the activity log", variant="stop").click(
+                    lambda s: wipe("log", s), sure_log, None
+                ).then(log_df, None, activity)
+            tab_log.select(log_df, None, activity, show_progress="hidden")
+
+
+# Gradio gives every stacked block the same 16px gap, so a heading sits as far from
+# its own table as from the section above it and nothing reads as a group. The whole
+# point of this sheet is the rhythm: 34px above a heading, 6px below it.
+CSS = (Path(__file__).parent / "assets" / "dashboard.css").read_text(encoding="utf-8")
+
+
+def dashboard_theme():
+    theme = gr.themes.Base(
+        primary_hue="red", neutral_hue="gray", spacing_size="md", radius_size="md"
+    )
+    tokens = theme.to_dict()["theme"]
+    theme.set(
+        **{
+            key: tokens[key.removesuffix("_dark")]
+            for key in tokens
+            if key.endswith("_dark") and key.removesuffix("_dark") in tokens
+        }
+    )
+    return theme
 
 
 if __name__ == "__main__":
-    url = f"http://127.0.0.1:{PORT}"
-    print(f"control panel: {url}   (ctrl-c to stop)")
-    if "--open" in sys.argv:
-        webbrowser.open(url)
-    HTTPServer(("127.0.0.1", PORT), H).serve_forever()  # localhost: it edits .env
+    print(f"control panel: http://127.0.0.1:{PORT}   (ctrl-c to stop)")
+    demo.launch(
+        server_name="127.0.0.1",  # localhost: it edits .env and wipes memory
+        server_port=PORT,
+        share=False,
+        inbrowser="--open" in sys.argv,
+        quiet=True,
+        css=CSS,
+        theme=dashboard_theme(),
+    )

@@ -1,15 +1,15 @@
-"""Voice channel: join/leave (G5) and listening (G6).
+"""Discord voice transport, recovery, local STT helpers and spoken replies.
 
-G6 rule: transcribe EVERYTHING into a chatlog, run no model. Whisper is cheap,
-the LLM is not. Waking her on the wake word is G7.
+Active per-speaker wake detection/capture lives in listening.py.
+Model loading must stay off the Discord event loop.
 """
+
 import asyncio
 import difflib
 import os
 import re
 import shutil
 import time
-import traceback
 from pathlib import Path
 
 import numpy as np
@@ -41,8 +41,17 @@ VOICE_DEBUG = os.environ.get("TIWA_VOICE_DEBUG", "0") != "0"
 NOISE_FLOOR = float(os.environ.get("TIWA_NOISE_FLOOR", "0.02"))
 
 # Whisper's greatest hits when handed noise. Cheap veto, cheaper than the LLM.
-_GHOSTS = ("thanks for watching", "thank you for watching", "thanks for the video",
-           "subscribe", "ขอบคุณที่รับชม", "ขอบคุณครับ", "ขอบคุณค่ะ", "you", "bye")
+_GHOSTS = (
+    "thanks for watching",
+    "thank you for watching",
+    "thanks for the video",
+    "subscribe",
+    "ขอบคุณที่รับชม",
+    "ขอบคุณครับ",
+    "ขอบคุณค่ะ",
+    "you",
+    "bye",
+)
 
 
 def rms(audio) -> float:
@@ -64,6 +73,7 @@ def is_junk(text: str) -> bool:
         if reps >= 5 and unit * reps == flat[: n * reps]:
             return True
     return False
+
 
 # faster-whisper is NOT usable here: Smart App Control (enforced on this machine)
 # blocks ctranslate2.dll for being unsigned. onnx-asr runs on Microsoft-signed
@@ -104,9 +114,9 @@ def _whisper():
         # CPU only, explicitly: the GPU belongs to the persona model (or to your
         # game). Never let onnxruntime quietly pick a CUDA provider.
         cpu = ["CPUExecutionProvider"]
-        _model = onnx_asr.load_model(
-            WHISPER_MODEL, providers=cpu, sess_options=opts
-        ).with_vad(onnx_asr.load_vad(providers=cpu))
+        _model = onnx_asr.load_model(WHISPER_MODEL, providers=cpu, sess_options=opts).with_vad(
+            onnx_asr.load_vad(providers=cpu)
+        )
     return _model
 
 
@@ -210,6 +220,59 @@ def enable_resilient_router() -> bool:
     return True
 
 
+def enable_lossless_flush() -> bool:
+    """Keep every received packet when voice_recv drains its jitter buffer."""
+    from collections import deque
+    from discord.ext.voice_recv.opus import PacketDecoder
+
+    if getattr(PacketDecoder, "_tiwa_lossless_flush", False):
+        return False
+    original_flag = PacketDecoder._flag_ready_state
+    original_reset, original_destroy = PacketDecoder.reset, PacketDecoder.destroy
+
+    def next_packet(self, timeout):
+        pending = getattr(self, "_tiwa_flushed", None)
+        if pending:
+            return pending.popleft()
+        packet = self._buffer.pop(timeout=timeout)
+        if packet is None:
+            if self._buffer:
+                self._tiwa_flushed = deque(self._buffer.flush())
+                if self._tiwa_flushed:
+                    return self._tiwa_flushed.popleft()
+            return None
+        return packet if packet else self._make_fakepacket()
+
+    def flag(self):
+        if getattr(self, "_tiwa_flushed", None):
+            self.router.waiter.register(self)
+        else:
+            original_flag(self)
+
+    def reset(self):
+        self._tiwa_flushed = deque()
+        original_reset(self)
+
+    def destroy(self):
+        self._tiwa_flushed = deque()
+        original_destroy(self)
+
+    PacketDecoder._get_next_packet = next_packet
+    PacketDecoder._flag_ready_state = flag
+    PacketDecoder.reset, PacketDecoder.destroy = reset, destroy
+    PacketDecoder._tiwa_lossless_flush = True
+    return True
+
+
+def _unpad_rtp(data, padded):
+    """RTP padding belongs to transport framing, not to the DAVE frame."""
+    if not padded:
+        return data
+    if not data or not 0 < data[-1] < len(data):
+        raise ValueError("invalid RTP padding length")
+    return data[: -data[-1]]
+
+
 def enable_dave_decrypt() -> bool:
     """Teach discord-ext-voice-recv to decrypt Discord's E2EE (DAVE).
 
@@ -235,28 +298,63 @@ def enable_dave_decrypt() -> bool:
         return False
     original_init = vr.AudioReader.__init__
 
+    # Drop failed DAVE payloads before they reach the Opus decoder.
+    from discord.ext.voice_recv import router as rt
+
+    original_feed = rt.PacketRouter.feed_rtp
+
+    def feed_rtp(self, packet):
+        if packet.decrypted_data is not None:
+            return original_feed(self, packet)
+
+    rt.PacketRouter.feed_rtp = feed_rtp
+
     def __init__(self, sink, voice_client, **kw):
         original_init(self, sink, voice_client, **kw)
         transport_decrypt = self.decryptor.decrypt_rtp  # bound in ITS __init__
+        voice_client._tiwa_decrypt_failures = {}
+        voice_client._tiwa_decrypted_packets = 0
 
         def decrypt_rtp(packet):
             data = transport_decrypt(packet)
+            try:
+                data = _unpad_rtp(data, getattr(packet, "padding", False))
+            except ValueError:
+                _why("invalid RTP padding; packet dropped")
+                return None
+            # DAVE's explicit silence exception, after transport authentication.
+            # https://daveprotocol.com/#silence-packets
+            # Never permit arbitrary plaintext Opus through this exception.
+            if data == b"\xf8\xff\xfe":
+                return data
             session = getattr(voice_client._connection, "dave_session", None)
             if session is None or not session.ready:
-                _why("dave session not ready")  # then opus WILL reject this packet
-                return data
+                _why("dave session not ready")
+                return None
             user_id = voice_client._get_id_from_ssrc(packet.ssrc)
             if not user_id:
                 _why("ssrc not mapped to a user yet")
-                return data
+                return None
             try:
                 out = session.decrypt(user_id, davey.MediaType.audio, data)
             except Exception as e:
-                _why(f"dave decrypt raised: {type(e).__name__}: {e}")
-                return data
+                now = time.monotonic()
+                failures = voice_client._tiwa_decrypt_failures
+                first, last, count = failures.get(user_id, (now, now, 0))
+                if now - last > 2:
+                    first, count = now, 0
+                failures[user_id] = (first, now, count + 1)
+                # Packet byte counts are not distinct failures; avoid x1 log spam.
+                reason = re.sub(r"(?:encrypted_size|plaintext_size): \d+", "size: variable", str(e))
+                _why(f"dave decrypt raised: {type(e).__name__}: {reason}")
+                return None
             if not out:
                 _why("dave decrypt returned nothing")
-                return data
+                return None
+            voice_client._tiwa_decrypt_failures.pop(user_id, None)
+            voice_client._tiwa_decrypted_packets += 1
+            if voice_client._tiwa_decrypted_packets == 1:
+                print("[voice] encrypted audio verified: first DAVE packet decrypted successfully")
             return out
 
         self.decryptor.decrypt_rtp = decrypt_rtp
@@ -267,132 +365,116 @@ def enable_dave_decrypt() -> bool:
 
 
 enable_resilient_router()  # both must run before any listening starts
+enable_lossless_flush()
 enable_dave_decrypt()
+
+
+_dave_recoveries = {}  # guild -> recent attempts; bound disruptive reconnects
+
+
+async def recover_decryption(guild):
+    """Reconnect only for sustained, recent failures, not a few transition frames."""
+    vc = getattr(guild, "voice_client", None)
+    if vc is None:
+        return None
+    now = time.monotonic()
+    failing = getattr(vc, "_tiwa_decrypt_failures", {})
+    if not any(
+        count >= 20 and last - first >= 3 and now - last < 5
+        for first, last, count in failing.values()
+    ):
+        return None
+    attempts = [t for t in _dave_recoveries.get(guild.id, []) if now - t < 600]
+    if len(attempts) >= 2 or (attempts and now - attempts[-1] < 60):
+        return None
+    _dave_recoveries[guild.id] = attempts + [now]
+    channel = vc.channel
+    try:
+        await asyncio.wait_for(vc.disconnect(force=True), 15)
+        await asyncio.wait_for(channel.connect(cls=voice_recv.VoiceRecvClient), 20)
+        return "Voice encryption recovery: reconnected. Please repeat your request. Music may need restarting."
+    except Exception as error:
+        return f"Voice encryption recovery failed: {type(error).__name__}. Ask Tiwa to join again."
 
 
 async def join(author) -> str:
     """Join the voice channel `author` is sitting in. Returns what to say back."""
-    ch = getattr(author.voice, "channel", None)
+    ch = getattr(getattr(author, "voice", None), "channel", None)
     if ch is None:
         return "you're not in a voice channel"
     vc = author.guild.voice_client
-    if vc is not None:
-        await vc.move_to(ch)
-    else:
-        await ch.connect(cls=voice_recv.VoiceRecvClient)
+    try:
+        if vc is not None:
+            await vc.move_to(ch)
+        else:
+            await ch.connect(cls=voice_recv.VoiceRecvClient)
+    except Exception as error:
+        return (
+            f"couldn't join voice: {type(error).__name__}; check connection and channel permissions"
+        )
     return f"joined {ch.name}"
 
 
 async def leave(guild) -> str:
-    vc = guild.voice_client
+    vc = getattr(guild, "voice_client", None)
     if vc is None:
         return "not in a voice channel"
-    await vc.disconnect()
+    try:
+        await vc.disconnect()
+    except Exception as error:
+        return f"couldn't leave voice: {type(error).__name__}"
     return "left"
 
 
-class Ears(voice_recv.AudioSink):
-    """Buffers each speaker separately, cuts on silence, hands text to `on_text`.
+# TIWA_VOICE decides how much of this file is live.
+#
+#   dj   — the voice channel is a SPEAKER for music and nothing else. Ears off,
+#          she does not talk out loud, and she does not decide to join or leave
+#          mid-conversation. Player.flush still brings her in when a song needs
+#          a channel, and `join` / `leave` typed by hand still work.
+#   full — ears, TTS and conversational join/leave as well.
+#
+# Default is dj: everything above the DJ line is either unfinished (Thai STT
+# garbles on whisper-base, ~10s on small) or unwanted while she is a text bot.
+DJ_ONLY = os.environ.get("TIWA_VOICE", "dj") != "full"
 
-    One stream per speaker is the point: she needs to know WHO said it, which is
-    what the per-user memory keys off.
-    """
-
-    def __init__(self, on_text, loop):
-        super().__init__()
-        self.on_text = on_text  # called (speaker_name, text) from the bot's loop
-        self.loop = loop
-        self.buf = {}  # name -> bytearray
-        self.last = {}  # name -> time of last packet
-        self.task = loop.create_task(self._watch())
-
-    def wants_opus(self) -> bool:
-        return False  # give us decoded PCM, not opus frames
-
-    def write(self, user, data):
-        if user is None:
-            return
-        name = getattr(user, "display_name", None) or str(user)
-        self.buf.setdefault(name, bytearray()).extend(data.pcm)
-        self.last[name] = time.monotonic()
-
-    async def _watch(self):
-        """Every 0.3s: whoever went quiet long enough gets their utterance cut.
-
-        Wrapped so nothing can end this task. If it dies she stops hearing
-        everyone, silently, until the bot restarts.
-        """
-        while True:
-            await asyncio.sleep(0.3)
-            try:
-                await self._sweep()
-            except asyncio.CancelledError:
-                raise  # leave() is allowed to stop us
-            except Exception:
-                print("[voice] listener hiccup, still listening:")
-                traceback.print_exc()
-
-    async def _sweep(self):
-        """One pass over the speakers; cut and transcribe whoever went quiet."""
-        now = time.monotonic()
-        for name in list(self.buf):
-            if not self.buf[name]:
-                continue
-            held = len(self.buf[name]) / (SAMPLE_RATE * 4)
-            quiet = now - self.last.get(name, 0) >= SILENCE_S
-            if not quiet and held < MAX_UTTERANCE_S:
-                continue  # still talking
-            pcm = bytes(self.buf.pop(name))
-            seconds = len(pcm) / (SAMPLE_RATE * 2 * 2)  # stereo, 2 bytes/sample
-            if seconds < MIN_UTTERANCE_S:
-                continue
-            audio = to_audio(pcm)
-            level = rms(audio)
-            if level < NOISE_FLOOR:
-                # gate 1: too quiet to be speech. Printed so you can tune it.
-                print(f"[voice] ignored {seconds:.1f}s from {name} "
-                      f"(level {level:.4f} < {NOISE_FLOOR})")
-                continue
-            # to_thread: whisper on CPU would otherwise block the bot
-            text = await asyncio.to_thread(transcribe, audio)  # gate 2: VAD
-            if VOICE_DEBUG:
-                dump(audio, SAMPLE_RATE, name, text)
-            if not text:
-                continue
-            if is_junk(text):  # gate 3: loops and stock hallucinations
-                print(f"[voice] ignored junk from {name} (level {level:.4f}): {text!r}")
-                continue
-            # her turn must never be able to kill our ears: a raise here used to
-            # end this task, and she would go deaf for the rest of the session
-            try:
-                await self.on_text(name, text)
-            except Exception:
-                print(f"[voice] turn failed for {name!r}, still listening:")
-                traceback.print_exc()
-
-    def cleanup(self):
-        # voice_recv's AudioSink.__del__ calls this, so it runs even when __init__
-        # died before its last line and there is no task to cancel. An exception
-        # in a destructor is only ever "Exception ignored" noise on stderr.
-        task = getattr(self, "task", None)
-        if task is not None:
-            task.cancel()
+# Listening is independent of spoken replies. The new listener requires a
+# trained local wake model and uploads only activated commands.
+LISTEN = os.environ.get("TIWA_LISTEN", "0") == "1"
 
 
-# Listening is OFF by default. Thai transcription on CPU is not good enough to
-# act on (whisper-base garbles it, small takes ~10s), so she takes commands by
-# text and only SPEAKS into voice. Set TIWA_LISTEN=1 to turn her ears back on.
-LISTEN = os.environ.get("TIWA_LISTEN", "0") != "0"
+_listen_lock = asyncio.Lock()  # ponytail: serialize startup; bot currently has one voice deck
 
 
-def listen(guild, on_text, loop) -> str:
+async def listen(guild, on_text, loop) -> str:
     if not LISTEN:
         return "not listening (TIWA_LISTEN=0)"
-    vc = guild.voice_client
-    if vc is None:
-        return "not in a voice channel"
-    vc.listen(Ears(on_text, loop))
-    return "listening"
+    async with _listen_lock:
+        vc = guild.voice_client
+        if vc is None:
+            return "not in a voice channel"
+        if vc.is_listening():
+            return "listening"
+        sink = None
+        try:
+            # Import and ONNX model creation can take seconds on a cold start.
+            # The worker creates no asyncio tasks, so cancellation cannot leak a listener.
+            def build():
+                from .listening import Ears as ActivatedEars
+
+                return ActivatedEars(on_text, loop)
+
+            sink = await asyncio.to_thread(build)
+            if guild.voice_client is not vc or not vc.is_connected():
+                sink.cleanup()
+                return "not listening: voice connection changed during startup"
+            vc.listen(sink)
+            sink.start(loop)
+        except Exception as error:
+            if sink is not None:
+                sink.cleanup()
+            return f"not listening: {error}"
+        return "listening"
 
 
 # G7. Whisper NEVER writes "ทิวา" — measured output is "ที่ว่า" / "ที่วับ" on both
@@ -417,8 +499,22 @@ def _like(a: str, b: str) -> float:
 
 # optional opener before her name. Whisper drops or mangles these constantly,
 # so they are allowed but never required.
-GREETINGS = ("hey", "hay", "hi", "hello", "yo", "ok", "okay", "เฮ้ย", "เห้ย",
-             "เฮ้", "เฮ", "เฮ้ย", "นี่", "โย่")
+GREETINGS = (
+    "hey",
+    "hay",
+    "hi",
+    "hello",
+    "yo",
+    "ok",
+    "okay",
+    "เฮ้ย",
+    "เห้ย",
+    "เฮ้",
+    "เฮ",
+    "เฮ้ย",
+    "นี่",
+    "โย่",
+)
 
 
 def _strip_prefix(low: str, raw: str, prefixes) -> tuple:
@@ -466,11 +562,29 @@ def _clean_rest(s: str) -> str:
     return re.sub(r"\s{2,}", " ", s).strip(" ,.!?ๆฯ")
 
 
-_LATER = ("later", "tonight", "tomorrow", "sometime", "next week", "in a bit",
-          "afterward", "after that", "เดี๋ยว", "พรุ่งนี้", "คืนนี้", "ทีหลัง",
-          # Thai was thin enough that "ออกไปตอนดึกนะ" passed the veto and would
-          # have hung up on a live call (tests/leavebench.py now asserts these)
-          "ตอนดึก", "ตอนเย็น", "ตอนบ่าย", "สักพัก", "อีกที", "วันหลัง", "ค่อย")
+_LATER = (
+    "later",
+    "tonight",
+    "tomorrow",
+    "sometime",
+    "next week",
+    "in a bit",
+    "afterward",
+    "after that",
+    "เดี๋ยว",
+    "พรุ่งนี้",
+    "คืนนี้",
+    "ทีหลัง",
+    # Thai was thin enough that "ออกไปตอนดึกนะ" passed the veto and would
+    # have hung up on a live call (tests/leavebench.py now asserts these)
+    "ตอนดึก",
+    "ตอนเย็น",
+    "ตอนบ่าย",
+    "สักพัก",
+    "อีกที",
+    "วันหลัง",
+    "ค่อย",
+)
 
 
 def wants_now(text: str) -> bool:
@@ -524,6 +638,8 @@ async def say(guild, text: str) -> bool:
 
     import discord
 
+    if DJ_ONLY:
+        return False  # the channel is a speaker for music, not a mouth
     vc = guild.voice_client
     if vc is None or not text.strip():
         return False
@@ -571,5 +687,9 @@ if __name__ == "__main__":  # self-check: deps present, no discord needed
     assert not wants_now("เดี๋ยวเข้ามานะ")
     assert wake("ที่ว่าเปิดเพลง") and wake("tiwa hi") and wake("nothing here") is None
     print("voice deps ok (pynacl + voice_recv), join veto ok, wake word ok")
-    print("ffmpeg:", "present" if ffmpeg_ready() else "absent — and not needed, "
-          "playback is raw PCM (soundfile/PyAV)")
+    print(
+        "ffmpeg:",
+        "present"
+        if ffmpeg_ready()
+        else "absent — and not needed, playback is raw PCM (soundfile/PyAV)",
+    )

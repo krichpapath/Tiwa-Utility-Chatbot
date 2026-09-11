@@ -1,0 +1,11 @@
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+extend-exclude = ["data", "qa-results", "site"]
+
+[tool.ruff.lint]
+select = ["F", "E9"]
+
+[tool.ruff.lint.per-file-ignores]
+# Import initializes environment for manual audio replay.
+"scripts/wakereplay.py" = ["F401"]

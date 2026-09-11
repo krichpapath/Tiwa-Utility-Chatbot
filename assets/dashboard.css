@@ -1,0 +1,142 @@
+/* Pastel red identity; dark ink remains legible on pale surfaces. */
+.gradio-container, .dark .gradio-container {
+ --body-background-fill:oklch(0.985 0.004 20); --background-fill-primary:white;
+ --background-fill-secondary:oklch(0.955 0.018 20); --block-background-fill:white;
+ --body-text-color:oklch(0.28 0.025 20); --body-text-color-subdued:oklch(0.43 0.025 20);
+ --input-background-fill:white; --input-text-color:oklch(0.28 0.025 20);
+ --input-placeholder-color:oklch(0.46 0.025 20); --border-color-primary:oklch(0.86 0.025 20);
+ --border-color-accent:oklch(0.58 0.15 20); --color-accent:oklch(0.49 0.16 20);
+ --button-primary-background-fill:oklch(0.9 0.06 20); --button-primary-text-color:oklch(0.3 0.09 20);
+ --button-primary-background-fill-hover:oklch(0.85 0.08 20);
+ --button-secondary-background-fill:white; --button-secondary-text-color:oklch(0.3 0.025 20);
+ --block-label-text-color:oklch(0.3 0.025 20); --block-info-text-color:oklch(0.43 0.025 20);
+ background:var(--body-background-fill)!important; color:var(--body-text-color)!important;
+ font-family:'Segoe UI',Tahoma,sans-serif!important;
+}
+.brand{display:flex;gap:16px;align-items:center;padding:24px 0 28px}
+.brand-mark{display:grid;place-items:center;width:52px;height:52px;border-radius:14px;background:oklch(0.9 0.06 20);color:oklch(0.3 0.09 20);font-size:30px}
+.brand h1{font-size:26px;margin:0;line-height:1.3}.brand h1 span{font-size:18px;font-weight:400;margin-left:8px}
+.brand p{margin:3px 0 0;font-size:14px}.brand small{margin-left:auto;color:var(--body-text-color-subdued)}
+#main-nav [role="tablist"]{background:oklch(0.955 0.018 20);padding:6px;gap:4px;border-radius:10px;margin-bottom:24px;flex-wrap:wrap;height:auto!important;min-height:54px;overflow:visible}
+#main-nav [role="tablist"] button{padding:12px 18px;font-size:15px;border-radius:7px;color:var(--body-text-color-subdued)}
+#main-nav [role="tablist"] button.selected{background:oklch(0.9 0.06 20);color:oklch(0.3 0.09 20);font-weight:650}
+button{min-height:42px} textarea,input{font-size:15px!important}
+.bad b{color:oklch(0.45 0.16 20)!important}
+@media(max-width:600px){.brand small{display:none}#main-nav [role="tablist"] button{padding:10px}.brand{padding-top:12px}}
+@media(prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+
+.settings-lead h2{font-size:26px;letter-spacing:-.02em;margin:12px 0 8px}
+.block.settings-notice{padding:10px 16px!important;border:1px solid var(--border-color-primary);background:var(--background-fill-secondary);border-radius:8px}
+.settings-notice p{margin:0!important}
+.settings-section{padding:20px!important;margin-top:12px!important;background:white!important;border:1px solid var(--border-color-primary)!important;border-radius:10px!important}
+.settings-section h3{font-size:18px;margin:0 0 12px}
+.settings-actions{margin:8px 0 18px!important}
+
+/* width:100% matters — the container is a flex item, and auto margins on a flex item
+   swallow the free space before flex-grow ever runs, so it stays at content width.
+   clamp, not a media query: gradio rewrites the selectors it is handed, and a
+   :root or .gradio-container rule inside @media quietly stops matching. */
+.gradio-container{width:100%!important;max-width:1400px!important;margin:0 auto!important;
+  padding:10px clamp(12px,3vw,34px) 72px!important}
+/* gradio pads .fillable too; two gutters stacked left 66px of dead rail on a phone */
+.fillable{padding-left:0!important;padding-right:0!important}
+.hdr h3{margin:0 0 3px;font-weight:650;letter-spacing:-.01em}
+.hdr span,.sec span{display:block;font-size:13px;font-weight:400;
+  color:var(--body-text-color-subdued);letter-spacing:0}
+.block.sec{margin:30px 0 -18px!important}
+.sec h5{margin:0;font-size:18px;font-weight:600;letter-spacing:0;
+  text-transform:none;color:var(--body-text-color-subdued)}
+.sec span{margin-top:3px;text-transform:none;letter-spacing:0}
+.intro{max-width:74ch;margin-bottom:6px!important;color:var(--body-text-color-subdued)}
+.live{margin:-6px 0 -10px;display:flex;justify-content:flex-end}
+.live,.live *{border:0!important;background:none!important;box-shadow:none!important}
+.live label{font-size:12.5px;color:var(--body-text-color-subdued)}
+
+/* right now — one panel, because mode, spend and totals answer one question */
+.card{border:1px solid var(--border-color-primary);border-radius:14px;
+  background:var(--block-background-fill);overflow:hidden}
+.card.pad{padding:20px 24px}
+.status{display:flex;flex-wrap:wrap;gap:12px 46px;justify-content:space-between;
+  padding:22px 26px}
+.status .mode{flex:1 1 430px;min-width:0}
+.status .spend{flex:0 1 400px;min-width:0}
+.lead{margin:0 0 5px;font-size:16.5px;max-width:78ch}
+.lead b{font-weight:650}
+.sub{margin:0;font-size:13px;max-width:82ch;color:var(--body-text-color-subdued)}
+.sub i{font-style:normal;padding:0 9px;opacity:.45}
+.status code{font-size:12.5px;padding:1px 6px;border-radius:5px;
+  background:var(--background-fill-secondary)}
+.meter-top{display:flex;align-items:baseline;gap:7px;font-size:13px;
+  color:var(--body-text-color-subdued)}
+.meter-top b{font-size:15px;color:var(--body-text-color);
+  font-variant-numeric:tabular-nums}
+.bar{height:6px;margin:7px 0 6px;border-radius:3px;overflow:hidden;
+  background:var(--background-fill-secondary)}
+/* scaleX, not width: animating width relayouts the page every tick */
+.bar i{display:block;height:100%;width:100%;border-radius:3px;transform-origin:left;
+  background:var(--color-accent);transition:transform .4s cubic-bezier(.2,.8,.2,1)}
+.nums{display:flex;flex-wrap:wrap;
+  border-top:1px solid var(--border-color-primary)}
+.nums div{flex:1 1 128px;padding:18px 22px 4px}
+.nums div+div{border-left:1px solid var(--border-color-primary)}
+.nums b{display:block;font-size:25px;font-weight:600;line-height:1.15;
+  font-variant-numeric:tabular-nums}
+.nums span{font-size:12.5px;color:var(--body-text-color-subdued)}
+
+/* one turn, three passes */
+.passes{display:flex;align-items:stretch;gap:4px;flex-wrap:wrap;max-width:1500px}
+.pass{flex:1 1 210px;padding:2px 4px}
+.pass b{display:block;font-size:14.5px;font-weight:650}
+.pass>span{display:block;margin:4px 0 16px;font-size:12.5px;
+  color:var(--body-text-color-subdued)}
+.pass em{display:inline-block;margin-right:20px;font-style:normal;font-size:17px;
+  font-weight:600;font-variant-numeric:tabular-nums}
+.pass em i{display:block;font-style:normal;font-size:11.5px;font-weight:400;
+  letter-spacing:.05em;text-transform:uppercase;color:var(--body-text-color-subdued)}
+.flow{width:34px;align-self:center;flex:0 0 auto;opacity:.32;
+  margin-bottom:26px}
+.flow path{fill:none;stroke:currentColor;stroke-width:1.2;stroke-linecap:round;
+  stroke-linejoin:round}
+.aside{margin:12px 2px 0;font-size:12.5px;color:var(--body-text-color-subdued)}
+/* charts sit between borderless sections; a framed one reads as the odd block out */
+.plot{border:1px solid var(--border-color-primary)!important;border-radius:14px;
+  background:var(--block-background-fill)!important;padding:16px 14px 6px!important}
+
+/* health — six things that are true or not, so the false one has to be loud */
+/* six across, not six down: a 1300px page reading a 6-row list down one side
+   wastes the width and buries the one row that is red */
+.health{display:flex;flex-wrap:wrap;
+  border-top:1px solid var(--border-color-primary)}
+.hrow{flex:1 1 190px;min-width:0;display:grid;grid-template-columns:auto 1fr;
+  gap:3px 9px;align-items:center;padding:16px 20px 18px}
+.hrow+.hrow{border-left:1px solid var(--border-color-primary)}
+.hrow b{font-weight:550}
+.hrow .why{grid-column:2;font-size:12px;line-height:1.45;
+  color:var(--body-text-color-subdued)}
+.hrow .why code{font-size:11.5px;padding:1px 5px;border-radius:4px;
+  background:var(--background-fill-secondary)}
+.dot{width:8px;height:8px;border-radius:50%;transform:translateY(-1px)}
+.ok .dot{background:#3fd08a;box-shadow:0 0 0 3px rgba(63,208,138,.15)}
+.soft .dot{background:#f5c451;box-shadow:0 0 0 3px rgba(245,196,81,.15)}
+.bad .dot{background:#ff6f6f;box-shadow:0 0 0 3px rgba(255,111,111,.18)}
+.bad b{color:#ff8f8f}
+
+/* browser surfaces gradio leaves at the useragent default */
+::selection{background:color-mix(in srgb,var(--color-accent) 32%,transparent)}
+:focus-visible{outline:2px solid var(--color-accent);outline-offset:2px}
+*{scrollbar-width:thin;
+  scrollbar-color:var(--border-color-primary) transparent}
+table td,.cell-wrap{font-variant-numeric:tabular-nums}
+
+@media(max-width:760px){
+  .nums div+div{border-left:0}
+  .nums div{flex:1 1 42%;padding:15px 14px 4px}
+  .hrow{flex:1 1 100%}
+  .hrow+.hrow{border-left:0;border-top:1px solid var(--border-color-primary)}
+  /* one turn reads top to bottom when there is no room for left to right.
+     nowrap matters: a wrapping column flex builds columns, not rows */
+  .passes{flex-direction:column;flex-wrap:nowrap}
+  .pass{flex:0 0 auto}
+  .flow{transform:rotate(90deg);margin:-2px auto}
+  .block.sec{margin-top:26px!important}
+}

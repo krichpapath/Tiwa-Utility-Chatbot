@@ -6,6 +6,7 @@ never triggers it.
 
     py -X utf8 tests\\moodbench.py
 """
+
 import asyncio
 import sys
 from pathlib import Path
@@ -24,8 +25,19 @@ FILLER = [
     "might rewatch it sometime",
     "what should I eat tonight",
 ]
-ANGRY_WORDS = ("angry", "anger", "mad", "insult", "hit back", "cold", "furious",
-               "disrespect", "attack", "hurt", "mock")
+ANGRY_WORDS = (
+    "angry",
+    "anger",
+    "mad",
+    "insult",
+    "hit back",
+    "cold",
+    "furious",
+    "disrespect",
+    "attack",
+    "hurt",
+    "mock",
+)
 
 
 async def brief_and_reply(db, hist, text):

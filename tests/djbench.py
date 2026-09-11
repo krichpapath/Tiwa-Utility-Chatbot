@@ -5,6 +5,7 @@ real reconnect path against YouTube.
 
     py -X utf8 tests\\djbench.py
 """
+
 import asyncio
 import sys
 import types
@@ -56,23 +57,23 @@ async def main():
     # found while reading that log for a genuine music bug, where "Bad Apple
     # (video)" x5 sat in the middle of the evidence. Benches never touch it.
     bot.db = memory.connect(":memory:")
+    bot.player.db = bot.calendar.db = bot.db
 
     vc = FakeVC()
     channel = FakeChannel(vc)
     bot.client.loop = asyncio.get_running_loop()
 
-    async def fake_find(ch, query):
+    def fake_find(query):
         music.NOW["pending_title"] = f"{query.title()} (video)"
-        return {"title": f"{query.title()} (video)", "url": f"http://x/{query}",
-                "query": query}
+        return [{"title": f"{query.title()} (video)", "url": f"http://x/{query}", "query": query}]
 
-    bot._find = fake_find
+    music.find_many = fake_find
     music.source_for = lambda hit: object()
 
     async def run(*jobs):
         tools.DJ.clear()
         tools.DJ.extend(jobs)
-        await bot._flush_music(channel, None)
+        await bot.player.flush(channel, None)
 
     print("| step | now playing | queue | she said |")
     print("|---|---|---|---|")
@@ -105,29 +106,21 @@ async def main():
     await show("stop")
     assert music.NOW["title"] is None and not music.QUEUE
 
-    # THE 20:39:15 BUG: play something while a queue is waiting behind the
-    # current track. Stopping the outgoing song fires its `after`, which used to
-    # be indistinguishable from that song ending — so the queue advanced on top
-    # of the track we were starting, and two songs logged `playing` in the same
-    # second. She asked for Mili and got Limbus Company.
+    # Ordinary play appends; explicit stop/play replaces. Stale callbacks must
+    # never start queued songs over a replacement.
     await run(("play", "dvorak"))
     await run(("queue", "limbus"))
-    assert len(music.QUEUE) == 1
     played.clear()
-    await run(("play", "mili"))          # explicit swap, NOT a song ending
-    await asyncio.sleep(0.05)
-    await show("play over a full queue")
-    assert music.NOW["title"].startswith("Mili"), \
-        f"the queue stole the deck: {music.NOW['title']}"
-    assert len(played) == 1, f"started {len(played)} tracks at once: {played}"
-    assert len(music.QUEUE) == 1, "the deliberate swap ate a queued song"
-
-    # ...and the queue must still advance when the song really does end
+    await run(("play", "mili"))
+    assert music.NOW["title"].startswith("Dvorak") and len(music.QUEUE) == 2
+    assert not played, "another listener's request interrupted playback"
+    await run(("stop", ""), ("play", "mili"), ("queue", "limbus"))
+    await show("explicit replacement")
+    assert music.NOW["title"].startswith("Mili") and len(music.QUEUE) == 1
+    assert len(played) == 1, "stale callback stole the deck"
     vc.stop()
     await asyncio.sleep(0.05)
-    await show("mili ends on its own")
-    assert music.NOW["title"].startswith("Limbus"), music.NOW
-    assert not music.QUEUE
+    assert music.NOW["title"].startswith("Limbus") and not music.QUEUE
     await run(("stop", ""))
 
     # "เพิ่มเพลงMili ลงคิวหลายๆเพลง" — one queue_music call is one song, so several
@@ -137,7 +130,7 @@ async def main():
     for _ in range(3):
         tools.queue_music(None, "Mili")  # queue_music never touches the db
     assert tools.DJ == [("queue", "Mili")] * 3, tools.DJ
-    await bot._flush_music(channel, None)
+    await bot.player.flush(channel, None)
     await asyncio.sleep(0.05)
     await show("queue Mili x3")
     assert music.NOW["title"].startswith("Mili"), music.NOW
@@ -158,71 +151,92 @@ async def main():
     # nothing happening = say nothing. A standing "no music is playing" would be
     # paid for on every ordinary message and used on almost none.
     assert pipeline._doing() == "", pipeline._doing()
-    # except when she was asked and the search came up empty — the one negative
-    assert "came up empty" in pipeline._doing(missed_music=True)
-    tools.PENDING_MUSIC = "lofi"  # forced retry worked -> back to silence on the negative
-    assert "came up empty" not in pipeline._doing(missed_music=True)
+    # ...and while a song is on its way she is told so, WITHOUT being told what it
+    # is. She has not seen the search result at this point in the turn, so every
+    # title she could name here would be invented — measured, three at once.
+    told = pipeline._doing(dispatching_music=True)
+    assert "Playback is NOT confirmed" in told and "do NOT name a SONG TITLE" in told, told
+    tools.PENDING_MUSIC = "lofi"  # DJ already acted -> she may name what SHE searched
+    assert "play lofi" in pipeline._doing(dispatching_music=True)
     tools.PENDING_MUSIC = None
 
-    # the forced retry: fires whenever they asked and nothing was queued. The
-    # "already playing" rows are the ones that matter — they were live failures,
-    # three confabulated turns in one session, every one with a song already on.
-    print("\n| ask | deck | forced? |")
-    print("|---|---|---|")
+    # --- the hint: does DJ Tiwa get STARTED early? -------------------------
+    #
+    # Read _maybe_music() first. This is not "is it a music ask" — DJ answers
+    # that. All a True buys is DJ starting at t=0 beside dispatch instead of
+    # ~1.5s behind it, so it is deliberately greedy and several rows below are
+    # True on purpose for messages that are obviously not music. Those are the
+    # `veto` rows: DJ has to answer `none` to them, and djminibench --live is
+    # where that is measured. A wrong True costs one cheap call nobody sees.
+    #
+    # It only has to be right about the two things that PREVENT an action.
+    print("\n| ask | deck | DJ started? | why |")
+    print("|---|---|---|---|")
     cases = [
-        ("เปิดเพลงอะไรก็ได้", None, True),
-        ("อยากได้เพลงเล่น Marvel rival เลือกให้หน่อย มันๆ", None, True),
-        ("play some lofi", None, True),
-        ("เปิดเพลงปล้น", "Lamenting the Days", True),          # swap the track
-        ("ให้โอกาสอีกรอบเปิดเพลงให้ถูก", "Lamenting the Days", True),
-        ("เพลงนี้ชื่ออะไร", "Bad Apple (video)", False),        # asking, not requesting
-        ("มึงว่าไง", None, False),                             # not about music at all
-        # --- straight from the live log, 2026-08-01 20:23-20:27. Every one of
-        # these called no tool AND hit no retry, and she claimed she played it.
-        ("play ビビデバ - BIBBIDIBA", "TheFatRat - Unity", True),
-        ("Queue เพลง ビビデバ - BIBBIDIBA", "TheFatRat - Unity", True),
-        ("play tung tung tung sahur orchestra", "TheFatRat - Unity", True),
-        # ...and the opposite failure from the same session: a QUESTION matched,
-        # so the retry searched the sentence and played a random Thai song over
-        # her answer. Silence is bad; the wrong song on top of a reply is worse.
-        ("ตอนนี้้เปิดเพลงอะไรอยู่", "BIBBIDIBA", False),
-        ("what song is this", "BIBBIDIBA", False),
-        ("เปิดเพลงนี้ให้หน่อยได้ไหม", None, False),             # a question, politely
-        # a bare `play` substring must NOT fire — this is why _MUSIC_VERB anchors
-        ("my dad plays Warframe", None, False),
-        ("he plays guitar", None, False),
-        # --- live log 2026-08-01/02. Three claimed-but-never-played turns out of
-        # 107, and all three reached _missed_music as False for a DIFFERENT reason.
-        # A youtube link always carries "?v=", and "?" is in _QUESTION, so every
-        # `queue <link>` was read as a question and the retry never ran:
-        ("queue https://www.youtube.com/watch?v=ftIfmQYUvVw", None, True),
-        ("play https://www.youtube.com/watch?v=gVQzCR5h4Y8", "BIBBIDIBA", True),
-        # a Thai verb with a foreign title and no "เพลง" glued on:
-        ("ขอ ATLAS-The Score", None, True),
-        ("เปิด Unstoppable-The score", "ATLAS", True),
-        # the verb in the middle of the sentence, so no prefix could reach it:
-        ("เพลงไม่ออกใส่ queue ด้วย", None, True),
-        # ...and the cost of loosening: these must still NOT fire. "ขอ " and
-        # "เปิด " are prefixes now, and Thai does not space its own words, so the
-        # space is what separates a foreign title from ordinary speech.
-        ("ขอโทษนะ", None, False),
-        ("ขอบคุณมาก", None, False),
-        ("เปิดประตูให้หน่อย", None, False),
-        # a real question that happens to contain a link is still a question
-        ("เพลงนี้ชื่ออะไร https://www.youtube.com/watch?v=abc", "BIBBIDIBA", False),
+        # plain asks
+        ("เปิดเพลงอะไรก็ได้", None, True, "ask"),
+        ("อยากได้เพลงเล่น Marvel rival เลือกให้หน่อย มันๆ", None, True, "ask"),
+        ("play some lofi", None, True, "ask"),
+        ("เปิดเพลงปล้น", "Lamenting the Days", True, "swap the track"),
+        ("play ビビデバ - BIBBIDIBA", "TheFatRat - Unity", True, "ask"),
+        ("queue https://www.youtube.com/watch?v=ftIfmQYUvVw", None, True, "a link is an ask"),
+        ("ขอ ATLAS-The Score", None, True, "thai verb, foreign title"),
+        ("เพลงไม่ออกใส่ queue ด้วย", None, True, "verb mid-sentence"),
+        ("เปิดเพลงนี้ให้หน่อยได้ไหม", None, True, "politely, still an ask"),
+        # --- THE 25 THE OLD PHRASE LIST SILENTLY MISSED, from her own log.
+        # Every one of these reached no tool and no retry. `skip` alone appeared
+        # four times and never once fired.
+        ("skip", None, True, "was missed: a bare verb"),
+        ("เปิดSunflowerให้หน่อย", None, True, "was missed: no space after เปิด"),
+        ("เปิดwhat up danger", None, True, "was missed: no space"),
+        ("hero miliเล่นให้หน่อย", None, True, "was missed: verb not at the front"),
+        ("เล่นที่ฉันชอบหน่อย", None, True, "was missed: play what I like"),
+        ("เพลงอื่นอีกเพลง", None, True, "was missed: another song"),
+        ("คิวเพลง https://youtu.be/FeHDKMilBl0", None, True, "was missed: คิว alone"),
+        # ...and these four carry NO music word at all. Only the live deck
+        # reaches them, which is the whole reason that rule exists.
+        ("ไม่ใช่ ของMili", "ATLAS", True, "was missed: deck is live"),
+        ("มันจบแล้ว เล่นอีกรอบ", "ATLAS", True, "was missed: deck is live"),
+        ("เอาอันที่เป็นของ enimen แทน", "ATLAS", True, "was missed: deck is live"),
+        ("อีกอันนึง", "ATLAS", True, "was missed: deck is live"),
+        # greedy on purpose — DJ answers `none` to every one of these
+        ("my dad plays Warframe", None, True, "veto: DJ says none"),
+        ("he plays guitar", None, True, "veto: DJ says none"),
+        ("ขอโทษนะ", None, True, "veto: DJ says none"),
+        ("ขอบคุณมาก", None, True, "veto: DJ says none"),
+        ("เปิดประตูให้หน่อย", None, True, "veto: DJ says none"),
+        ("ขอ ยืมตังหน่อย", None, True, "veto: DJ says none — the live 2026-08-24 turn"),
+        # nothing music-shaped, and no deck: not even started
+        ("มึงว่าไง", None, False, "no hint word, empty deck"),
+        ("กินข้าวยัง", None, False, "no hint word, empty deck"),
+        # ...and the one thing that must stay precise, because it PREVENTS a
+        # track starting over her answer. Same rows as before the loosening.
+        ("เพลงนี้ชื่ออะไร", "Bad Apple (video)", False, "deck question"),
+        ("ตอนนี้้เปิดเพลงอะไรอยู่", "BIBBIDIBA", False, "deck question"),
+        ("what song is this", "BIBBIDIBA", False, "deck question"),
+        (
+            "เพลงนี้ชื่ออะไร https://www.youtube.com/watch?v=abc",
+            "BIBBIDIBA",
+            False,
+            "deck question with a link",
+        ),
     ]
-    for ask, deck, want in cases:
+    for ask, deck, want, why in cases:
         tools.PENDING_MUSIC, tools.DJ[:] = None, []
-        music.NOW["title"] = deck
-        got = pipeline._missed_music(ask)
-        print(f"| {ask} | {deck or '—'} | {got} |")
-        assert got is want, ask
-    music.NOW["title"] = None
-    tools.PENDING_MUSIC = "lofi"  # play_music already fired -> never force twice
-    assert not pipeline._missed_music("เปิดเพลงอะไรก็ได้")
+        music.NOW["title"], music.QUEUE[:] = deck, []
+        got = pipeline._maybe_music(ask)
+        print(f"| {ask} | {deck or '—'} | {got} | {why} |")
+        assert got is want, f"{ask!r} -> {got}, wanted {want} ({why})"
+    music.NOW["title"], music.QUEUE[:] = None, []
+    tools.PENDING_MUSIC = "lofi"  # play_music already fired -> never start twice
+    assert not pipeline._maybe_music("เปิดเพลงอะไรก็ได้")
     tools.PENDING_MUSIC = ""  # stop_music fired -> do NOT start one instead
-    assert not pipeline._missed_music("ปิดเพลง เปิดเพลงใหม่ไม่ต้อง")
+    assert not pipeline._maybe_music("ปิดเพลง เปิดเพลงใหม่ไม่ต้อง")
     tools.PENDING_MUSIC = None
+    # a queued song with nothing playing is still a live session
+    music.QUEUE.append({"title": "x"})
+    assert pipeline._maybe_music("อีกอันนึง"), "a full queue is not a live deck"
+    music.QUEUE[:] = []
 
     # --- she must know when the deck is EMPTY, but only when asked -----------
     # _doing() stays silent on an ordinary quiet turn, on purpose. The gap was
@@ -235,8 +249,12 @@ async def main():
     on = pipeline._doing(asked_deck=True)
     assert "NOTHING is playing" not in on and "Bad Apple" in on, on
     music.NOW["title"] = None
-    for q, want in [("มึงเล่นเพลงไรอยู่เนี่ย", True), ("what song is this", True),
-                    ("เปิดเพลงอะไรก็ได้", False), ("play some lofi", False)]:
+    for q, want in [
+        ("มึงเล่นเพลงไรอยู่เนี่ย", True),
+        ("what song is this", True),
+        ("เปิดเพลงอะไรก็ได้", False),
+        ("play some lofi", False),
+    ]:
         assert pipeline._asked_deck(q) is want, q
 
     # model output arrives padded; only the terms may reach the search

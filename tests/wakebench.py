@@ -6,6 +6,7 @@ because Whisper drops it constantly.
 
     py -X utf8 tests\\wakebench.py
 """
+
 import sys
 from pathlib import Path
 
@@ -62,8 +63,10 @@ for text, want, expect in CASES:
     ok = woke == want and (not expect or not woke or got == expect)
     if not ok:
         wrong.append((text, got, want, expect))
-    print(f"| `{text}` | {'yes' if woke else 'no'} | {'yes' if want else 'no'} "
-          f"| {got if woke else '—'} |{'' if ok else '  **WRONG**'}")
+    print(
+        f"| `{text}` | {'yes' if woke else 'no'} | {'yes' if want else 'no'} "
+        f"| {got if woke else '—'} |{'' if ok else '  **WRONG**'}"
+    )
 
 if wrong:
     print("\nfailures:")

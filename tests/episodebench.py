@@ -5,6 +5,7 @@ useless, and injected into every prompt. Most exchanges should store NOTHING.
 
     py -X utf8 tests\\episodebench.py
 """
+
 import sys
 from pathlib import Path
 
@@ -18,8 +19,11 @@ CASES = [
     ("hi", "yo.", False),
     ("i'm Tycoon btw, nice to meet you", "cool. how do you know Krich?", False),
     ("where can i buy น้ำพริกกะปิ in bangkok?", "try any fresh market.", False),
-    ("i'm flying to Japan in March for two weeks",
-     "two weeks? bring me back something stupid.", True),
+    (
+        "i'm flying to Japan in March for two weeks",
+        "two weeks? bring me back something stupid.",
+        True,
+    ),
     ("i quit my job today", "damn. on purpose, or were you pushed?", True),
 ]
 
@@ -36,8 +40,10 @@ def main():
         ok = got == want
         kept += got and not want
         missed += want and not got
-        print(f"| {text[:44]} | {eps[0][:52] if eps else '—'} "
-              f"| {'yes' if want else 'no'} |{'' if ok else '  **WRONG**'}")
+        print(
+            f"| {text[:44]} | {eps[0][:52] if eps else '—'} "
+            f"| {'yes' if want else 'no'} |{'' if ok else '  **WRONG**'}"
+        )
     print(f"\nnoise stored: {kept} (want 0) · real events missed: {missed} (want 0)")
 
     # cap: one person cannot fill her head with diary entries

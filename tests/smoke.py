@@ -3,6 +3,7 @@
 Seeds a throwaway in-memory DB, then runs persona probes end to end.
 Usage: py -X utf8 tests\\smoke.py
 """
+
 import asyncio
 import sys
 from pathlib import Path

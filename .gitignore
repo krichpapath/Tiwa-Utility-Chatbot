@@ -3,3 +3,6 @@ client_secret*.json
 data/
 __pycache__/
 site/
+.venv/
+.ruff_cache/
+qa-results/

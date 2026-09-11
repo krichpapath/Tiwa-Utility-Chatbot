@@ -2,6 +2,7 @@
 
 Usage: py -X utf8 gcal_auth.py
 """
+
 from google_auth_oauthlib.flow import InstalledAppFlow
 
 from tiwa import gcal

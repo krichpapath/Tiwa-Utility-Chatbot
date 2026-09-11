@@ -4,6 +4,7 @@ Writes data/tts_en.wav and data/tts_th.wav so you can actually listen.
 
     py -X utf8 tests\\ttsbench.py
 """
+
 import asyncio
 import sys
 import time
@@ -36,14 +37,13 @@ async def main():
             w.setframerate(voice.SAMPLE_RATE)
             w.writeframes(pcm)
         used = voice.THAI_VOICE if voice.is_thai(text) else voice.EN_VOICE
-        print(f"| {lang} | {used} | {text[:38]}… | {seconds:.1f}s | {took:.1f}s "
-              f"| {len(pcm):,} |")
+        print(f"| {lang} | {used} | {text[:38]}… | {seconds:.1f}s | {took:.1f}s | {len(pcm):,} |")
         assert seconds > 1.0, "suspiciously short audio"
         assert len(pcm) % 4 == 0, "not 16-bit stereo frames"
 
     # the language switch must be automatic, not a flag anyone has to remember
     assert voice.is_thai("ทิวาเอง") and not voice.is_thai("hey there")
-    print(f"\nwrote {OUT/'tts_en.wav'} and {OUT/'tts_th.wav'} — listen to check")
+    print(f"\nwrote {OUT / 'tts_en.wav'} and {OUT / 'tts_th.wav'} — listen to check")
     print("G8 ok — speech generated at discord's format, no ffmpeg involved")
 
 

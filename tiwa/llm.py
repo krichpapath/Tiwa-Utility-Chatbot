@@ -6,14 +6,20 @@ already runs in a thread. One code path beats two.
 Normalized return, so pipeline.py never learns which provider it talked to:
     {"content": str, "tool_calls": [{"id","name","args"}], "raw": <msg to append>}
 """
+
 import datetime
 import json
 import os
 import time
+import threading
 from pathlib import Path
 
 import httpx
 from ollama import Client
+
+
+_warned = set()  # shadowed keys already announced
+_from_file = set()  # keys .env actually got to set
 
 
 def load_env():
@@ -25,7 +31,26 @@ def load_env():
     for line in f.read_text(encoding="utf-8").splitlines():
         if "=" in line and not line.lstrip().startswith("#"):
             k, _, v = line.partition("=")
-            os.environ.setdefault(k.strip(), v.strip().strip('"').strip("'"))
+            k, v = k.strip(), v.strip().strip('"').strip("'")
+            # setdefault means the SYSTEM environment wins. That is the usual
+            # convention and it stays — but silently, it cost an evening: a
+            # refreshed OPENROUTER_API_KEY in .env did nothing for hours because a
+            # stale one sat in the Windows user environment, and every call 401'd
+            # with the file looking correct. The dashboard's Settings tab writes
+            # this file, so a shadowed key means the control panel is lying to you.
+            # `k not in _warned`: voice.py calls load_env() again on purpose (it
+            # must not depend on import order), so without this every shadowed
+            # key announces itself twice.
+            if k in os.environ and os.environ[k] != v and k not in _warned:
+                _warned.add(k)
+                print(
+                    f"[tiwa] {k} in .env is IGNORED — your system environment "
+                    f"already sets it, and that wins. Clear it there, or edit it "
+                    f"there instead of in .env."
+                )
+            if k not in os.environ:
+                _from_file.add(k)
+            os.environ.setdefault(k, v)
 
 
 load_env()
@@ -51,10 +76,31 @@ MODE = os.environ.get("TIWA_MODE", "local")
 if MODE not in _MODES:
     # warn, don't die: a stale value used to brick every entrypoint including
     # the dashboard you would use to fix it.
-    print(f"[tiwa] TIWA_MODE={MODE!r} unknown — using 'local'. "
-          f"Pick one of: {', '.join(_MODES)}")
+    print(f"[tiwa] TIWA_MODE={MODE!r} unknown — using 'local'. Pick one of: {', '.join(_MODES)}")
     MODE = "local"
 PROVIDER, PERSONA_PROVIDER = _MODES[MODE]
+
+
+def key_banner() -> str:
+    """Which OpenRouter key is actually in use, and where it came from.
+
+    Printed at import because the alternative is what happened on 2026-08-23: a
+    good key sat in .env while a stale one shadowed it from the Windows
+    environment, the bot came up looking healthy, and every single turn 401'd.
+    Four characters on screen at boot would have ended it in seconds.
+
+    Only the last four are shown — enough to tell two keys apart, not enough to
+    be a secret sitting in a console someone screenshots.
+    """
+    k = os.environ.get("OPENROUTER_API_KEY")
+    if not k:
+        return "[tiwa] OPENROUTER_API_KEY is not set — the API path will fail"
+    src = ".env" if "OPENROUTER_API_KEY" in _from_file else "your system environment"
+    return f"[tiwa] OpenRouter key ...{k[-4:]} (from {src})"
+
+
+if "openrouter" in (PROVIDER, PERSONA_PROVIDER):
+    print(key_banner())
 
 TOOL_MODEL = os.environ.get("TIWA_TOOL_MODEL", "deepseek/deepseek-v4-flash")
 EXTRACT_MODEL = os.environ.get("TIWA_EXTRACT_MODEL", "deepseek/deepseek-v4-flash")
@@ -66,24 +112,60 @@ OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 # runaway insurance, not budgeting: a looping bug should not bill all night.
 # 2M tokens/day is ~$0.30 at V4 Flash rates and far beyond normal chat.
 DAILY_TOKENS = int(os.environ.get("TIWA_DAILY_TOKENS", "2000000"))
-SPEND_FILE = Path(__file__).parents[1] / "data" / "spend.json"
+SPEND_FILE = (
+    Path(os.environ.get("TIWA_DATA_DIR") or Path(__file__).parents[1] / "data") / "spend.json"
+)
+SPEND_FILE = Path(os.environ.get("TIWA_SPEND_FILE") or SPEND_FILE)
+_spend_lock = threading.Lock()
 
 _ollama = Client()
 
 
 def spend(add: int = 0) -> int:
     """Tokens used today. Resets on date change. Returns the running total."""
+    with _spend_lock:
+        SPEND_FILE.parent.mkdir(parents=True, exist_ok=True)
+        # The bot and local panel are separate processes; a thread lock alone loses usage.
+        with SPEND_FILE.with_suffix(".lock").open("a+b") as lock:
+            lock.seek(0, 2)
+            if not lock.tell():
+                lock.write(b"0")
+                lock.flush()
+            lock.seek(0)
+            if os.name == "nt":
+                import msvcrt
+
+                msvcrt.locking(lock.fileno(), msvcrt.LK_LOCK, 1)
+            else:
+                import fcntl
+
+                fcntl.flock(lock, fcntl.LOCK_EX)
+            try:
+                return _spend(add)
+            finally:
+                lock.seek(0)
+                if os.name == "nt":
+                    msvcrt.locking(lock.fileno(), msvcrt.LK_UNLCK, 1)
+                else:
+                    fcntl.flock(lock, fcntl.LOCK_UN)
+
+
+def _spend(add: int = 0) -> int:
     today = datetime.date.today().isoformat()
     try:
         d = json.loads(SPEND_FILE.read_text())
-    except Exception:
+    except FileNotFoundError:
         d = {}
+    except (ValueError, OSError) as error:
+        raise RuntimeError("cannot read daily usage ledger; repair it before paid calls") from error
     if d.get("date") != today:
         d = {"date": today, "tokens": 0}
     if add:
         d["tokens"] += add
-        SPEND_FILE.parent.mkdir(exist_ok=True)
-        SPEND_FILE.write_text(json.dumps(d))
+        SPEND_FILE.parent.mkdir(parents=True, exist_ok=True)
+        temporary = SPEND_FILE.with_suffix(".tmp")
+        temporary.write_text(json.dumps(d))
+        temporary.replace(SPEND_FILE)
     return d["tokens"]
 
 
@@ -145,13 +227,32 @@ def _openrouter_chat(model, messages, tools, fmt, options, think):
         json=body,
         timeout=120,
     )
-    r.raise_for_status()
+    if r.is_error:
+        # raise_for_status() reports "401 Unauthorized" and discards the body,
+        # where the provider says WHICH 401 this is. "User not found." (revoked or
+        # wrong key) reads nothing like "Insufficient credits" or a rate limit, and
+        # the difference is the whole diagnosis. Measured cost of not having it:
+        # an evening spent on a key that was fine.
+        why = ""
+        try:
+            why = (r.json().get("error") or {}).get("message", "")
+        except Exception:
+            why = r.text[:200]
+        raise httpx.HTTPStatusError(
+            f"{r.status_code} from OpenRouter: {why or r.reason_phrase}",
+            request=r.request,
+            response=r,
+        )
     j = r.json()
     spend((j.get("usage") or {}).get("total_tokens", 0))
     msg = j["choices"][0]["message"]
     calls = [
         # OpenAI-style args are a JSON *string*; _arg_name expects dict-or-str
-        {"id": tc["id"], "name": tc["function"]["name"], "args": _loads(tc["function"]["arguments"])}
+        {
+            "id": tc["id"],
+            "name": tc["function"]["name"],
+            "args": _loads(tc["function"]["arguments"]),
+        }
         for tc in msg.get("tool_calls") or []
     ]
     return {"content": msg.get("content") or "", "tool_calls": calls, "raw": msg}
@@ -167,8 +268,7 @@ def _loads(s):
 LOG_PROMPTS = os.environ.get("TIWA_LOG_PROMPTS", "1") != "0"
 
 
-def chat(model=None, messages=None, tools=None, fmt=None, options=None, think=False,
-         provider=None):
+def chat(model=None, messages=None, tools=None, fmt=None, options=None, think=False, provider=None):
     """One call. `provider` overrides the mode default."""
     use_api = (provider or PROVIDER) == "openrouter"
     if use_api and DAILY_TOKENS and spend() >= DAILY_TOKENS:
