@@ -1,3 +1,0 @@
-[tiwa] TIWA_LOG_PROMPTS in .env is IGNORED — your system environment already sets it, and that wins. Clear it there, or edit it there instead of in .env.
-[tiwa] OpenRouter key ...7b80 (from .env)
-gate ok — calendar_write queues text and nothing else

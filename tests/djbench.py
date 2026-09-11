@@ -5,6 +5,7 @@ real reconnect path against YouTube.
 
     py -X utf8 tests\\djbench.py
 """
+
 import asyncio
 import sys
 import types
@@ -64,8 +65,7 @@ async def main():
 
     def fake_find(query):
         music.NOW["pending_title"] = f"{query.title()} (video)"
-        return [{"title": f"{query.title()} (video)", "url": f"http://x/{query}",
-                 "query": query}]
+        return [{"title": f"{query.title()} (video)", "url": f"http://x/{query}", "query": query}]
 
     music.find_many = fake_find
     music.source_for = lambda hit: object()
@@ -183,7 +183,6 @@ async def main():
         ("ขอ ATLAS-The Score", None, True, "thai verb, foreign title"),
         ("เพลงไม่ออกใส่ queue ด้วย", None, True, "verb mid-sentence"),
         ("เปิดเพลงนี้ให้หน่อยได้ไหม", None, True, "politely, still an ask"),
-
         # --- THE 25 THE OLD PHRASE LIST SILENTLY MISSED, from her own log.
         # Every one of these reached no tool and no retry. `skip` alone appeared
         # four times and never once fired.
@@ -200,7 +199,6 @@ async def main():
         ("มันจบแล้ว เล่นอีกรอบ", "ATLAS", True, "was missed: deck is live"),
         ("เอาอันที่เป็นของ enimen แทน", "ATLAS", True, "was missed: deck is live"),
         ("อีกอันนึง", "ATLAS", True, "was missed: deck is live"),
-
         # greedy on purpose — DJ answers `none` to every one of these
         ("my dad plays Warframe", None, True, "veto: DJ says none"),
         ("he plays guitar", None, True, "veto: DJ says none"),
@@ -208,18 +206,20 @@ async def main():
         ("ขอบคุณมาก", None, True, "veto: DJ says none"),
         ("เปิดประตูให้หน่อย", None, True, "veto: DJ says none"),
         ("ขอ ยืมตังหน่อย", None, True, "veto: DJ says none — the live 2026-08-24 turn"),
-
         # nothing music-shaped, and no deck: not even started
         ("มึงว่าไง", None, False, "no hint word, empty deck"),
         ("กินข้าวยัง", None, False, "no hint word, empty deck"),
-
         # ...and the one thing that must stay precise, because it PREVENTS a
         # track starting over her answer. Same rows as before the loosening.
         ("เพลงนี้ชื่ออะไร", "Bad Apple (video)", False, "deck question"),
         ("ตอนนี้้เปิดเพลงอะไรอยู่", "BIBBIDIBA", False, "deck question"),
         ("what song is this", "BIBBIDIBA", False, "deck question"),
-        ("เพลงนี้ชื่ออะไร https://www.youtube.com/watch?v=abc", "BIBBIDIBA", False,
-         "deck question with a link"),
+        (
+            "เพลงนี้ชื่ออะไร https://www.youtube.com/watch?v=abc",
+            "BIBBIDIBA",
+            False,
+            "deck question with a link",
+        ),
     ]
     for ask, deck, want, why in cases:
         tools.PENDING_MUSIC, tools.DJ[:] = None, []
@@ -249,8 +249,12 @@ async def main():
     on = pipeline._doing(asked_deck=True)
     assert "NOTHING is playing" not in on and "Bad Apple" in on, on
     music.NOW["title"] = None
-    for q, want in [("มึงเล่นเพลงไรอยู่เนี่ย", True), ("what song is this", True),
-                    ("เปิดเพลงอะไรก็ได้", False), ("play some lofi", False)]:
+    for q, want in [
+        ("มึงเล่นเพลงไรอยู่เนี่ย", True),
+        ("what song is this", True),
+        ("เปิดเพลงอะไรก็ได้", False),
+        ("play some lofi", False),
+    ]:
         assert pipeline._asked_deck(q) is want, q
 
     # model output arrives padded; only the terms may reach the search

@@ -6,6 +6,7 @@ log containing one row of every pass that exists and checks exactly one survives
 
     py -X utf8 tests\\recordbench.py
 """
+
 import json
 import sys
 import time
@@ -26,42 +27,70 @@ def log(messages, response):
     db.execute(
         "INSERT INTO llm_log(ts, provider, model, ms, tokens, request, response) "
         "VALUES(?,?,?,?,?,?,?)",
-        (time.time(), "openrouter", "x", 1, 1, flatten(messages), response))
+        (time.time(), "openrouter", "x", 1, 1, flatten(messages), response),
+    )
     db.commit()
 
 
-HER = [{"role": "system", "content": pipeline.PERSONA},
-       {"role": "system", "content": "[inner-state — background, do not recite]\nrules"},
-       {"role": "user", "content": "Krich: hey"}]
+HER = [
+    {"role": "system", "content": pipeline.PERSONA},
+    {"role": "system", "content": "[inner-state — background, do not recite]\nrules"},
+    {"role": "user", "content": "Krich: hey"},
+]
 
 
 def every_pass_goes_in_one_comes_out():
-    log(HER, "bored out of my skull")                                      # keep
+    log(HER, "bored out of my skull")  # keep
     # The tool pass is gone from this branch, but its rows are not: the live
     # database holds hundreds of them from before the swap, and every one is a
     # brief written TO her, not BY her. Frozen as a literal so the filter is
     # still tested against what is actually on disk.
-    log([{"role": "system",
-          "content": "You are Tiwa's inner thoughts, run before she replies. "
-                     "You are NOT the reply."},
-         {"role": "user", "content": "Krich: hey"}], "- you remember Krich")
-    log([{"role": "system", "content": minis._SYSTEM.format(minis="- dj: x")},
-         {"role": "user", "content": "Krich: play something"}], '{"dispatch":[]}')
-    log([{"role": "system", "content": minis._DJ_SYSTEM},
-         {"role": "user", "content": "lofi"}], '{"action":"play"}')
-    log([{"role": "system", "content": minis._CAL_SYSTEM},
-         {"role": "user", "content": "tuesday"}], '{"action":"none"}')
-    log([{"role": "system", "content": minis._SEARCH_SYSTEM},
-         {"role": "user", "content": "who won"}], "ผลบอลเมื่อคืน")
-    log([{"role": "system", "content": pipeline._IDLE_SYSTEM},
-         {"role": "user", "content": "time: 3am"}], "NOTHING")
+    log(
+        [
+            {
+                "role": "system",
+                "content": "You are Tiwa's inner thoughts, run before she replies. "
+                "You are NOT the reply.",
+            },
+            {"role": "user", "content": "Krich: hey"},
+        ],
+        "- you remember Krich",
+    )
+    log(
+        [
+            {"role": "system", "content": minis._SYSTEM.format(minis="- dj: x")},
+            {"role": "user", "content": "Krich: play something"},
+        ],
+        '{"dispatch":[]}',
+    )
+    log(
+        [{"role": "system", "content": minis._DJ_SYSTEM}, {"role": "user", "content": "lofi"}],
+        '{"action":"play"}',
+    )
+    log(
+        [{"role": "system", "content": minis._CAL_SYSTEM}, {"role": "user", "content": "tuesday"}],
+        '{"action":"none"}',
+    )
+    log(
+        [
+            {"role": "system", "content": minis._SEARCH_SYSTEM},
+            {"role": "user", "content": "who won"},
+        ],
+        "ผลบอลเมื่อคืน",
+    )
+    log(
+        [
+            {"role": "system", "content": pipeline._IDLE_SYSTEM},
+            {"role": "user", "content": "time: 3am"},
+        ],
+        "NOTHING",
+    )
 
     out = record.rows(db)
     print(f"{'logged rows':28} | {db.execute('select count(*) from llm_log').fetchone()[0]}")
     print(f"{'exported':28} | {len(out)}")
     assert len(out) == 1, f"a non-persona pass got into the training set: {len(out)}"
-    assert out[0]["messages"][-1] == {"role": "assistant",
-                                      "content": "bored out of my skull"}
+    assert out[0]["messages"][-1] == {"role": "assistant", "content": "bored out of my skull"}
     print("filter ok   — 7 passes in, 1 out, and it is hers")
 
 
@@ -69,20 +98,30 @@ def a_follow_up_is_not_a_turn():
     """_voice() speaks through say(), so it IS a persona row by the rule above.
     But its user turn is the placeholder '(earlier message)' — training on it
     teaches her to answer a message that is not there."""
-    log([{"role": "system", "content": pipeline.PERSONA},
-         {"role": "system", "content": "[inner-state]\nYou just this second found "
-                                       "out what you went to look up.\nsearch: x"},
-         {"role": "user", "content": "Krich: (earlier message)"}], "oh — it's 3-1")
+    log(
+        [
+            {"role": "system", "content": pipeline.PERSONA},
+            {
+                "role": "system",
+                "content": "[inner-state]\nYou just this second found "
+                "out what you went to look up.\nsearch: x",
+            },
+            {"role": "user", "content": "Krich: (earlier message)"},
+        ],
+        "oh — it's 3-1",
+    )
     assert len(record.rows(db)) == 1, "the late follow-up got in"
     print("followup ok — her late line is real speech but not a real turn")
 
 
 def empty_and_unparsable_are_dropped():
-    log(HER, "")                       # she said nothing
-    log(HER, "   \n ")                 # ...and whitespace is nothing
-    db.execute("INSERT INTO llm_log(ts, provider, model, ms, tokens, request, "
-               "response) VALUES(?,?,?,?,?,?,?)",
-               (time.time(), "x", "x", 1, 1, "not flattened at all", "hi"))
+    log(HER, "")  # she said nothing
+    log(HER, "   \n ")  # ...and whitespace is nothing
+    db.execute(
+        "INSERT INTO llm_log(ts, provider, model, ms, tokens, request, "
+        "response) VALUES(?,?,?,?,?,?,?)",
+        (time.time(), "x", "x", 1, 1, "not flattened at all", "hi"),
+    )
     db.commit()
     assert len(record.rows(db)) == 1, "an empty or unparsable row got in"
     print("drop ok     — empty replies and unparsable rows never reach the set")

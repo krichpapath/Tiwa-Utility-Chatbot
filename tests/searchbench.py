@@ -7,6 +7,7 @@ index, which is the part you have to read and judge yourself.
     py -X utf8 tests\\searchbench.py
     py -X utf8 tests\\searchbench.py --live
 """
+
 import asyncio
 import sys
 from pathlib import Path
@@ -19,10 +20,12 @@ LIVE = "--live" in sys.argv
 
 def fake_ddgs(pages):
     """Stand in for ddgs.DDGS so the mechanics run with no network."""
+
     class Fake:
         def text(self, query, region="us-en", max_results=8):
             calls.append((query, region))
-            return pages[: max_results]
+            return pages[:max_results]
+
     return Fake
 
 
@@ -32,8 +35,10 @@ calls = []
 def offline():
     import ddgs
 
-    pages = [{"title": f"Result {i}", "href": f"https://site{i}.com/a",
-              "body": f"body {i}"} for i in range(8)]
+    pages = [
+        {"title": f"Result {i}", "href": f"https://site{i}.com/a", "body": f"body {i}"}
+        for i in range(8)
+    ]
     real_ddgs, ddgs.DDGS = ddgs.DDGS, fake_ddgs(pages)
     db = memory.connect(":memory:")
 
@@ -94,14 +99,20 @@ async def live():
         found = [await asyncio.to_thread(minis.run, db, "search", t) for _, t in jobs]
         queries = [f["query"] for f in found if f.get("query")]
         doms = sorted({u.split("/")[2] for u in tools.SEEN_URLS})[:3]
-        print(f"| {ask} | {'yes' if jobs else '**NO**'} | "
-              f"{' / '.join(queries) or '—'} | {', '.join(doms) or '—'} |")
-    print("\nJudge two things: did dispatch route it to search at all, and is the "
-          "query keywords rather than the sentence they typed.")
+        print(
+            f"| {ask} | {'yes' if jobs else '**NO**'} | "
+            f"{' / '.join(queries) or '—'} | {', '.join(doms) or '—'} |"
+        )
+    print(
+        "\nJudge two things: did dispatch route it to search at all, and is the "
+        "query keywords rather than the sentence they typed."
+    )
 
 
 offline()
 if LIVE:
     asyncio.run(live())
-print("\nsearch ok — dedupe, region and formatting behave"
-      + ("" if LIVE else " (offline only; --live judges the keywords)"))
+print(
+    "\nsearch ok — dedupe, region and formatting behave"
+    + ("" if LIVE else " (offline only; --live judges the keywords)")
+)

@@ -1,9 +1,0 @@
-Traceback (most recent call last):
-  File "C:\Work\Tiwa\tests\eyebench.py", line 17, in <module>
-    from tiwa import eyes, llm, memory, pipeline  # noqa: E402
-    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "C:\Work\Tiwa\tiwa\eyes.py", line 28, in <module>
-    from . import llm, memory
-  File "C:\Work\Tiwa\tiwa\llm.py", line 15, in <module>
-    import httpx
-ModuleNotFoundError: No module named 'httpx'

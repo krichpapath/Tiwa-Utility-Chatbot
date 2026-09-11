@@ -1,9 +1,0 @@
-Traceback (most recent call last):
-  File "C:\Work\Tiwa\tests\calbench.py", line 22, in <module>
-    from tiwa import memory, minis, pipeline, tools  # noqa: E402
-    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "C:\Work\Tiwa\tiwa\minis.py", line 19, in <module>
-    from . import llm, memory
-  File "C:\Work\Tiwa\tiwa\llm.py", line 15, in <module>
-    import httpx
-ModuleNotFoundError: No module named 'httpx'

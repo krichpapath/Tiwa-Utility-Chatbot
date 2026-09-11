@@ -7,6 +7,7 @@ message she would read out loud.
 
     py -X utf8 tests\\searchminibench.py
 """
+
 import datetime
 import json
 import sys
@@ -24,8 +25,16 @@ result = {"out": "Some Match 3-1 [thairath.co.th]: they won"}
 def fake_chat(**kw):
     if kw.get("fmt") == minis._SEARCH_REVIEW_FORMAT:
         failed = result["out"].startswith(("search failed", "every result"))
-        return {"content": json.dumps({"enough": not failed, "answer": result["out"] if not failed else "",
-                                       "sources": [1] if not failed else [], "query": ""})}
+        return {
+            "content": json.dumps(
+                {
+                    "enough": not failed,
+                    "answer": result["out"] if not failed else "",
+                    "sources": [1] if not failed else [],
+                    "query": "",
+                }
+            )
+        }
     asked.update(kw)
     return {"content": keywords["out"], "tool_calls": [], "raw": {}}
 
@@ -60,12 +69,15 @@ def keywords_not_sentences():
     cases = [
         ("ผลบอลเมื่อคืน", "ผลบอลเมื่อคืน", "plain answer"),
         ("'iPhone review'", "iPhone review", "quotes stripped"),
-        ("<think>hmm</think>\nJujutsu Kaisen new season\nthat should do it",
-         "Jujutsu Kaisen new season", "first real line, <think> gone"),
+        (
+            "<think>hmm</think>\nJujutsu Kaisen new season\nthat should do it",
+            "Jujutsu Kaisen new season",
+            "first real line, <think> gone",
+        ),
         ("x" * 200, "x" * 80, "capped at 80 chars"),
     ]
     print(f"\n{'model answered':46} | query sent to the index")
-    print(f"{'-'*46}-+-{'-'*30}")
+    print(f"{'-' * 46}-+-{'-' * 30}")
     for said, want, why in cases:
         keywords["out"] = said
         out = minis.run(db, "search", "มึงรู้ไหมว่าใครชนะบอลเมื่อคืน")
@@ -98,8 +110,10 @@ def empty_model_falls_back():
 def a_failure_is_not_an_answer():
     """web_search never raises, so a flake arrives as text. Text is not an answer."""
     keywords["out"] = "ผลบอลเมื่อคืน"
-    for failure in ("search failed: ConnectError",
-                    "every result was one you already saw this turn"):
+    for failure in (
+        "search failed: ConnectError",
+        "every result was one you already saw this turn",
+    ):
         result["out"] = failure
         out = minis.run(db, "search", "who won")
         assert "Could not establish" in out["found"], out
@@ -113,10 +127,17 @@ def a_failure_is_not_an_answer():
 def read_only():
     """The coercion guarantee: no mini may reach a write path."""
     src = (Path(__file__).parents[1] / "tiwa" / "minis.py").read_text(encoding="utf-8")
-    for writer in ("memory.remember(", "memory.reflect(", "store_extraction",
-                   "memory.wipe(", "delete_relation"):
-        assert writer not in src, f"a mini can reach {writer} — offline reflection"\
-                                  " is meant to be the only thing that changes a belief"
+    for writer in (
+        "memory.remember(",
+        "memory.reflect(",
+        "store_extraction",
+        "memory.wipe(",
+        "delete_relation",
+    ):
+        assert writer not in src, (
+            f"a mini can reach {writer} — offline reflection"
+            " is meant to be the only thing that changes a belief"
+        )
     print("readonly ok — no mini in the registry can reach a memory write")
 
 

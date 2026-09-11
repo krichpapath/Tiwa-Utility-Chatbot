@@ -12,8 +12,8 @@ around it — the two ways a schema-constrained pass fails silently in this repo
 
     py -X utf8 tests\\minibench.py
 """
+
 import asyncio
-import json
 import sys
 from pathlib import Path
 
@@ -34,8 +34,9 @@ llm.chat = fake_chat
 minis.MINIS.clear()  # fixtures only — the real dj has its own bench and its own model
 
 
-@minis.mini("plays and queues music. give it the song, mood or 'their favourite'.",
-            ("playing", "artist"))
+@minis.mini(
+    "plays and queues music. give it the song, mood or 'their favourite'.", ("playing", "artist")
+)
 def fakedj(db, task):
     return {"playing": task, "artist": "unknown"}
 
@@ -61,8 +62,10 @@ def strict(node, where="root"):
 def schema():
     s = minis._schema()
     strict(s)
-    assert s["properties"]["dispatch"]["items"]["properties"]["mini"]["enum"] == \
-        ["fakecal", "fakedj"], "enum must be the live registry, sorted"
+    assert s["properties"]["dispatch"]["items"]["properties"]["mini"]["enum"] == [
+        "fakecal",
+        "fakedj",
+    ], "enum must be the live registry, sorted"
     print("schema ok   — strict-mode legal at every depth, mini names are an enum")
 
 
@@ -81,15 +84,26 @@ def prompt_says_json():
 def routing():
     cases = [
         ("nothing", '{"dispatch":[],"ask":null}', [], ""),
-        ("one job", '{"dispatch":[{"mini":"fakedj","task":"their favourite song"}],"ask":null}',
-         [("fakedj", "their favourite song")], ""),
-        ("two jobs", '{"dispatch":[{"mini":"fakedj","task":"lofi"},'
-                     '{"mini":"fakecal","task":"cancel friday"}],"ask":null}',
-         [("fakedj", "lofi"), ("fakecal", "cancel friday")], ""),
-        ("ambiguous", '{"dispatch":[],"ask":"which friday did they mean"}',
-         [], "which friday did they mean"),
-        ("invented mini", '{"dispatch":[{"mini":"lights","task":"off"}],"ask":null}',
-         [], ""),
+        (
+            "one job",
+            '{"dispatch":[{"mini":"fakedj","task":"their favourite song"}],"ask":null}',
+            [("fakedj", "their favourite song")],
+            "",
+        ),
+        (
+            "two jobs",
+            '{"dispatch":[{"mini":"fakedj","task":"lofi"},'
+            '{"mini":"fakecal","task":"cancel friday"}],"ask":null}',
+            [("fakedj", "lofi"), ("fakecal", "cancel friday")],
+            "",
+        ),
+        (
+            "ambiguous",
+            '{"dispatch":[],"ask":"which friday did they mean"}',
+            [],
+            "which friday did they mean",
+        ),
+        ("invented mini", '{"dispatch":[{"mini":"lights","task":"off"}],"ask":null}', [], ""),
         ("junk", "sorry, I can't help with that", [], ""),
         # valid JSON, wrong shape. OpenRouter's strict schema cannot produce
         # these; the cost ceiling falling back to local ollama can, and .get()
@@ -100,7 +114,7 @@ def routing():
         ("empty content", "", [], ""),
     ]
     print(f"\n{'case':14} | {'dispatch':40} | ask")
-    print(f"{'-'*14}-+-{'-'*40}-+-{'-'*30}")
+    print(f"{'-' * 14}-+-{'-' * 40}-+-{'-' * 30}")
     for name, reply, want_jobs, want_ask in cases:
         sent["_reply"] = reply
         got = asyncio.run(minis.dispatch(db, "Krich", "..."))
@@ -112,6 +126,7 @@ def routing():
 
 def facts_only():
     """The end-to-end path a dispatched job takes: run() drops what wasn't declared."""
+
     @minis.mini("leaks", ("title",))
     def leaky(db, task):
         return {"title": "ATLAS", "say": "tell them you're putting it on 😎"}

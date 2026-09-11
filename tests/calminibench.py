@@ -7,10 +7,10 @@ Tuesday did they mean, does it clash, is it worth mentioning.
 
     py -X utf8 tests\\calminibench.py
 """
+
 import asyncio
 import json
 import sys
-import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parents[1]))
@@ -56,8 +56,9 @@ def a_write_only_queues():
     """The ✅ gate is the write. This mini decides WHAT to propose, never that it happens."""
     tools.new_turn()
     answer.clear()
-    answer.update(action="write", request="add dentist Tuesday 15:00", ask="",
-                  clash="", mention=False)
+    answer.update(
+        action="write", request="add dentist Tuesday 15:00", ask="", clash="", mention=False
+    )
     out = minis.run(db, "calendar", "put dentist on tuesday")
     assert tools.PENDING_CALENDAR == ["add dentist Tuesday 15:00"], tools.PENDING_CALENDAR
     assert out["queued"] == "add dentist Tuesday 15:00"
@@ -72,12 +73,19 @@ def ambiguity_asks_and_changes_nothing():
     """A guess that lands in someone's calendar is worse than a question."""
     tools.new_turn()
     answer.clear()
-    answer.update(action="write", request="add lunch next tuesday",
-                  ask="this tuesday or the one after?", clash="", mention=False)
+    answer.update(
+        action="write",
+        request="add lunch next tuesday",
+        ask="this tuesday or the one after?",
+        clash="",
+        mention=False,
+    )
     out = minis.run(db, "calendar", "lunch next tuesday")
     assert out["action"] == "none", "it asked AND acted in the same breath"
     assert out["ask"] == "this tuesday or the one after?"
-    assert tools.PENDING_CALENDAR == [], f"an ambiguous date queued anyway: {tools.PENDING_CALENDAR}"
+    assert tools.PENDING_CALENDAR == [], (
+        f"an ambiguous date queued anyway: {tools.PENDING_CALENDAR}"
+    )
     print("ask ok      — ambiguous date asks and queues nothing")
 
 
@@ -85,8 +93,13 @@ def a_clash_is_pointed_out_not_blocked():
     """Krich decides. She points."""
     tools.new_turn()
     answer.clear()
-    answer.update(action="write", request="add gym Tuesday 15:00", ask="",
-                  clash="dentist is already at 15:00 Tuesday", mention=False)
+    answer.update(
+        action="write",
+        request="add gym Tuesday 15:00",
+        ask="",
+        clash="dentist is already at 15:00 Tuesday",
+        mention=False,
+    )
     out = minis.run(db, "calendar", "gym tuesday 3pm")
     assert out["clash"].startswith("dentist")
     assert tools.PENDING_CALENDAR == ["add gym Tuesday 15:00"], "a clash blocked the write"
@@ -104,15 +117,18 @@ def a_dead_calendar_is_not_read_aloud():
     """
     from tiwa import gcal
 
-    was, gcal.upcoming = gcal.upcoming, lambda: (
-        "calendar unavailable: ('invalid_grant: Bad Request', {'error': 'x'})")
+    was, gcal.upcoming = (
+        gcal.upcoming,
+        lambda: "calendar unavailable: ('invalid_grant: Bad Request', {'error': 'x'})",
+    )
     try:
         tools.new_turn()
         out = minis.run(db, "calendar", "ลงปฏิทินให้หน่อย นัดหมอฟัน อาทิตย์หน้า 13.00")
         assert "invalid_grant" not in str(out), f"the raw error reached her: {out}"
         assert out["action"] == "none", out
-        assert tools.PENDING_CALENDAR == [], \
+        assert tools.PENDING_CALENDAR == [], (
             f"a ✅ was queued for a write that cannot happen: {tools.PENDING_CALENDAR}"
+        )
         assert "cannot reach the calendar" in out["events"], out
     finally:
         gcal.upcoming = was
@@ -149,15 +165,16 @@ def she_speaks_first():
         order.append("follow-up")
 
     answer.clear()
-    answer.update(action="none", request="", ask="which tuesday did you mean?",
-                  clash="", mention=False)
+    answer.update(
+        action="none", request="", ask="which tuesday did you mean?", clash="", mention=False
+    )
 
     async def go():
         was, pipeline.say = pipeline.say, slow_say
         try:
             import tiwa.minis as m
-            route = {"dispatch": [{"mini": "calendar", "task": "lunch tuesday"}],
-                     "ask": None}
+
+            route = {"dispatch": [{"mini": "calendar", "task": "lunch tuesday"}], "ask": None}
             real_dispatch = m.dispatch
 
             async def fake_dispatch(*a, **k):
@@ -165,8 +182,13 @@ def she_speaks_first():
 
             m.dispatch = fake_dispatch
             try:
-                await pipeline.respond(db, [{"role": "user", "content": "Krich: hi"}],
-                                   "Krich", "lunch tuesday", on_late=on_late)
+                await pipeline.respond(
+                    db,
+                    [{"role": "user", "content": "Krich: hi"}],
+                    "Krich",
+                    "lunch tuesday",
+                    on_late=on_late,
+                )
                 await asyncio.sleep(0.4)
             finally:
                 m.dispatch = real_dispatch
@@ -175,7 +197,9 @@ def she_speaks_first():
             pipeline._cancel_pending("Krich")
 
     asyncio.run(go())
-    assert order == ["reply"], f"calendar should be included before the reply, not sent twice: {order}"
+    assert order == ["reply"], (
+        f"calendar should be included before the reply, not sent twice: {order}"
+    )
     print("order ok    — the reply always lands before the follow-up")
 
 

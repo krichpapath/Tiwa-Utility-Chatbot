@@ -11,6 +11,7 @@ deterministic check and a failure is a real bug.
 
     py -X utf8 tests\\discordbench.py
 """
+
 import asyncio
 import sys
 import types
@@ -31,9 +32,9 @@ ME = types.SimpleNamespace(id=999, bot=True, display_name="Tiwa")
 bot.calendar.owner_id = "7"
 gcal.prepare_change = lambda text: text
 gcal.describe_change = lambda text: text
-bot.client = types.SimpleNamespace(user=ME, loop=None,
-                                   get_channel=lambda i: CHANNELS.get(i),
-                                   fetch_channel=None)
+bot.client = types.SimpleNamespace(
+    user=ME, loop=None, get_channel=lambda i: CHANNELS.get(i), fetch_channel=None
+)
 bot.player.client = bot.client
 CHANNELS = {}
 
@@ -47,8 +48,7 @@ class FakeChannel:
 
     async def send(self, text):
         self.sent.append(text)
-        return types.SimpleNamespace(id=len(self.sent) + 5000,
-                                     add_reaction=self._noop)
+        return types.SimpleNamespace(id=len(self.sent) + 5000, add_reaction=self._noop)
 
     async def _noop(self, *a):
         pass
@@ -83,8 +83,15 @@ extracted = []
 
 
 async def fake_respond(db, hist, author, text, images=(), on_late=None):
-    seen_calls.append({"author": author, "text": text, "images": list(images),
-                       "hist": len(hist), "on_late": on_late})
+    seen_calls.append(
+        {
+            "author": author,
+            "text": text,
+            "images": list(images),
+            "hist": len(hist),
+            "on_late": on_late,
+        }
+    )
     return REPLY
 
 
@@ -109,6 +116,7 @@ def reset(cid=1, guild=None):
 
 # ---------------------------------------------------------------- who is answered
 
+
 def who_gets_answered():
     """In a server she answers a MENTION and nothing else. Everything said in the
     channel is still written down — that is what makes "he" resolve three
@@ -127,17 +135,25 @@ def who_gets_answered():
     assert ch.sent == [REPLY], ch.sent
 
     # her own messages never come back round
-    asyncio.run(bot.on_message(types.SimpleNamespace(
-        content="x", author=types.SimpleNamespace(bot=True), attachments=[],
-        guild=guild, mentions=[], channel=ch)))
+    asyncio.run(
+        bot.on_message(
+            types.SimpleNamespace(
+                content="x",
+                author=types.SimpleNamespace(bot=True),
+                attachments=[],
+                guild=guild,
+                mentions=[],
+                channel=ch,
+            )
+        )
+    )
     assert len(seen_calls) == 1, "she answered a bot"
 
     # a DM has no guild, so no mention is needed
     dm = reset(cid=2, guild=None)
     asyncio.run(bot.on_message(msg("hello", dm, guild=None)))
     assert len(seen_calls) == 1, "a DM went unanswered"
-    print("who ok      — mention in a server, anything in a DM, bots never, "
-          "everything recorded")
+    print("who ok      — mention in a server, anything in a DM, bots never, everything recorded")
 
 
 def the_reply_reaches_the_channel():
@@ -175,25 +191,38 @@ def what_she_can_see():
     """Only real images cost a vision call. A caption-less picture still has to
     reach memory as something, or 'ดูสิ' three messages later resolves to nothing."""
     ch = reset()
-    asyncio.run(bot.on_message(msg("<@999> look", ch, mentions=[ME],
-                                   files=[("http://x/a.png", "image/png")])))
+    asyncio.run(
+        bot.on_message(
+            msg("<@999> look", ch, mentions=[ME], files=[("http://x/a.png", "image/png")])
+        )
+    )
     assert seen_calls[-1]["images"] == ["http://x/a.png"], seen_calls[-1]
 
     ch = reset()
-    asyncio.run(bot.on_message(msg("<@999> here", ch, mentions=[ME],
-                                   files=[("http://x/a.zip", "application/zip"),
-                                          ("http://x/b.txt", None)])))
+    asyncio.run(
+        bot.on_message(
+            msg(
+                "<@999> here",
+                ch,
+                mentions=[ME],
+                files=[("http://x/a.zip", "application/zip"), ("http://x/b.txt", None)],
+            )
+        )
+    )
     assert seen_calls[-1]["images"] == [], "a .zip cost a vision call"
 
     ch = reset()
-    asyncio.run(bot.on_message(msg("<@999>", ch, mentions=[ME],
-                                   files=[("http://x/c.png", "image/png")])))
-    assert extracted and extracted[-1][1] == "[image]", \
+    asyncio.run(
+        bot.on_message(msg("<@999>", ch, mentions=[ME], files=[("http://x/c.png", "image/png")]))
+    )
+    assert extracted and extracted[-1][1] == "[image]", (
         f"a caption-less image reached memory as {extracted[-1][1]!r}"
+    )
     print("eyes ok     — images pass, a .zip does not, a bare picture is '[image]'")
 
 
 # ---------------------------------------------------------------- the ✅ gate
+
 
 def the_calendar_gate():
     """calendar_write only ever queues a sentence. The reaction IS the write,
@@ -210,8 +239,9 @@ def the_calendar_gate():
     mid = next(iter(bot.calendar.pending))
 
     def react(emoji, uid=7, message_id=None):
-        return types.SimpleNamespace(message_id=message_id or mid, user_id=uid,
-                                     emoji=emoji, channel_id=ch.id)
+        return types.SimpleNamespace(
+            message_id=message_id or mid, user_id=uid, emoji=emoji, channel_id=ch.id
+        )
 
     asyncio.run(bot.on_raw_reaction_add(react("✅", uid=ME.id)))
     assert not applied, "her OWN reaction confirmed the write"
@@ -238,6 +268,7 @@ def the_calendar_gate():
 
 # ---------------------------------------------------------------- late follow-up
 
+
 def the_late_line():
     """A mini that finishes after she spoke sends a SECOND message, never an
     edit — and it has to land in history, or the next turn cannot see what she
@@ -246,8 +277,7 @@ def the_late_line():
     send = bot._later(ch)
     asyncio.run(send("turns out it was Arsenal"))
     assert ch.sent == ["turns out it was Arsenal"], ch.sent
-    assert bot.history[ch.id][-1] == {"role": "assistant",
-                                      "content": "turns out it was Arsenal"}
+    assert bot.history[ch.id][-1] == {"role": "assistant", "content": "turns out it was Arsenal"}
     asyncio.run(send("y" * 3000))
     assert len(ch.sent[-1]) == 2000, "a long follow-up was not truncated"
 
@@ -259,6 +289,7 @@ def the_late_line():
 
 
 # ---------------------------------------------------------------- voice + music
+
 
 def voice_commands_cost_nothing():
     """`join` and `leave` typed exactly are handled before the pipeline — no
@@ -299,6 +330,7 @@ def music_pulls_her_in():
     guild = types.SimpleNamespace(id=1, voice_client=None)
     ch = reset(guild=guild)
     author = object()
+
     async def ok_join(a):
         return "joined general"
 
@@ -317,6 +349,7 @@ def music_pulls_her_in():
 
     # she is in the call but the join fails -> the reason reaches the channel
     ch = reset(guild=types.SimpleNamespace(id=2, voice_client=None))
+
     async def bad_join(a):
         return "you're not in a voice channel"
 

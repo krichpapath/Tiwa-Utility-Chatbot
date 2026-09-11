@@ -1,8 +1,0 @@
-[tiwa] TIWA_LOG_PROMPTS in .env is IGNORED — your system environment already sets it, and that wins. Clear it there, or edit it there instead of in .env.
-[tiwa] OpenRouter key ...7b80 (from .env)
-[voice] undecryptable audio — opus rejected a packet: Exception: corrupted stream (x1)
-packets offered : 6
-packets written : 5 -> ['packet1', 'packet2', 'packet4', 'packet5', 'packet6']
-watchdog: silent with ears off, one line per real restart with them on
-
-router ok — bad packet skipped, listening continued, watchdog quiet

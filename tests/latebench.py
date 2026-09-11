@@ -10,6 +10,7 @@ beside it. So the delays here are the measured ones —
 
     py -X utf8 tests\\latebench.py
 """
+
 import asyncio
 import json
 import sys
@@ -32,8 +33,11 @@ def fake_chat(**kw):
         return {"content": json.dumps(route), "tool_calls": [], "raw": {}}
     if "You are the DJ" in system:
         time.sleep(MINI)
-        return {"content": json.dumps({"action": "play", "terms": "bad apple"}),
-                "tool_calls": [], "raw": {}}
+        return {
+            "content": json.dumps({"action": "play", "terms": "bad apple"}),
+            "tool_calls": [],
+            "raw": {},
+        }
     time.sleep(PERSONA)
     return {"content": "ok whatever", "tool_calls": [], "raw": {}}
 
@@ -58,8 +62,7 @@ async def turn_of(text, author="Krich", handler=True):
     """Returns (reply, seconds, PENDING_MUSIC) — flags read inside the task, the
     way bot.player.flush does."""
     t0 = time.perf_counter()
-    reply = await pipeline.respond(db, HIST, author, text,
-                               on_late=on_late if handler else None)
+    reply = await pipeline.respond(db, HIST, author, text, on_late=on_late if handler else None)
     return reply, time.perf_counter() - t0, tools.PENDING_MUSIC
 
 
@@ -70,18 +73,22 @@ def scenario(fn):
     which would kill every late task the moment she finished speaking. bot.py runs
     on one long-lived loop, so this is the shape production actually has.
     """
+
     def go():
         async def wrapper():
             try:
                 await fn()
             finally:
                 pipeline._cancel_pending("Krich")  # no task outlives its scenario
+
         asyncio.run(wrapper())
+
     return go
 
 
 async def settle(extra=0.2):
     await asyncio.sleep(SLOW + PERSONA + extra)
+
 
 @scenario
 async def music_does_not_wait_for_the_router():
@@ -98,8 +105,7 @@ async def music_does_not_wait_for_the_router():
     # queueing behind it: all three serially would be DISPATCH + MINI + PERSONA.
     ceiling = DISPATCH + MINI + PERSONA
     assert took < ceiling, f"the song waited for the router: {took:.2f}s"
-    print(f"music ok    — song queued in {took:.2f}s, not {ceiling:.2f}s; DJ "
-          f"overlapped the router")
+    print(f"music ok    — song queued in {took:.2f}s, not {ceiling:.2f}s; DJ overlapped the router")
 
 
 @scenario
@@ -117,8 +123,9 @@ async def search_never_blocks_her():
     assert late[0] == "ok whatever", late
     print(f"late ok     — it came back as a follow-up message: {late[0]!r}")
     # Rule 1: the raw facts must not reach the channel — she says it.
-    assert not any("the answer to" in line for line in late), \
+    assert not any("the answer to" in line for line in late), (
         f"a mini's facts reached the channel verbatim: {late}"
+    )
     print("voice ok    — the facts went through her, not around her")
 
 
@@ -144,13 +151,15 @@ async def speech_cancels_actions_do_not():
     """They spoke again. A stale search dies; a queued song still plays."""
     route.update(dispatch=[{"mini": "search", "task": "first question"}], ask=None)
     late.clear()
-    await turn_of("who won last night")            # leaves a search running
+    await turn_of("who won last night")  # leaves a search running
     route.update(dispatch=[], ask=None)
     music.NOW["title"] = None
     _, _, pending = await turn_of("เปิดเพลงอะไรก็ได้")  # moved on, and asked for a song
     await settle()
     assert not late, f"a stale search spoke after they changed the subject: {late}"
-    assert pending == {"keywords": "bad apple", "request": "เปิดเพลงอะไรก็ได้"}, "cancelling speech killed the song too"
+    assert pending == {"keywords": "bad apple", "request": "เปิดเพลงอะไรก็ได้"}, (
+        "cancelling speech killed the song too"
+    )
     rows = [t for _, k, t, _ in memory.read_log(db, 20) if k == "mini"]
     assert any("cancelled" in r for r in rows), rows[:3]
     print("cancel ok   — stale search dropped, the song they just asked for played")

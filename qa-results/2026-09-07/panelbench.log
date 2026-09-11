@@ -1,7 +1,0 @@
-Traceback (most recent call last):
-  File "C:\Work\Tiwa\tests\panelbench.py", line 22, in <module>
-    import dashboard  # noqa: E402  (after the patch, so it never opens data/tiwa.db)
-    ^^^^^^^^^^^^^^^^
-  File "C:\Work\Tiwa\dashboard.py", line 27, in <module>
-    import gradio as gr
-ModuleNotFoundError: No module named 'gradio'

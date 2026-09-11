@@ -18,6 +18,7 @@ things a music turn cannot:
 
 Costs real tokens: 2 turns + 2 judge calls per case.
 """
+
 import asyncio
 import os
 import sys
@@ -25,7 +26,6 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parents[1]))
 from tiwa import memory, minis, music, pipeline, tools  # noqa: E402
-from tests.personabench import ask  # noqa: E402  (its main is guarded)
 
 # Real turns from her log, plus the two the log has no example of because nobody
 # had tried them. None of these should reach a mini.
@@ -56,7 +56,7 @@ async def main():
 
     rows = []
     print(f"{'message':34} | mini | memory | why it is here")
-    print(f"{'-'*34}-+------+--------+{'-'*24}")
+    print(f"{'-' * 34}-+------+--------+{'-' * 24}")
     for who, text, why in CASES:
         hist = [{"role": "user", "content": f"{who}: {text}"}]
 
@@ -69,15 +69,25 @@ async def main():
         fired = ",".join(sorted({n for n, _ in jobs})) or "—"
         print(f"{text[:34]:34} | {fired:4} | {len(mem):5}c | {why}")
 
-        rows.append({"text": text, "reply": await one(db, list(hist), who, text),
-                     "fired": fired, "mem": len(mem)})
+        rows.append(
+            {
+                "text": text,
+                "reply": await one(db, list(hist), who, text),
+                "fired": fired,
+                "mem": len(mem),
+            }
+        )
 
     spurious = [r for r in rows if r["fired"] != "—"]
-    print(f"\nminis fired on {len(spurious)}/{len(rows)} turns that needed none"
-          + (f": {[r['text'][:22] for r in spurious]}" if spurious else ""))
+    print(
+        f"\nminis fired on {len(spurious)}/{len(rows)} turns that needed none"
+        + (f": {[r['text'][:22] for r in spurious]}" if spurious else "")
+    )
     no_mem = [r for r in rows if r["mem"] == 0]
-    print(f"turns where no memory reached her: {len(no_mem)}/{len(rows)}"
-          + (f" {[r['text'][:22] for r in no_mem]}" if no_mem else ""))
+    print(
+        f"turns where no memory reached her: {len(no_mem)}/{len(rows)}"
+        + (f" {[r['text'][:22] for r in no_mem]}" if no_mem else "")
+    )
 
     # No pairwise tally here any more: there is one turn shape per branch, so
     # comparing arms is personabench's job across two latbench runs. What this

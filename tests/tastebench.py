@@ -18,6 +18,7 @@ tell a pattern from a playlist.
 
 The offline half is where the guards are. Read those first.
 """
+
 import asyncio
 import json
 import sys
@@ -37,9 +38,12 @@ def fake_chat(**kw):
 
 
 def dj_row(db, terms, action="play"):
-    memory.log(db, "mini", "dj('whatever') -> "
-               + repr({"action": action, "terms": terms,
-                       "playing": None, "queued": 0}))
+    memory.log(
+        db,
+        "mini",
+        "dj('whatever') -> "
+        + repr({"action": action, "terms": terms, "playing": None, "queued": 0}),
+    )
 
 
 def turn_row(db, who):
@@ -59,21 +63,33 @@ def seeded(pairs):
 
 # ---------------------------------------------------------------- the mining
 
+
 def mining():
     """The `mini` row carries the terms, the `turn` row after it carries the
     author. Pairing them is the whole mechanism, and it is the part that can be
     wrong silently."""
-    db = seeded([
-        ("Tycoon", "Mili"), ("Tycoon", "Mili"), ("Krich", "Bad Apple"),
-        ("Tycoon", "hero Mili"), ("Krich", None),          # a turn with no music
-    ])
+    db = seeded(
+        [
+            ("Tycoon", "Mili"),
+            ("Tycoon", "Mili"),
+            ("Krich", "Bad Apple"),
+            ("Tycoon", "hero Mili"),
+            ("Krich", None),  # a turn with no music
+        ]
+    )
     got = memory.unsettled_asks(db)
     assert got == {"Tycoon": ["Mili", "Mili", "hero Mili"], "Krich": ["Bad Apple"]}, got
 
     # a skip or a stop is an opinion about what is ON, never a request for
     # something — counting them would make "skip" itself look like a taste
-    db = seeded([("Tycoon", "x", "skip"), ("Tycoon", "y", "stop"),
-                 ("Tycoon", "", "none"), ("Tycoon", "Mili", "queue")])
+    db = seeded(
+        [
+            ("Tycoon", "x", "skip"),
+            ("Tycoon", "y", "stop"),
+            ("Tycoon", "", "none"),
+            ("Tycoon", "Mili", "queue"),
+        ]
+    )
     assert memory.unsettled_asks(db) == {"Tycoon": ["Mili"]}, memory.unsettled_asks(db)
 
     # a raw link is never a taste, same rule the extractor has for entities
@@ -83,8 +99,9 @@ def mining():
     # ...and nothing she asked for herself counts as somebody's taste
     db = seeded([(TIWA, "Mili"), ("Krich", "Bad Apple")])
     assert TIWA not in memory.unsettled_asks(db)
-    print("mine ok     — terms paired to the right author; skips, links and her "
-          "own asks all ignored")
+    print(
+        "mine ok     — terms paired to the right author; skips, links and her own asks all ignored"
+    )
 
 
 def the_watermark():
@@ -101,6 +118,7 @@ def the_watermark():
 
 
 # ---------------------------------------------------------------- the guards
+
 
 def below_the_bar_costs_nothing():
     """Two asks is a coincidence. It must not even reach a model."""
@@ -121,8 +139,12 @@ def she_cannot_be_repeated_into():
     answer.update(object="BLACKPINK", note="asked for it constantly")
     db = seeded([(TIWA, "BLACKPINK")] * 5)
     asyncio.run(pipeline._tastes(db))
-    facts = list(db.execute("SELECT s.name, rel, d.name FROM relations r "
-                            "JOIN entities s ON s.id=r.src JOIN entities d ON d.id=r.dst"))
+    facts = list(
+        db.execute(
+            "SELECT s.name, rel, d.name FROM relations r "
+            "JOIN entities s ON s.id=r.src JOIN entities d ON d.id=r.dst"
+        )
+    )
     assert not facts, f"repetition wrote a belief about her: {facts}"
     print("coercion ok — her own asks reach no model and write no fact about her")
 
@@ -131,9 +153,11 @@ def a_pattern_must_say_what_recurs():
     """The note IS the evidence here. A conclusion that cannot name what repeated
     did not find a pattern, it guessed one."""
     db = seeded([("Tycoon", "Mili")] * 4)
-    for bad in ({"object": "", "note": "they like stuff"},
-                {"object": "Mili", "note": ""},
-                {"object": "Tycoon", "note": "likes himself"}):
+    for bad in (
+        {"object": "", "note": "they like stuff"},
+        {"object": "Mili", "note": ""},
+        {"object": "Tycoon", "note": "likes himself"},
+    ):
         answer.clear()
         answer.update(bad)
         db2 = seeded([("Tycoon", "Mili")] * 4)
@@ -145,23 +169,29 @@ def a_pattern_must_say_what_recurs():
     answer.clear()
     answer.update(object="Mili", note="asked for them four times this week")
     asyncio.run(pipeline._tastes(db))
-    got = list(db.execute("SELECT s.name, rel, d.name, r.note FROM relations r "
-                          "JOIN entities s ON s.id=r.src JOIN entities d ON d.id=r.dst"))
-    assert got == [("Tycoon", "often requests", "Mili",
-                    "asked for them four times this week")], got
-    print("note ok     — empty object, empty note and self-reference all refused; "
-          "a named pattern lands with its evidence")
+    got = list(
+        db.execute(
+            "SELECT s.name, rel, d.name, r.note FROM relations r "
+            "JOIN entities s ON s.id=r.src JOIN entities d ON d.id=r.dst"
+        )
+    )
+    assert got == [("Tycoon", "often requests", "Mili", "asked for them four times this week")], got
+    print(
+        "note ok     — empty object, empty note and self-reference all refused; "
+        "a named pattern lands with its evidence"
+    )
 
 
 def a_failure_is_not_silent():
     """A dead provider must cost the pass, never the heartbeat around it."""
+
     def boom(**kw):
         raise RuntimeError("502 upstream")
 
     was, llm.chat = llm.chat, boom
     try:
         db = seeded([("Tycoon", "Mili")] * 4)
-        asyncio.run(pipeline._tastes(db))   # must not raise
+        asyncio.run(pipeline._tastes(db))  # must not raise
         rows = [t for (t,) in db.execute("SELECT text FROM log WHERE kind='taste'")]
         assert rows and "failed" in rows[-1], rows
     finally:
@@ -176,30 +206,31 @@ def live():
     importlib.reload(pipeline)
 
     CASES = [
-        ("a real pattern",
-         ["Mili", "hero Mili", "Mili limbus", "Bad Apple"], True),
-        ("spelling varies",
-         ["Charlie Kirk", "Charie Kirk", "We Are Charlie Kirk"], True),
-        ("one franchise, three tracks",
-         ["Spiderman theme", "Blade theme", "Iron Man theme"], True),
-        ("a scatter — the normal answer",
-         ["Bad Apple", "Rick Roll", "ลูกทุ่ง", "Fortnite theme"], False),
-        ("twice is not a pattern",
-         ["Mili", "Mili", "Bad Apple", "Rick Roll"], False),
+        ("a real pattern", ["Mili", "hero Mili", "Mili limbus", "Bad Apple"], True),
+        ("spelling varies", ["Charlie Kirk", "Charie Kirk", "We Are Charlie Kirk"], True),
+        ("one franchise, three tracks", ["Spiderman theme", "Blade theme", "Iron Man theme"], True),
+        (
+            "a scatter — the normal answer",
+            ["Bad Apple", "Rick Roll", "ลูกทุ่ง", "Fortnite theme"],
+            False,
+        ),
+        ("twice is not a pattern", ["Mili", "Mili", "Bad Apple", "Rick Roll"], False),
     ]
     print(f"\n{'asks':52} | wrote")
-    print(f"{'-'*52}-+------")
+    print(f"{'-' * 52}-+------")
     ok = 0
     for label, terms, want in CASES:
         db = seeded([("Tycoon", t) for t in terms])
         asyncio.run(pipeline._tastes(db))
-        got = list(db.execute("SELECT d.name, r.note FROM relations r "
-                              "JOIN entities d ON d.id=r.dst"))
+        got = list(
+            db.execute("SELECT d.name, r.note FROM relations r JOIN entities d ON d.id=r.dst")
+        )
         hit = bool(got) is want
         ok += hit
         shown = f"{got[0][0]} — {got[0][1]}"[:40] if got else "(nothing)"
-        print(f"{(label + ': ' + ', '.join(terms))[:52]:52} | {shown}"
-              f"{'' if hit else '   <-- WRONG'}")
+        print(
+            f"{(label + ': ' + ', '.join(terms))[:52]:52} | {shown}{'' if hit else '   <-- WRONG'}"
+        )
     print(f"\npattern: {ok}/{len(CASES)}")
     assert ok >= len(CASES) - 1, f"it cannot tell a pattern from a playlist: {ok}"
     print("live ok     — a repeat becomes a taste, a scatter stays a playlist")
@@ -224,8 +255,7 @@ def she_notices_when_she_knows_nothing():
     assert not memory.should_ask(db, ""), "a blank name earned a nudge"
 
     # ...and someone she already knows is left alone
-    for rel, obj in (("plays", "Warframe"), ("real name", "Gateaux"),
-                     ("friend of", "Nara")):
+    for rel, obj in (("plays", "Warframe"), ("real name", "Gateaux"), ("friend of", "Nara")):
         memory.remember(db, "Tycoon", rel, obj, "")
     assert not memory.should_ask(db, "Tycoon"), "she was nudged about someone she knows"
     assert memory.KNOW_LITTLE >= 3, "two facts is still a stranger"
@@ -252,8 +282,7 @@ def she_asks_rather_than_interviews():
     memory.log(db2, "ask", "Krich: knows too little — she asked")
     for _ in range(memory.ASK_EVERY * 2):
         memory.log(db2, "turn", "Tycoon: something -> ok")
-    assert not memory.should_ask(db2, "Krich"), \
-        "another person's turns burned Krich's cooldown"
+    assert not memory.should_ask(db2, "Krich"), "another person's turns burned Krich's cooldown"
     print("rate ok     — one question every ASK_EVERY of THEIR turns, nobody else's")
 
 
@@ -265,17 +294,20 @@ def a_declined_nudge_costs_nothing():
     talking. Burning her one chance in eight turns on a turn that could never
     have worked is the bug this avoids.
     """
-    for reply, want in [("ว่าไงมึง มึงทำงานอะไรอยู่", True),
-                        ("เปิดให้ละ", False),
-                        ("skip what?", True),
-                        ("Yo.", False),
-                        ("อือ เบื่อเหมือนกัน", False),
-                        ("มึงเล่นเกมอะไรบ้าง", True)]:
+    for reply, want in [
+        ("ว่าไงมึง มึงทำงานอะไรอยู่", True),
+        ("เปิดให้ละ", False),
+        ("skip what?", True),
+        ("Yo.", False),
+        ("อือ เบื่อเหมือนกัน", False),
+        ("มึงเล่นเกมอะไรบ้าง", True),
+    ]:
         assert pipeline._is_question(reply) is want, f"{reply!r} -> {want}"
 
     src = (Path(__file__).parents[1] / "tiwa" / "pipeline.py").read_text(encoding="utf-8")
-    assert "if ask_about and _is_question(reply):" in src, \
+    assert "if ask_about and _is_question(reply):" in src, (
         "the cooldown is burned on nudges again, not on questions"
+    )
     print("decline ok  — a nudge she ignores does not spend her turn")
 
 
@@ -309,6 +341,5 @@ a_failure_is_not_silent()
 if "--live" in sys.argv:
     live()
 else:
-    print("\nlive      — SKIPPED. `--live` asks a real model to tell a pattern "
-          "from a playlist.")
+    print("\nlive      — SKIPPED. `--live` asks a real model to tell a pattern from a playlist.")
 print("\ntaste ok — repetition is counted, and only a named pattern earns a row")

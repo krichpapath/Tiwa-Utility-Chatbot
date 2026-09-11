@@ -5,6 +5,7 @@ The failing case from real use: "อยากได้เพลงเล่น M
 
     py -X utf8 tests\\pickbench.py
 """
+
 import asyncio
 import sys
 from pathlib import Path
@@ -40,9 +41,9 @@ async def main():
         tools.DJ.clear()
         tools.PENDING_MUSIC = None
         reply = await pipeline.respond(
-            db, [{"role": "user", "content": f"Tycoon: {text}"}], "Tycoon", text)
-        queued = ([tools.PENDING_MUSIC] if tools.PENDING_MUSIC else []) + \
-                 [a for _, a in tools.DJ]
+            db, [{"role": "user", "content": f"Tycoon: {text}"}], "Tycoon", text
+        )
+        queued = ([tools.PENDING_MUSIC] if tools.PENDING_MUSIC else []) + [a for _, a in tools.DJ]
         ok = bool(queued) == want
         good += ok
         mark = "" if ok else "  <- WRONG"

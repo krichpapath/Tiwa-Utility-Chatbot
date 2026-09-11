@@ -1,4 +1,5 @@
 """Small live search sample. Synthetic questions; no Discord posts or playback."""
+
 import json
 from pathlib import Path
 import sys
@@ -10,9 +11,14 @@ from tiwa import memory, minis, music, tools
 rows = []
 for kind, tasks in (
     ("music", ["Mili Hero", "Warframe Red Line", "Bodyslam แสงสุดท้าย"]),
-    ("web", ["In Python, how are str.casefold() and str.lower() different?",
-             "เกม Hollow Knight Silksong คือเกมอะไร ใครพัฒนา",
-             "Who won the match last night?"]),
+    (
+        "web",
+        [
+            "In Python, how are str.casefold() and str.lower() different?",
+            "เกม Hollow Knight Silksong คือเกมอะไร ใครพัฒนา",
+            "Who won the match last night?",
+        ],
+    ),
 ):
     for task in tasks:
         started = time.monotonic()
@@ -30,4 +36,5 @@ for kind, tasks in (
         rows.append(row)
         print(json.dumps(row, ensure_ascii=False), flush=True)
         Path("qa-results/search-quality-live.json").write_text(
-            json.dumps(rows, ensure_ascii=False, indent=2), encoding="utf-8")
+            json.dumps(rows, ensure_ascii=False, indent=2), encoding="utf-8"
+        )

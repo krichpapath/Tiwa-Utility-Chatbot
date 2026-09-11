@@ -9,6 +9,7 @@ choice that used to cost Main Tiwa four competing tools.
 
     py -X utf8 tests\\djminibench.py
 """
+
 import json
 import sys
 from pathlib import Path
@@ -34,8 +35,9 @@ def contract():
     spec = minis.MINIS["dj"]
     assert spec["fields"] == frozenset({"action", "terms", "playing", "queued"})
     for word in ("เปิดเพลง", "ข้ามเพลง", "หยุดเพลง"):
-        assert word in spec["description"], f"{word} missing — the model does not"\
-                                            " generalise from English examples"
+        assert word in spec["description"], (
+            f"{word} missing — the model does not generalise from English examples"
+        )
     minis._schema()  # dj must be a legal enum member
     assert "json" in minis._DJ_SYSTEM.lower(), "DeepSeek returns empty without it"
     print("contract ok — dj declares 4 facts, lists Thai triggers, says 'json'")
@@ -73,12 +75,13 @@ def actions():
         ("play", "", None, []),
     ]
     print(f"\n{'action':7} | {'terms':12} | {'PENDING_MUSIC':14} | DJ")
-    print(f"{'-'*7}-+-{'-'*12}-+-{'-'*14}-+-{'-'*24}")
+    print(f"{'-' * 7}-+-{'-' * 12}-+-{'-' * 14}-+-{'-' * 24}")
     for action, terms, want_music, want_dj in cases:
         if want_music:
             want_music = {"keywords": want_music, "request": "..."}
-        want_dj = [(a, {"keywords": q, "request": "..."} if a == "queue" else q)
-                   for a, q in want_dj]
+        want_dj = [
+            (a, {"keywords": q, "request": "..."} if a == "queue" else q) for a, q in want_dj
+        ]
         reply.update(action=action, terms=terms)
         tools.new_turn()
         out = minis.run(db, "dj", "...")
@@ -96,8 +99,7 @@ def facts_not_prohibitions():
     music.NOW["title"] = None
     tools.new_turn()
     out = minis.run(db, "dj", "ATLAS")
-    assert out == {"action": "play", "terms": "ATLAS The Score",
-                   "playing": None, "queued": 0}, out
+    assert out == {"action": "play", "terms": "ATLAS The Score", "playing": None, "queued": 0}, out
     blob = " ".join(str(v) for v in out.values())
     for leak in ("do NOT", "You have NOT seen", "say you are putting it on"):
         assert leak not in blob, f"tool prose leaked into the mini's facts: {leak}"
@@ -131,12 +133,11 @@ def the_veto(argv):
     a guess.
     """
     if "--live" not in argv:
-        print("\nveto      — SKIPPED. `--live` runs it; it is what makes the greedy"
-              " hint safe.")
+        print("\nveto      — SKIPPED. `--live` runs it; it is what makes the greedy hint safe.")
         return
     import importlib
 
-    importlib.reload(llm)                 # undo the fake_chat monkeypatch
+    importlib.reload(llm)  # undo the fake_chat monkeypatch
     importlib.reload(minis)
 
     CASES = [
@@ -158,7 +159,7 @@ def the_veto(argv):
         ("เปิดเพลงอะไรก็ได้", "play", "anything you like"),
     ]
     print(f"\n{'they said':38} | {'want':5} | {'DJ said':5} | why")
-    print(f"{'-'*38}-+-------+-------+{'-'*34}")
+    print(f"{'-' * 38}-+-------+-------+{'-' * 34}")
     ok = 0
     for text, want, why in CASES:
         tools.new_turn()
@@ -168,15 +169,14 @@ def the_veto(argv):
         ok += hit
         # the guarantee is one-directional: a `none` must never reach the deck
         if want == "none":
-            assert tools.PENDING_MUSIC is None and not tools.DJ, \
+            assert tools.PENDING_MUSIC is None and not tools.DJ, (
                 f"{text!r} reached the deck: {tools.PENDING_MUSIC} {tools.DJ}"
-        print(f"{text[:38]:38} | {want:5} | {got:5} | {why}"
-              f"{'' if hit else '   <-- WRONG'}")
+            )
+        print(f"{text[:38]:38} | {want:5} | {got:5} | {why}{'' if hit else '   <-- WRONG'}")
     print(f"\nveto: {ok}/{len(CASES)}")
     vetoes = [c for c in CASES if c[1] == "none"]
     assert ok == len(CASES), f"DJ's judgment regressed: {ok}/{len(CASES)}"
-    print(f"veto ok     — {len(vetoes)} non-music asks reached DJ and none reached"
-          " the deck")
+    print(f"veto ok     — {len(vetoes)} non-music asks reached DJ and none reached the deck")
 
 
 contract()

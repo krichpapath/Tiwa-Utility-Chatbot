@@ -19,6 +19,7 @@ on context it never gets measures nothing.
 
 Costs real tokens: one dispatch call per case.
 """
+
 import argparse
 import asyncio
 import collections
@@ -29,16 +30,47 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parents[1]))
 from tiwa import memory, minis, pipeline  # noqa: E402
 
-TOOL_TO_MINI = {"play_music": "dj", "queue_music": "dj", "skip_music": "dj",
-                "stop_music": "dj", "web_search": "search",
-                "calendar_read": "calendar", "calendar_write": "calendar"}
+TOOL_TO_MINI = {
+    "play_music": "dj",
+    "queue_music": "dj",
+    "skip_music": "dj",
+    "stop_music": "dj",
+    "web_search": "search",
+    "calendar_read": "calendar",
+    "calendar_write": "calendar",
+}
 
 # Hand corrections, by index into the mined set. Every one of these is a turn
 # where the tool pass called NOTHING and should have called something — the
 # missed-ask failure djbench was built around. Left alone: questions about the
 # deck, agreements, roleplay, and chat.
-FORCE_DJ = {13, 23, 24, 35, 38, 40, 41, 52, 54, 60, 63, 65, 67, 82, 83, 87, 88,
-            91, 93, 94, 101, 102, 103, 107, 108}
+FORCE_DJ = {
+    13,
+    23,
+    24,
+    35,
+    38,
+    40,
+    41,
+    52,
+    54,
+    60,
+    63,
+    65,
+    67,
+    82,
+    83,
+    87,
+    88,
+    91,
+    93,
+    94,
+    101,
+    102,
+    103,
+    107,
+    108,
+}
 
 # The `search` labels were ALL wrong, and finding out why is the most useful
 # thing this bench did. Every one of the 8 logged web_search calls was the old
@@ -48,8 +80,8 @@ FORCE_DJ = {13, 23, 24, 35, 38, 40, 41, 52, 54, 60, 63, 65, 67, 82, 83, 87, 88,
 #
 # Search Tiwa is for facts: scores, prices, news, something she does not
 # recognise. In 111 real turns there is not one of those. Reported, not hidden.
-NOT_SEARCH = {3, 29, 58, 62, 73, 74, 86}   # -> dj only
-DECK_QUESTION = {92}                        # "ชื่อเพลง" — _doing() answers it
+NOT_SEARCH = {3, 29, 58, 62, 73, 74, 86}  # -> dj only
+DECK_QUESTION = {92}  # "ชื่อเพลง" — _doing() answers it
 
 # THE SET IS FROZEN HERE, and it has to be.
 #
@@ -83,19 +115,22 @@ def mine(db) -> list:
             continue
         m = re.match(r"(.+?): (.*?) -> (.*)", text, re.S)
         if m:
-            cases.append({"author": m.group(1), "text": m.group(2),
-                          "reply": m.group(3), "tools": pending})
+            cases.append(
+                {"author": m.group(1), "text": m.group(2), "reply": m.group(3), "tools": pending}
+            )
         pending = []
 
     extra = len(cases) - CORRECTED_THROUGH
     if extra > 0:
-        print(f"note: {extra} newer turn(s) mined but NOT scored — no tool rows to "
-              f"label them with. See CORRECTED_THROUGH.")
+        print(
+            f"note: {extra} newer turn(s) mined but NOT scored — no tool rows to "
+            f"label them with. See CORRECTED_THROUGH."
+        )
     cases = cases[:CORRECTED_THROUGH]
 
     for i, c in enumerate(cases):
         did = sorted({TOOL_TO_MINI[t] for t in c["tools"] if t in TOOL_TO_MINI})
-        c["did"] = did                       # what the OLD system routed to
+        c["did"] = did  # what the OLD system routed to
         want = set(did) | ({"dj"} if i in FORCE_DJ else set())
         if i in NOT_SEARCH:
             want = (want - {"search"}) | {"dj"}
@@ -104,8 +139,8 @@ def mine(db) -> list:
         c["want"] = sorted(want)
         # the window production gives dispatch, built the same way respond() does
         c["recent"] = "\n".join(
-            f"{p['author']}: {p['text']}\nทิวา: {p['reply'][:120]}"
-            for p in cases[max(0, i - 4):i])
+            f"{p['author']}: {p['text']}\nทิวา: {p['reply'][:120]}" for p in cases[max(0, i - 4) : i]
+        )
     return cases
 
 
@@ -124,7 +159,7 @@ async def run(cases) -> list:
 
 
 def report(cases, got):
-    per = collections.defaultdict(lambda: [0, 0])       # label -> [hit, total]
+    per = collections.defaultdict(lambda: [0, 0])  # label -> [hit, total]
     old_hits = new_hits = 0
     empty_total = empty_new_fp = empty_old_fp = 0
     misses = []
@@ -147,17 +182,21 @@ def report(cases, got):
 
     n = len(cases)
     print(f"{'label':14} | {'n':>4} | dispatch accuracy")
-    print(f"{'-'*14}-+-{'-'*4}-+------------------")
+    print(f"{'-' * 14}-+-{'-' * 4}-+------------------")
     for key, (hit, tot) in sorted(per.items(), key=lambda kv: -kv[1][1]):
-        print(f"{key:14} | {tot:4} | {hit:3}/{tot:<3} {hit/tot*100:5.1f}%")
+        print(f"{key:14} | {tot:4} | {hit:3}/{tot:<3} {hit / tot * 100:5.1f}%")
 
     print(f"\n{'':22} | {'tool pass (old)':>16} | {'dispatch (new)':>15}")
-    print(f"{'-'*22}-+-{'-'*16}-+-{'-'*15}")
-    print(f"{'overall accuracy':22} | {old_hits/n*100:15.1f}% | {new_hits/n*100:14.1f}%")
-    print(f"{'false positives on':22} | {empty_old_fp:>6}/{empty_total:<9} | "
-          f"{empty_new_fp:>6}/{empty_total:<8}")
-    print(f"{'  turns needing none':22} | {empty_old_fp/empty_total*100:15.1f}% | "
-          f"{empty_new_fp/empty_total*100:14.1f}%")
+    print(f"{'-' * 22}-+-{'-' * 16}-+-{'-' * 15}")
+    print(f"{'overall accuracy':22} | {old_hits / n * 100:15.1f}% | {new_hits / n * 100:14.1f}%")
+    print(
+        f"{'false positives on':22} | {empty_old_fp:>6}/{empty_total:<9} | "
+        f"{empty_new_fp:>6}/{empty_total:<8}"
+    )
+    print(
+        f"{'  turns needing none':22} | {empty_old_fp / empty_total * 100:15.1f}% | "
+        f"{empty_new_fp / empty_total * 100:14.1f}%"
+    )
 
     # WHAT THE ROUTER ALONE MISSES IS NOT WHAT SHE MISSES.
     #
@@ -172,8 +211,10 @@ def report(cases, got):
     dj_missed = [c for c, want, g in misses if "dj" in want and "dj" not in g]
     caught = [c for c in dj_missed if pipeline._maybe_music(c["text"])]
     if dj_missed:
-        print(f"\nof the {len(dj_missed)} dj asks the router missed, the free hint "
-              f"catches {len(caught)} — DJ still ran on those.")
+        print(
+            f"\nof the {len(dj_missed)} dj asks the router missed, the free hint "
+            f"catches {len(caught)} — DJ still ran on those."
+        )
         for c in dj_missed:
             if c not in caught:
                 print(f"  BOTH missed: {c['text'][:60]}")
@@ -192,14 +233,17 @@ if __name__ == "__main__":
 
     cases = mine(memory.connect())
     if args.n:
-        cases = cases[:args.n]
+        cases = cases[: args.n]
     print(f"{len(cases)} turns, hand-corrected, in the real traffic mix\n")
     got = asyncio.run(run(cases))
     new, old, fp = report(cases, got)
 
     # SWARM.md's abandon condition: dispatch must not be worse than the tool pass.
     assert new >= old, (
-        f"ABANDON CONDITION: dispatch {new*100:.1f}% is worse than the tool pass "
-        f"{old*100:.1f}% on the same hand-corrected labels")
-    print(f"\ndispatch ok — {new*100:.1f}% vs the tool pass's {old*100:.1f}%, "
-          f"{fp*100:.1f}% false positives on turns needing nothing")
+        f"ABANDON CONDITION: dispatch {new * 100:.1f}% is worse than the tool pass "
+        f"{old * 100:.1f}% on the same hand-corrected labels"
+    )
+    print(
+        f"\ndispatch ok — {new * 100:.1f}% vs the tool pass's {old * 100:.1f}%, "
+        f"{fp * 100:.1f}% false positives on turns needing nothing"
+    )

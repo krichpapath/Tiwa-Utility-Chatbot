@@ -1,7 +1,0 @@
-Traceback (most recent call last):
-  File "C:\Work\Tiwa\tests\dumpbench.py", line 15, in <module>
-    from tiwa import voice  # noqa: E402
-    ^^^^^^^^^^^^^^^^^^^^^^
-  File "C:\Work\Tiwa\tiwa\voice.py", line 16, in <module>
-    from discord.ext import voice_recv
-ModuleNotFoundError: No module named 'discord'

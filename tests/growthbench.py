@@ -10,6 +10,7 @@ leaked and this design did not do the thing it exists for.
 
     py -X utf8 tests\\growthbench.py
 """
+
 import inspect
 import sys
 from pathlib import Path
@@ -30,32 +31,38 @@ def main_prompt() -> str:
 
 def dispatch_prompt() -> str:
     return minis._SYSTEM.format(
-        minis="\n".join(f"- {n}: {m['description']}"
-                        for n, m in sorted(minis.MINIS.items())))
+        minis="\n".join(f"- {n}: {m['description']}" for n, m in sorted(minis.MINIS.items()))
+    )
 
 
 def before_and_after():
     main_before, disp_before = main_prompt(), dispatch_prompt()
     n_before = len(minis.MINIS)
 
-    @minis.mini("sets a timer and tells her when it goes off. give it a duration.",
-                ("seconds", "label"))
+    @minis.mini(
+        "sets a timer and tells her when it goes off. give it a duration.", ("seconds", "label")
+    )
     def timer(db, task):
         return {"seconds": 60, "label": task}
 
     main_after, disp_after = main_prompt(), dispatch_prompt()
 
     print(f"{'':22} | {'before':>8} | {'after':>8} | delta")
-    print(f"{'-'*22}-+-{'-'*8}-+-{'-'*8}-+------")
+    print(f"{'-' * 22}-+-{'-' * 8}-+-{'-' * 8}-+------")
     print(f"{'minis registered':22} | {n_before:8} | {len(minis.MINIS):8} | +1")
-    print(f"{'MAIN TIWA prompt':22} | {len(main_before):8} | {len(main_after):8} | "
-          f"{len(main_after) - len(main_before):+}")
-    print(f"{'dispatch prompt':22} | {len(disp_before):8} | {len(disp_after):8} | "
-          f"{len(disp_after) - len(disp_before):+}")
+    print(
+        f"{'MAIN TIWA prompt':22} | {len(main_before):8} | {len(main_after):8} | "
+        f"{len(main_after) - len(main_before):+}"
+    )
+    print(
+        f"{'dispatch prompt':22} | {len(disp_before):8} | {len(disp_after):8} | "
+        f"{len(disp_after) - len(disp_before):+}"
+    )
 
     assert main_after == main_before, (
         "MAIN TIWA'S PROMPT GREW when a mini was added — the containment leaked "
-        "and this design did not do the thing it was built for")
+        "and this design did not do the thing it was built for"
+    )
     grew = len(disp_after) - len(disp_before)
     assert disp_after.count("\n- ") == disp_before.count("\n- ") + 1
     assert grew < 200, f"a mini cost {grew} chars of dispatch prompt, not one line"
@@ -73,8 +80,9 @@ def main_has_no_tool_list():
     assert not hasattr(tools, "TOOLS"), "a tool registry came back"
     src = (Path(__file__).parents[1] / "tiwa" / "pipeline.py").read_text(encoding="utf-8")
     for dead in ("_tool_chat", "_inner_brief", "def _arg_name"):
-        assert f"\n{dead}" not in src and f"def {dead}" not in src, \
+        assert f"\n{dead}" not in src and f"def {dead}" not in src, (
             f"the tool pass came back: {dead}"
+        )
     print("main ok     — she is handed no tools to choose between, and no pass to run")
 
 
@@ -90,9 +98,13 @@ def one_line_buys_a_whole_subsystem():
     dj_line = len(f"- dj: {minis.MINIS['dj']['description']}")
     print(f"\n4 music tool descriptions Main used to read : {OLD_MUSIC_DESC_CHARS:>5} chars")
     print(f"the one dj line she reads instead           : {dj_line:>5} chars")
-    assert dj_line < OLD_MUSIC_DESC_CHARS / 4, "the mini line is not cheaper than the tools it hides"
-    print(f"contain ok  — {OLD_MUSIC_DESC_CHARS // dj_line}x less, and it stays flat"
-          " as DJ gains tools")
+    assert dj_line < OLD_MUSIC_DESC_CHARS / 4, (
+        "the mini line is not cheaper than the tools it hides"
+    )
+    print(
+        f"contain ok  — {OLD_MUSIC_DESC_CHARS // dj_line}x less, and it stays flat"
+        " as DJ gains tools"
+    )
 
 
 def nothing_is_orphaned():
@@ -108,22 +120,27 @@ def nothing_is_orphaned():
     OWNER = {
         "join_voice": "code: pipeline._asked_voice (off under TIWA_VOICE=dj)",
         "leave_voice": "code: pipeline._asked_voice (off under TIWA_VOICE=dj)",
-        "play_music": "mini: dj", "stop_music": "mini: dj",
-        "queue_music": "mini: dj", "skip_music": "mini: dj",
+        "play_music": "mini: dj",
+        "stop_music": "mini: dj",
+        "queue_music": "mini: dj",
+        "skip_music": "mini: dj",
         "web_search": "mini: search",
         "calendar_write": "mini: calendar",
     }
     # the Turn machinery is not an actuator — it is what they all write to
     PLUMBING = {"current", "new_turn"}
-    actual = {n for n, f in vars(tools).items()
-              if inspect.isfunction(f) and not n.startswith("_")
-              and f.__module__ == "tiwa.tools"} - PLUMBING
+    actual = {
+        n
+        for n, f in vars(tools).items()
+        if inspect.isfunction(f) and not n.startswith("_") and f.__module__ == "tiwa.tools"
+    } - PLUMBING
     missing = sorted(actual - set(OWNER))
     stale = sorted(set(OWNER) - actual)
     assert not missing, (
         f"{missing} has no named caller. There is no tool pass to find it, so a "
         "function nobody calls is dead — and dead silently. Name who calls it, "
-        "or delete it.")
+        "or delete it."
+    )
     assert not stale, f"{stale} is claimed by an owner but no longer exists"
     for name, who in OWNER.items():
         if who.startswith("mini: "):
@@ -161,11 +178,18 @@ def voice_is_dj_only():
     # ...and the classifier itself is still right, so `full` is one env var away
     was, t.VOICE_DJ_ONLY = t.VOICE_DJ_ONLY, False
     try:
-        live = [("come join the vc", "join"), ("เข้ามาหน่อย", "join"),
-                ("get out", "leave"), ("ออกไป", "leave"),
-                ("join us later tonight", ""), ("ออกไปตอนดึกนะ", ""),
-                ("หยุดเพลง", ""), ("ปิดเพลง", ""), ("พอแล้ว", ""),
-                ("how are you", "")]
+        live = [
+            ("come join the vc", "join"),
+            ("เข้ามาหน่อย", "join"),
+            ("get out", "leave"),
+            ("ออกไป", "leave"),
+            ("join us later tonight", ""),
+            ("ออกไปตอนดึกนะ", ""),
+            ("หยุดเพลง", ""),
+            ("ปิดเพลง", ""),
+            ("พอแล้ว", ""),
+            ("how are you", ""),
+        ]
         for text, want in live:
             got = pipeline._asked_voice(text)
             assert got == want, f"under full: {text!r} -> {got!r}, wanted {want!r}"
@@ -176,15 +200,19 @@ def voice_is_dj_only():
 
 def music_still_gets_a_channel():
     """The one thing voice is still FOR. Asking for a song brings her in."""
-    src = (Path(__file__).parents[1] / "bot.py").read_text(encoding="utf-8")
-    i = src.index("async def _flush_music")
-    body = src[i:src.index("async def _hang_up")]
-    assert "await voice.join(author)" in body, \
+    from tiwa.discord_player import Player
+    import inspect
+
+    body = inspect.getsource(Player._flush_locked)
+    assert "await voice.join(author)" in body, (
         "music no longer brings her into the channel — voice is now FOR nothing"
+    )
     from tiwa import voice
     import inspect
-    assert "DJ_ONLY" not in inspect.getsource(voice.join), \
+
+    assert "DJ_ONLY" not in inspect.getsource(voice.join), (
         "voice.join() got gated — music cannot reach a channel"
+    )
     print("dj ok       — a song still pulls her into the channel; join() ungated")
 
 

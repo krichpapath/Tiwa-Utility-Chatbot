@@ -13,6 +13,7 @@ cannot produce a song title she has not seen.
 No key, no network, no model — llm.chat is replaced by a sleeper so wall-clock
 proves the overlap is real.
 """
+
 import asyncio
 import json
 import sys
@@ -20,7 +21,7 @@ import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parents[1]))
-from tiwa import llm, memory, minis, music, pipeline, tools  # noqa: E402
+from tiwa import llm, memory, music, pipeline, tools  # noqa: E402
 
 DELAY = 0.3  # each fake model call, so overlap is measurable
 db = memory.connect(":memory:")
@@ -29,8 +30,8 @@ memory.remember(db, "Steven", "plays", "guitar")
 memory.remember(db, "Gateaux", "plays", "Marvel Rivals")
 
 calls = []
-states = []          # every state block the persona pass was handed
-DJ_SAYS = {"action": "play", "terms": "bad apple"}   # what DJ Tiwa answers
+states = []  # every state block the persona pass was handed
+DJ_SAYS = {"action": "play", "terms": "bad apple"}  # what DJ Tiwa answers
 
 
 def fake_chat(**kw):
@@ -39,8 +40,7 @@ def fake_chat(**kw):
     calls.append(system[:40])
     time.sleep(DELAY)
     if "decide which of" in system:  # the dispatch pass
-        return {"content": json.dumps({"dispatch": [], "ask": None}),
-                "tool_calls": [], "raw": {}}
+        return {"content": json.dumps({"dispatch": [], "ask": None}), "tool_calls": [], "raw": {}}
     if "You are the DJ" in system:
         return {"content": json.dumps(DJ_SAYS), "tool_calls": [], "raw": {}}
     if len(kw["messages"]) > 1:  # the persona pass — keep what she was told
@@ -60,6 +60,7 @@ def run_turn(text, author="Krich"):
     That is S0 working, not a bug, and it is why the flush lives in the same task
     as the reply.
     """
+
     async def go():
         reply = await pipeline.respond(db, HIST, author, text)
         return reply, tools.PENDING_MUSIC, list(tools.DJ)
@@ -76,7 +77,7 @@ def mentioned():
         ("hey", "Steven", False, "the speaker is turn_context's job, not this"),
     ]
     print(f"{'message':32} | {'speaker':8} | found | why")
-    print(f"{'-'*32}-+-{'-'*8}-+-------+{'-'*34}")
+    print(f"{'-' * 32}-+-{'-' * 8}-+-------+{'-' * 34}")
     for text, who, want, why in cases:
         got = bool(memory.mentioned(db, text, skip=who))
         print(f"{text[:32]:32} | {who:8} | {str(got):5} | {why}")
@@ -104,8 +105,10 @@ def forked():
     # So two calls, not three: the tool pass and its rounds are what went away.
     assert took < DELAY * 2.6, f"a third call crept back in: {took:.2f}s"
     assert took >= DELAY * 1.8, "dispatch is not actually in front of the reply"
-    print(f"fork ok     — dispatch then persona in {took:.2f}s, no tool pass "
-          f"(serial would be {DELAY * 3:.2f}s+)")
+    print(
+        f"fork ok     — dispatch then persona in {took:.2f}s, no tool pass "
+        f"(serial would be {DELAY * 3:.2f}s+)"
+    )
 
 
 def net_under_the_router():
@@ -138,8 +141,11 @@ def cannot_name_what_she_has_not_heard():
     tools.new_turn()
     music.NOW["title"] = None
     state = pipeline._state(db, "Krich", "เปิดเพลงอะไรก็ได้", dispatching_music=True)
-    for must in ("Playback is NOT confirmed", "do NOT name a SONG TITLE",
-                 "Do not sing or quote its lyrics"):
+    for must in (
+        "Playback is NOT confirmed",
+        "do NOT name a SONG TITLE",
+        "Do not sing or quote its lyrics",
+    ):
         assert must in state, f"missing from a mid-dispatch turn: {must}"
     assert "came up empty" not in state, "told her it failed before it had run"
     # Measured in the live A/B: told only that "a song" was going on, she invented
@@ -170,8 +176,9 @@ def dj_has_the_last_word_before_she_speaks():
         _, pending, dj = run_turn("ขอ ยืมตังหน่อย")
         assert pending is None and dj == [], f"a veto still reached the deck: {pending} {dj}"
         assert states, "the persona pass never ran"
-        assert "Playback is NOT confirmed" not in states[-1], \
+        assert "Playback is NOT confirmed" not in states[-1], (
             f"she was told a song is coming after DJ vetoed it:\n{states[-1]}"
+        )
     finally:
         DJ_SAYS = was
 
@@ -179,8 +186,9 @@ def dj_has_the_last_word_before_she_speaks():
     states.clear()
     _, pending, _ = run_turn("เปิดเพลงอะไรก็ได้")
     assert pending == {"keywords": "bad apple", "request": "เปิดเพลงอะไรก็ได้"}, pending
-    assert "play bad apple" in states[-1], \
+    assert "bad apple" in states[-1] and "Playback is NOT confirmed" in states[-1], (
         f"the state block is still vague about what is playing:\n{states[-1]}"
+    )
     assert "do NOT name a SONG TITLE" in states[-1], "the guard came off with it"
     print("veto ok     — DJ's `none` lands before the briefing, and `play` names the terms")
 

@@ -14,6 +14,7 @@ survives the thread hop.
 
 No Discord, no network, no model.
 """
+
 import asyncio
 import sys
 from pathlib import Path
@@ -46,7 +47,7 @@ async def concurrent():
     a, b = await asyncio.gather(turn("lofi", 0.02), turn("metal", 0.01))
 
     print(f"{'turn':6} | {'PENDING_MUSIC':14} | {'DJ':22} | PENDING_CALENDAR")
-    print(f"{'-'*6}-+-{'-'*14}-+-{'-'*22}-+-{'-'*24}")
+    print(f"{'-' * 6}-+-{'-' * 14}-+-{'-' * 22}-+-{'-' * 24}")
     for name, r in (("lofi", a), ("metal", b)):
         print(f"{name:6} | {str(r['music']):14} | {str(r['dj']):22} | {r['calendar']}")
 
@@ -102,8 +103,9 @@ def writeable():
     tools.play_music(db, "bad apple")
     tools.PENDING_MUSIC = None
     assert tools.PENDING_MUSIC is None
-    assert "PENDING_MUSIC" not in vars(sys.modules["tiwa.tools"]), \
+    assert "PENDING_MUSIC" not in vars(sys.modules["tiwa.tools"]), (
         "assignment leaked a real module global — the shim is bypassed from here on"
+    )
     print("write ok   — the old names stay writable without shadowing the shim")
 
 

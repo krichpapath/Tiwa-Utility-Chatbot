@@ -27,6 +27,7 @@ djbench learned that one the hard way.
 
 Writes data/ab_<tag>.json for personabench. Costs real tokens.
 """
+
 import argparse
 import asyncio
 import json
@@ -47,13 +48,10 @@ AB = memory.DATA_DIR / "ab.json"
 def sample(db, n: int) -> list:
     """Real turns, in the real mix: music asks, chat, a question, a search."""
     turns = []
-    for _, kind, text in db.execute(
-        "SELECT id, kind, text FROM log WHERE kind='turn' ORDER BY id"
-    ):
+    for _, kind, text in db.execute("SELECT id, kind, text FROM log WHERE kind='turn' ORDER BY id"):
         m = re.match(r"(.+?): (.*?) -> (.*)", text, re.S)
         if m and m.group(2).strip():
-            turns.append({"author": m.group(1), "text": m.group(2),
-                          "reply": m.group(3)})
+            turns.append({"author": m.group(1), "text": m.group(2), "reply": m.group(3)})
     # Stratified, not just spread. Music is 87 of 111 real turns, so an even
     # sample is almost all "play X" — which times the same path over and over and
     # tells personabench nothing, because voice shows up in chat and in fights,
@@ -67,8 +65,10 @@ def sample(db, n: int) -> list:
         picked += group[::step][:want]
     for i, t in enumerate(picked):
         j = turns.index(t)
-        t["hist"] = [{"role": "user", "content": f"{p['author']}: {p['text']}"}
-                     for p in turns[max(0, j - 3):j]]
+        t["hist"] = [
+            {"role": "user", "content": f"{p['author']}: {p['text']}"}
+            for p in turns[max(0, j - 3) : j]
+        ]
         t["hist"].append({"role": "user", "content": f"{t['author']}: {t['text']}"})
     return picked
 
@@ -98,30 +98,33 @@ if __name__ == "__main__":
     turns = sample(memory.connect(str(live)), args.n)
     print(f"{len(turns)} real turns, arm '{args.tag}'\n")
     print(f"{'#':>2} | {'message':38} | {'ms':>8}")
-    print(f"{'-'*2}-+-{'-'*38}-+-{'-'*8}")
+    print(f"{'-' * 2}-+-{'-' * 38}-+-{'-' * 8}")
 
     rows, ms = [], []
     for i, t in enumerate(turns, 1):
         reply, took = asyncio.run(one(db, t))
         ms.append(took)
-        rows.append({"author": t["author"], "text": t["text"],
-                     "reply": reply, "ms": round(took)})
+        rows.append({"author": t["author"], "text": t["text"], "reply": reply, "ms": round(took)})
         print(f"{i:2} | {t['text'][:38]:38} | {took:7.0f}ms")
 
     print(f"\n{'':10} | {'p50':>9} | {'p95':>9} | {'mean':>9}")
-    print(f"{'-'*10}-+-{'-'*9}-+-{'-'*9}-+-{'-'*9}")
-    print(f"{args.tag:10} | {pct(ms, .5):8.0f}ms | {pct(ms, .95):8.0f}ms | "
-          f"{statistics.mean(ms):8.0f}ms")
+    print(f"{'-' * 10}-+-{'-' * 9}-+-{'-' * 9}-+-{'-' * 9}")
+    print(
+        f"{args.tag:10} | {pct(ms, 0.5):8.0f}ms | {pct(ms, 0.95):8.0f}ms | "
+        f"{statistics.mean(ms):8.0f}ms"
+    )
 
     out = AB.with_name(f"ab_{args.tag}.json")
     out.write_text(json.dumps(rows, ensure_ascii=False, indent=1), encoding="utf-8")
     db.close()  # Windows will not unlink a file sqlite still has open
     copy.unlink(missing_ok=True)
 
-    p50 = pct(ms, .5)
+    p50 = pct(ms, 0.5)
     print(f"\nreplies -> {out}")
-    print(f"For the persona A/B, run this on BOTH branches (--tag main, --tag swarm)"
-          f" and then: py -X utf8 tests\\personabench.py data\\ab_main.json {out}")
+    print(
+        f"For the persona A/B, run this on BOTH branches (--tag main, --tag swarm)"
+        f" and then: py -X utf8 tests\\personabench.py data\\ab_main.json {out}"
+    )
     if p50 >= TARGET_MS:
         print(f"\nABANDON CONDITION: p50 {p50:.0f}ms misses the {TARGET_MS}ms target")
     else:

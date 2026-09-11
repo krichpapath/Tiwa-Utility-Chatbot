@@ -1,7 +1,0 @@
-Live command: .venv\Scripts\python.exe -X utf8 -m tiwa.music "Mili Hero"
-Exit: 0
-found: Mili - Hero [Limbus Company] (215s)
-source class: MusicSource, Stream, discord.player.AudioSource
-decoded 500/500 frames in 1.3s (10s of audio), peak amplitude 26105
-music ok — searched, decoded, real audio, no ffmpeg
-No voice channel joined and no audio played aloud.

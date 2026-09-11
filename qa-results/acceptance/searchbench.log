@@ -1,8 +1,0 @@
-| check | result |
-|---|---|
-| 5 results with domains | ok |
-| repeat query in one turn | refused, told to change keywords |
-| Thai query region | th-th |
-| English query region | us-en |
-
-search ok — dedupe, region and formatting behave (offline only; --live judges the keywords)

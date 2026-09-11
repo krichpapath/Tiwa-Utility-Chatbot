@@ -14,6 +14,7 @@ word "check", so a message leading with a calendar word mapped to calendar_read.
 same seven cases went 7/7 twice after the prompt gained a write rule — this one
 never needed code, which is why the bench is a measure and not a check.
 """
+
 import asyncio
 import os
 import sys
@@ -30,6 +31,7 @@ tools.calendar_write(db, "add dentist tomorrow 15:00")
 assert tools.PENDING_CALENDAR == ["add dentist tomorrow 15:00"]
 # ...and it reaches nothing else: no Google client, no event, until bot.py sees a ✅
 import tiwa.gcal as gcal  # noqa: E402
+
 if os.environ.get("TIWA_QA_FIXTURES") == "1":
     gcal.upcoming = lambda days=7: "calendar empty for the next 7 days"
 
@@ -42,24 +44,24 @@ if "--live" not in sys.argv:
 
 memory.remember(db, "Tycoon", "real name", "Gateaux")
 
-CLARIFY = ("13.00 คือเวลากินข้าวเที่ยง ไม่ใช่เช้านะ มึงหมายถึงพรุ่งนี้ "
-           "(อาทิตย์ 2 ส.ค.) เวลา 13.00 ป่าว")
+CLARIFY = "13.00 คือเวลากินข้าวเที่ยง ไม่ใช่เช้านะ มึงหมายถึงพรุ่งนี้ (อาทิตย์ 2 ส.ค.) เวลา 13.00 ป่าว"
 ASK_TH = "พรุ่งนี้เช้ามีนัดกินข้าว 13.00 ช่วยลงปติทินให้หน่อย"
 
 CASES = [
     # the live failure: a bare "yes" to her own clarifying question. 0/2 before.
-    ("bare confirmation", "Tycoon", "ช่ายๆๆ",
-     f"Tycoon: {ASK_TH}\n{memory.TIWA}: {CLARIFY}"),
-    ("bare confirmation, other speaker", "Krich", "ช่ายๆๆ",
-     f"Krich: {ASK_TH}\n{memory.TIWA}: {CLARIFY}"),
+    ("bare confirmation", "Tycoon", "ช่ายๆๆ", f"Tycoon: {ASK_TH}\n{memory.TIWA}: {CLARIFY}"),
+    (
+        "bare confirmation, other speaker",
+        "Krich",
+        "ช่ายๆๆ",
+        f"Krich: {ASK_TH}\n{memory.TIWA}: {CLARIFY}",
+    ),
     ("thai ask", "Tycoon", ASK_TH, ""),
     ("thai ask, other speaker", "Krich", ASK_TH, ""),
     ("english ask", "Tycoon", "put lunch with mom on the calendar tomorrow 1pm", ""),
-    ("english ask, other speaker", "Krich",
-     "put lunch with mom on the calendar tomorrow 1pm", ""),
+    ("english ask, other speaker", "Krich", "put lunch with mom on the calendar tomorrow 1pm", ""),
     # led with the calendar word and reliably picked calendar_read. 0/2 before.
-    ("calendar word first", "Tycoon",
-     "ลงปฏิทินให้หน่อย นัดหมอฟัน อาทิตย์ 9 ส.ค. 13.00", ""),
+    ("calendar word first", "Tycoon", "ลงปฏิทินให้หน่อย นัดหมอฟัน อาทิตย์ 9 ส.ค. 13.00", ""),
 ]
 
 

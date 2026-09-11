@@ -8,6 +8,7 @@ bleeds across.
     py -X utf8 tests\\extractbench.py openrouter
     py -X utf8 tests\\extractbench.py --think    # A/B reasoning on the write pass
 """
+
 import sys
 import time
 from pathlib import Path
@@ -152,8 +153,7 @@ def junk(rels):
     'guitar},{' scored ok — caught by eye during the thinking A/B, not by the
     bench, which is exactly why this check exists now."""
     bad = '{}[]"'
-    return [f"{s}|{r}|{d}" for s, r, d in rels
-            if any(c in s + r + d for c in bad)]
+    return [f"{s}|{r}|{d}" for s, r, d in rels if any(c in s + r + d for c in bad)]
 
 
 def run(provider):
@@ -194,11 +194,12 @@ if __name__ == "__main__":
     provs = [a for a in sys.argv[1:] if not a.startswith("-")] or ["ollama", "openrouter"]
     rows = []
     for prov in provs:
-        for think in ([False, True] if ab else [memory.EXTRACT_THINK]):
+        for think in [False, True] if ab else [memory.EXTRACT_THINK]:
             memory.EXTRACT_THINK = think
             t0 = time.perf_counter()
-            rows.append((f"{prov} think={'ON' if think else 'OFF'}",
-                         run(prov), time.perf_counter() - t0))
+            rows.append(
+                (f"{prov} think={'ON' if think else 'OFF'}", run(prov), time.perf_counter() - t0)
+            )
     if ab:
         print(f"\n{'setting':26}{'clean':>8}{'total s':>10}")
         for label, p, secs in rows:

@@ -31,6 +31,7 @@ untouched. A dead heat is the result this is looking for.
 
 Costs real tokens: two judge calls per pair.
 """
+
 import asyncio
 import json
 import sys
@@ -54,8 +55,7 @@ Answer in json: {{"pick": "A" or "B", "why": "at most 12 words"}}"""
 
 FMT = {
     "type": "object",
-    "properties": {"pick": {"type": "string", "enum": ["A", "B"]},
-                   "why": {"type": "string"}},
+    "properties": {"pick": {"type": "string", "enum": ["A", "B"]}, "why": {"type": "string"}},
     "required": ["pick", "why"],
     "additionalProperties": False,
 }
@@ -84,10 +84,13 @@ def load(path: Path) -> dict:
     """One arm, keyed by the message so two files line up even if the sample
     order differs. `reply` is what latbench writes on this branch."""
     if not path.exists():
-        raise SystemExit(f"no {path} — run tests/latbench.py --tag {path.stem[3:]} "
-                         "on that branch first")
-    return {r["text"]: (r.get("reply") or "").strip()
-            for r in json.loads(path.read_text(encoding="utf-8"))}
+        raise SystemExit(
+            f"no {path} — run tests/latbench.py --tag {path.stem[3:]} on that branch first"
+        )
+    return {
+        r["text"]: (r.get("reply") or "").strip()
+        for r in json.loads(path.read_text(encoding="utf-8"))
+    }
 
 
 async def main():
@@ -99,7 +102,8 @@ async def main():
         raise SystemExit(
             "usage: personabench.py <arm-a.json> <arm-b.json>\n"
             "  e.g. py -X utf8 tests\\personabench.py data\\ab_main.json data\\ab_swarm.json\n"
-            "  each file comes from: py -X utf8 tests\\latbench.py --tag <name>")
+            "  each file comes from: py -X utf8 tests\\latbench.py --tag <name>"
+        )
     pa, pb = Path(argv[0]), Path(argv[1])
     a_name, b_name = pa.stem.replace("ab_", ""), pb.stem.replace("ab_", "")
     A, B = load(pa), load(pb)
@@ -107,12 +111,11 @@ async def main():
     shared = [t for t in A if t in B and A[t] and B[t]]
     if not shared:
         raise SystemExit("the two arms share no messages — sample the same turns")
-    print(f"{a_name} vs {b_name}: {len(shared)} pairs, "
-          "each judged twice with the sides swapped\n")
+    print(f"{a_name} vs {b_name}: {len(shared)} pairs, each judged twice with the sides swapped\n")
 
     tally = {a_name: 0, b_name: 0, "tie": 0}
     print(f"{'#':>2} | {'message':30} | verdict     | why")
-    print(f"{'-'*2}-+-{'-'*30}-+-------------+{'-'*34}")
+    print(f"{'-' * 2}-+-{'-' * 30}-+-------------+{'-' * 34}")
     for i, text in enumerate(shared, 1):
         # order 1: arm A is shown first. order 2: arm B is shown first.
         p1, w1 = await ask(text, A[text], B[text])
@@ -128,20 +131,23 @@ async def main():
 
     n = len(shared)
     print(f"\n{'':12} | wins | share")
-    print(f"{'-'*12}-+------+------")
+    print(f"{'-' * 12}-+------+------")
     for k in (a_name, b_name, "tie"):
-        print(f"{k:12} | {tally[k]:4} | {tally[k]/n*100:4.0f}%")
+        print(f"{k:12} | {tally[k]:4} | {tally[k] / n * 100:4.0f}%")
 
     # The bar is "does not lose", not "wins". Persona was meant to be untouched.
     lost = tally[a_name] - tally[b_name]
     if lost > n * 0.2:
-        print(f"\nPERSONA REGRESSION: {a_name} won {tally[a_name]}/{n}, "
-              f"{b_name} {tally[b_name]}/{n}. She reads differently.")
+        print(
+            f"\nPERSONA REGRESSION: {a_name} won {tally[a_name]}/{n}, "
+            f"{b_name} {tally[b_name]}/{n}. She reads differently."
+        )
     else:
-        print(f"\npersona ok — no measurable regression "
-              f"({a_name} {tally[a_name]}, {b_name} {tally[b_name]}, "
-              f"tie {tally['tie']})")
-
+        print(
+            f"\npersona ok — no measurable regression "
+            f"({a_name} {tally[a_name]}, {b_name} {tally[b_name]}, "
+            f"tie {tally['tie']})"
+        )
 
 
 if __name__ == "__main__":  # importable: chatbench reuses ask()

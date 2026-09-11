@@ -2,6 +2,7 @@
 
 No calendar writes, Discord posts, or voice calls. Requires API access.
 """
+
 import json
 import os
 from pathlib import Path
@@ -12,11 +13,23 @@ import tempfile
 import time
 
 ROOT = Path(__file__).resolve().parents[1]
-CASES = [("test_memory", "--live"), ("djminibench", "--live"),
-         ("calbench", "--live"), ("searchbench", "--live"), ("eyebench", "--live"),
-         ("tastebench", "--live"), ("extractbench", "openrouter"),
-         ("factbench", "openrouter"), ("worthbench",), ("episodebench",),
-         ("pickbench",), ("smoke",), ("moodbench",), ("chatbench",), ("livechat",)]
+CASES = [
+    ("test_memory", "--live"),
+    ("djminibench", "--live"),
+    ("calbench", "--live"),
+    ("searchbench", "--live"),
+    ("eyebench", "--live"),
+    ("tastebench", "--live"),
+    ("extractbench", "openrouter"),
+    ("factbench", "openrouter"),
+    ("worthbench",),
+    ("episodebench",),
+    ("pickbench",),
+    ("smoke",),
+    ("moodbench",),
+    ("chatbench",),
+    ("livechat",),
+]
 
 
 def run(case):
@@ -29,11 +42,21 @@ def run(case):
         target = sqlite3.connect(str(Path(scratch) / "tiwa.db"))
         target.close()
         # Paid-call usage remains in the real shared ledger; only memories/logs isolate.
-        env = dict(os.environ, TIWA_DATA_DIR=scratch, TIWA_LOG_PROMPTS="0",
-                   TIWA_SPEND_FILE=str(ROOT / "data" / "spend.json"), TIWA_QA_FIXTURES="1")
+        env = dict(
+            os.environ,
+            TIWA_DATA_DIR=scratch,
+            TIWA_LOG_PROMPTS="0",
+            TIWA_SPEND_FILE=str(ROOT / "data" / "spend.json"),
+            TIWA_QA_FIXTURES="1",
+        )
         try:
-            p = subprocess.run([sys.executable, "-X", "utf8", str(ROOT / "tests" / f"{name}.py"), *args],
-                               cwd=ROOT, env=env, capture_output=True, timeout=600)
+            p = subprocess.run(
+                [sys.executable, "-X", "utf8", str(ROOT / "tests" / f"{name}.py"), *args],
+                cwd=ROOT,
+                env=env,
+                capture_output=True,
+                timeout=600,
+            )
             code, output = p.returncode, p.stdout + p.stderr
         except subprocess.TimeoutExpired as e:
             code, output = 124, (e.stdout or b"") + (e.stderr or b"") + b"\nTIMEOUT"

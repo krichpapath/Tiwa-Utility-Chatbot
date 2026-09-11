@@ -19,6 +19,7 @@ Three call sites, three different silences:
 
 No Discord, no network, no model.
 """
+
 import asyncio
 import sys
 import types
@@ -46,8 +47,12 @@ class FakeChannel:
 
     def typing(self):
         class _N:
-            async def __aenter__(s): return s
-            async def __aexit__(s, *a): return False
+            async def __aenter__(s):
+                return s
+
+            async def __aexit__(s, *a):
+                return False
+
         return _N()
 
 
@@ -55,17 +60,18 @@ def a_401() -> Exception:
     """The real one: httpx.HTTPStatusError, whose str() carries the code."""
     req = httpx.Request("POST", "https://openrouter.ai/api/v1/chat/completions")
     resp = httpx.Response(401, request=req)
-    return httpx.HTTPStatusError("Client error '401 Unauthorized'",
-                                 request=req, response=resp)
+    return httpx.HTTPStatusError("Client error '401 Unauthorized'", request=req, response=resp)
 
 
 def she_says_why():
     """Not in her voice — the model is what failed, so there is nothing to write
     her line with, and faking one is the bluffing failure in a different hat."""
     ch = FakeChannel()
-    for err, must in ((a_401(), "401"),
-                      (httpx.ConnectError("nope"), "cannot reach"),
-                      (ValueError("something else"), "ValueError")):
+    for err, must in (
+        (a_401(), "401"),
+        (httpx.ConnectError("nope"), "cannot reach"),
+        (ValueError("something else"), "ValueError"),
+    ):
         sent.clear()
         asyncio.run(bot._apologise(ch, err))
         assert sent, f"{type(err).__name__} said nothing at all"
@@ -109,7 +115,7 @@ def the_heartbeat_survives():
     rows = [t for _, k, t, _ in memory.read_log(bot.db, 20) if k == "error"]
     beats = [r for r in rows if "heartbeat" in r]
     assert len(beats) == 3, f"expected 3 survived ticks, logged {len(beats)}"
-    print(f"heartbeat ok — 3 outages, 3 log rows, loop still alive")
+    print("heartbeat ok — 3 outages, 3 log rows, loop still alive")
 
 
 def no_bare_respond_left():

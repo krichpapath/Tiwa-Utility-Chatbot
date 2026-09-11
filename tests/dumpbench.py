@@ -5,6 +5,7 @@ a Windows filename and raised OSError inside the sweep loop.
 
     py -X utf8 tests\\dumpbench.py
 """
+
 import sys
 import wave
 from pathlib import Path
@@ -15,13 +16,13 @@ sys.path.insert(0, str(Path(__file__).parents[1]))
 from tiwa import voice  # noqa: E402
 
 NASTY = [
-    "Hello  how are you?",                 # THE one that broke it
+    "Hello  how are you?",  # THE one that broke it
     'she said "what" then left',
     "who/what\\where",
     "ratio 50:50 <best> |ever|",
     "trailing dots...",
     "trailing space ",
-    "ทิวา เปิดเพลงหน่อย",                   # Thai must survive
+    "ทิวา เปิดเพลงหน่อย",  # Thai must survive
     "*" * 40,
     "",
     "   ",
@@ -35,7 +36,7 @@ print("| transcript | filename produced |")
 print("|---|---|")
 before = set(out.glob("*.wav")) if out.exists() else set()
 for text in NASTY:
-    voice.dump(audio, 16000, "Tycoon", text)   # must never raise
+    voice.dump(audio, 16000, "Tycoon", text)  # must never raise
     print(f"| `{text[:34]}` | {voice.safe_filename(text)!r} |")
 
 made = sorted(set(out.glob("*.wav")) - before)

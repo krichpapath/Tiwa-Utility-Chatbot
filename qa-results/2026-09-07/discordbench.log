@@ -1,7 +1,0 @@
-Traceback (most recent call last):
-  File "C:\Work\Tiwa\tests\discordbench.py", line 22, in <module>
-    import bot  # noqa: E402  (imports discord, does not connect)
-    ^^^^^^^^^^
-  File "C:\Work\Tiwa\bot.py", line 9, in <module>
-    import discord
-ModuleNotFoundError: No module named 'discord'
